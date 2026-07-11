@@ -1,0 +1,27 @@
+# بيئة Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# إعدادات حساسة
+config/.env
+*.key
+
+# قاعدة البيانات
+*.db
+~/.weaver/
+
+# مجلد التبعيات
+deps/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# نظام التشغيل
+.DS_Store
+Thumbs.db

@@ -1,0 +1,18 @@
+# WeaverCode Dependencies
+# pip install -r config/requirements.txt --break-system-packages
+
+# ── الأساسيات ────────────────────────────────
+httpx>=0.27.0          # HTTP client async
+python-dotenv>=1.0.0   # قراءة .env
+
+# ── اختياري للواجهة التفاعلية ────────────────
+rich>=13.0.0           # تنسيق جميل للـ terminal
+prompt_toolkit>=3.0.0  # محرر سطر أوامر متقدم
+
+# ── اختياري للويب ────────────────────────────
+beautifulsoup4>=4.12.0 # تحليل HTML
+lxml>=5.0.0            # محلل XML/HTML سريع
+
+# ── Python الأساسي (مدمج — لا يحتاج تثبيت) ──
+# asyncio, sqlite3, json, os, pathlib, subprocess
+# re, glob, time, uuid, dataclasses, typing
