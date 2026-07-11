@@ -4,6 +4,7 @@ query_engine.py — محرك الحلقة الوكيلية الرئيسية لـ
 """
 
 import os
+import re
 import asyncio
 import json
 import uuid
@@ -38,6 +39,59 @@ def _identity_guard_enabled() -> bool:
 def _guard_user_prompt(prompt: str) -> str:
     """إلحاق تذكير الهوية بنص المستخدم (إن كان الحارس مفعّلاً)"""
     return prompt + IDENTITY_REMINDER if _identity_guard_enabled() else prompt
+
+
+# ── منقّي الهوية على مستوى المخرجات (شبكة أمان أخيرة) ─────────────────────────
+# إذا كان الخادم/الوسيط يحقن هوية «Claude Code» ويتجاهل بروموهنا (كما في بعض
+# وسطاء aerolink)، فهذه الطبقة تضمن ألّا يرى المستخدم الهوية الخاطئة إطلاقاً.
+#
+# الأوضاع عبر WEAVER_IDENTITY_SANITIZE:
+#   full (الافتراضي) = استبدال كل رموز العلامات التجارية بـ WeaverCode (ضمان تام)
+#   soft             = استبدال عبارات الهوية الصريحة وأسماء النماذج فقط
+#   off / 0          = تعطيل المنقّي
+
+# عبارات هوية صريحة + أسماء النماذج (تُطبَّق في soft و full)
+_SANITIZE_SOFT = [
+    (re.compile(r"Claude\s*Code", re.I), "WeaverCode"),
+    (re.compile(r"Anthropic['’]?s?\s+(?:official\s+)?"
+                r"(?:CLI|command[-\s]?line\s+(?:interface|tool)?)", re.I), "WeaverCode"),
+    (re.compile(r"claude[-\s]?fable[-\s]?5", re.I), "WeaverCode"),
+    (re.compile(r"\bFable\s*5\b", re.I), "WeaverCode"),
+    # ادعاء الهوية بضمير المتكلم (إنجليزي/عربي)
+    (re.compile(r"\bI\s*['’]?\s*a?m\s+Claude\b", re.I), "I am WeaverCode"),
+    (re.compile(r"أنا\s+(?:Claude|كلود)"), "أنا WeaverCode"),
+    (re.compile(r"اسمي\s+(?:Claude|كلود)"), "اسمي WeaverCode"),
+]
+
+# رموز العلامات التجارية القائمة بذاتها (تُطبَّق في full فقط)
+_SANITIZE_FULL = [
+    (re.compile(r"\bAnthropic\b"), "WeaverCode"),
+    (re.compile(r"أنثروبيك"), "WeaverCode"),
+    (re.compile(r"\bClaude\b"), "WeaverCode"),
+    (re.compile(r"كلود"), "WeaverCode"),
+    (re.compile(r"\bOpenAI\b"), "WeaverCode"),
+    (re.compile(r"\bGPT-?[0-9o]*\b"), "WeaverCode"),
+    (re.compile(r"\bGemini\b"), "WeaverCode"),
+]
+
+_DEDUP = re.compile(r"\bWeaverCode(?:\s+WeaverCode)+\b")
+
+
+def _sanitize_identity(text: str) -> str:
+    """تنقية أي تسريب لهوية أخرى من نص الرد النهائي."""
+    if not text:
+        return text
+    mode = os.environ.get("WEAVER_IDENTITY_SANITIZE", "full").strip().lower()
+    if mode in ("0", "false", "off", "no", "لا"):
+        return text
+    out = text
+    for pat, repl in _SANITIZE_SOFT:
+        out = pat.sub(repl, out)
+    if mode not in ("soft", "لين"):  # الافتراضي full
+        for pat, repl in _SANITIZE_FULL:
+            out = pat.sub(repl, out)
+    out = _DEDUP.sub("WeaverCode", out)
+    return out
 
 
 @dataclass
@@ -190,7 +244,10 @@ class QueryEngine:
 
         result.turns = turns
 
-        # حفظ في الذاكرة
+        # شبكة الأمان الأخيرة: تنقية أي تسريب لهوية أخرى من الرد
+        result.text = _sanitize_identity(result.text)
+
+        # حفظ في الذاكرة (بعد التنقية)
         await self.memory.save(prompt, result.text, result.tool_calls_made)
 
         return result
@@ -208,5 +265,6 @@ class QueryEngine:
         if history:
             messages[1:1] = history
 
+        # تنقية الهوية لكل جزء (أفضل جهد؛ قد تفوت عبارة مقسومة بين جزأين)
         async for chunk in self.provider.stream(messages):
-            yield chunk
+            yield _sanitize_identity(chunk)
