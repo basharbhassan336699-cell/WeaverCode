@@ -201,6 +201,10 @@ def main():
     parser.add_argument("--model", help="اسم النموذج (يتجاوز WEAVER_MODEL)")
     parser.add_argument("--key", help="مفتاح API (يتجاوز WEAVER_API_KEY)")
     parser.add_argument("--url", help="عنوان API (يتجاوز WEAVER_BASE_URL)")
+    parser.add_argument("--version", "-v", action="store_true",
+                        help="عرض إصدار WeaverCode والخروج")
+    parser.add_argument("--print-system", action="store_true",
+                        help="طباعة البروموه النظامي الفعلي المُرسَل للنموذج (تشخيص الهوية)")
 
     args = parser.parse_args()
 
@@ -214,6 +218,28 @@ def main():
         os.environ["WEAVER_API_KEY"] = args.key
     if args.url:
         os.environ["WEAVER_BASE_URL"] = args.url
+
+    # ── تشخيص: عرض الإصدار ──────────────────────────────────────────────────
+    if args.version:
+        from core.ui import WEAVER_VERSION, get_version
+        guard = "مفعّل" if os.environ.get("WEAVER_IDENTITY_GUARD", "1").lower() \
+            not in ("0", "false", "off", "no") else "معطّل"
+        print(f"🕸️  WeaverCode {get_version()} (base {WEAVER_VERSION})")
+        print(f"    النموذج:  {os.environ.get('WEAVER_MODEL', 'غير محدد')}")
+        print(f"    المزود:   {os.environ.get('WEAVER_BASE_URL', 'غير محدد')}")
+        print(f"    حارس الهوية: {guard}")
+        return
+
+    # ── تشخيص: طباعة البروموه النظامي الفعلي ────────────────────────────────
+    if args.print_system:
+        system = get_system_prompt(args.mode)
+        print("=" * 60)
+        print(f"البروموه النظامي الفعلي للوضع '{args.mode}' (يُرسَل للنموذج):")
+        print("=" * 60)
+        print(system)
+        print("=" * 60)
+        print("ملاحظة: يُضاف أيضاً تذكير هوية إلى نص المستخدم نفسه (حارس الهوية).")
+        return
 
     if args.interactive:
         asyncio.run(interactive_mode())
