@@ -112,7 +112,12 @@ async def interactive_mode():
     provider = get_provider()
     memory = MemoryStore()
     tools = ToolRegistry()
-    engine = QueryEngine(provider=provider, tool_registry=tools, memory=memory)
+    engine = QueryEngine(
+        provider=provider,
+        tool_registry=tools,
+        memory=memory,
+        system_prompt=get_system_prompt("main"),
+    )
 
     draw_welcome(provider.config.model, provider.config.base_url)
     print(f"{GRAY}اكتب 'خروج' للإنهاء | '/mode <mode>' لتغيير الوضع | '/model <name>' لتبديل النموذج{RESET}")
