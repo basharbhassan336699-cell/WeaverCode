@@ -23,10 +23,10 @@ from core.tools.registry import ToolRegistry
 from core.memory.store import MemoryStore
 from prompts.system import get_system_prompt
 from core.ui import (
-    show_banner, show_mini_banner, format_tool_call,
-    format_response, format_error, format_success,
-    format_info, print_stats, show_startup_icon,
-    ORANGE, GRAY, RESET, BOLD
+    draw_welcome, draw_split_header, draw_tool_call,
+    draw_response, draw_error, draw_success, draw_info,
+    draw_stats, draw_prompt, draw_separator, clear_line,
+    Spinner, ORANGE, GRAY, RESET, BOLD
 )
 
 
@@ -72,29 +72,35 @@ async def run_once(prompt: str, mode: str = "main", stream: bool = False):
         system_prompt=system,
     )
 
-    show_banner(provider.config.model, provider.config.base_url)
+    draw_welcome(provider.config.model, provider.config.base_url)
+    draw_split_header(provider.config.model,
+                      provider.config.base_url.split("//")[-1].split("/")[0])
 
     if stream:
-        print(f"{ORANGE}🕸️{RESET}  ", end="", flush=True)
+        print(f"\n{ORANGE}🕸️{RESET}  ", end="", flush=True)
         async for chunk in engine.stream_run(prompt):
             print(chunk, end="", flush=True)
         print("\n")
     else:
-        def on_text(text):
-            pass
+        spinner = Spinner("يعالج...")
 
         def on_tool(name, args):
+            spinner.clear()
             key_arg = str(list(args.values())[0]) if args else ""
-            print(format_tool_call(name, key_arg))
+            draw_tool_call(name, key_arg)
 
-        result = await engine.run(prompt, on_text=on_text, on_tool=on_tool)
+        spinner.start()
+        try:
+            result = await engine.run(prompt, on_tool=on_tool)
+        finally:
+            await spinner.stop()
 
         if result.error:
-            print(format_error(result.error))
+            draw_error(result.error)
         else:
-            print(format_response(result.text))
+            draw_response(result.text)
             if result.tool_calls_made:
-                print_stats(result.turns, result.tool_calls_made)
+                draw_stats(result.turns, result.tool_calls_made)
 
     await provider.close()
 
@@ -108,16 +114,15 @@ async def interactive_mode():
     tools = ToolRegistry()
     engine = QueryEngine(provider=provider, tool_registry=tools, memory=memory)
 
-    show_startup_icon()
-    show_banner(provider.config.model, provider.config.base_url)
+    draw_welcome(provider.config.model, provider.config.base_url)
     print(f"{GRAY}اكتب 'خروج' للإنهاء | '/mode <mode>' لتغيير الوضع | '/model <name>' لتبديل النموذج{RESET}")
-    print(f"{GRAY}{'─' * 50}{RESET}")
+    draw_separator()
 
     history = []
 
     while True:
         try:
-            prompt = input(f"\n{ORANGE}👤{RESET} أنت: ").strip()
+            prompt = draw_prompt()
         except (EOFError, KeyboardInterrupt):
             print(f"\n\n{ORANGE}🕸️  إلى اللقاء!{RESET}")
             break
@@ -132,36 +137,39 @@ async def interactive_mode():
         if prompt.startswith("/mode "):
             mode = prompt[6:].strip()
             engine.system_prompt = get_system_prompt(mode)
-            print(format_success(f"الوضع: {mode}"))
+            draw_success(f"الوضع: {mode}")
             continue
 
         if prompt.startswith("/model "):
             model = prompt[7:].strip()
             provider.config.model = model
-            print(format_success(f"النموذج: {model}"))
-            continue
-
-        if prompt.startswith("/icon"):
-            show_startup_icon()
+            draw_success(f"النموذج: {model}")
             continue
 
         if prompt.startswith("/stats"):
             stats = engine.memory.get_stats()
-            print(format_info(f"محادثات محفوظة: {stats['conversations']} | حقائق: {stats['facts']}"))
+            draw_info(f"محادثات محفوظة: {stats['conversations']} | حقائق: {stats['facts']}")
             continue
 
-        def on_tool(name, args):
-            key_arg = str(list(args.values())[0]) if args else ""
-            print(format_tool_call(name, key_arg))
+        spinner = Spinner("يعالج...")
 
-        result = await engine.run(prompt, history=history, on_tool=on_tool)
+        def on_tool(name, args):
+            spinner.clear()
+            key_arg = str(list(args.values())[0]) if args else ""
+            draw_tool_call(name, key_arg)
+
+        spinner.start()
+        try:
+            result = await engine.run(prompt, history=history, on_tool=on_tool)
+        finally:
+            await spinner.stop()
 
         if result.error:
-            print(format_error(result.error))
+            draw_error(result.error)
         else:
-            print(format_response(result.text))
+            draw_response(result.text)
             if result.tool_calls_made:
-                print_stats(result.turns, result.tool_calls_made)
+                draw_stats(result.turns, result.tool_calls_made)
 
     await provider.close()
 
