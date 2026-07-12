@@ -16,6 +16,11 @@ prompt_toolkit>=3.0.0  # محرر سطر أوامر متقدم
 beautifulsoup4>=4.12.0 # تحليل HTML
 lxml>=5.0.0            # محلل XML/HTML سريع
 
+# ── لوحة الويب (weaver --web / --background) ──
+fastapi>=0.110.0       # خادم الـ Dashboard
+uvicorn>=0.27.0        # تشغيل ASGI
+# (يُثبَّتان تلقائياً عند أول تشغيل للوحة إن لم يوجدا)
+
 # ── Python الأساسي (مدمج — لا يحتاج تثبيت) ──
 # asyncio, sqlite3, json, os, pathlib, subprocess
 # re, glob, time, uuid, dataclasses, typing
