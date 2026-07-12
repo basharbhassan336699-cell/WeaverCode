@@ -386,7 +386,17 @@ class WeaverProvider:
             500: "خطأ داخلي في خادم المزود — أعد المحاولة لاحقاً.",
             503: "خدمة المزود غير متاحة حالياً — أعد المحاولة لاحقاً.",
         }
-        hint = hints.get(status, "راجع عنوان المزود والمفتاح والنموذج.")
+        # كشف رسائل الرصيد/الاشتراك: كثير من المزودين يردّها بحالة 401/403 مضلِّلة
+        billing_kw = ("no active free usage", "add balance", "buy a plan",
+                      "insufficient", "quota", "billing", "payment required",
+                      "credit", "out of usage", "no credit", "رصيد", "اشتراك")
+        low = (snippet or "").lower()
+        if any(k in low for k in billing_kw):
+            hint = ("رصيد/اشتراك الحساب لدى المزوّد غير كافٍ أو انتهى الاستخدام "
+                    "المجاني — أضف رصيداً أو خطة في لوحة المزوّد، أو جرّب مزوّداً آخر. "
+                    "(هذه رسالة من خادم المزوّد لا من مفتاحك.)")
+        else:
+            hint = hints.get(status, "راجع عنوان المزود والمفتاح والنموذج.")
 
         raise ProviderError(
             f"❌ رفض المزود الطلب (HTTP {status}).\n"
