@@ -66,6 +66,29 @@ def test_anthropic_text_response_to_openai():
     assert conv["choices"][0]["finish_reason"] == "stop"
 
 
+def test_billing_error_hint():
+    import json as _json
+    p = _p("https://capi.aerolink.lat")
+    raw = _json.dumps({"error": "No active free usage is available on this account. "
+                                "Add balance or buy a plan to continue."})
+    try:
+        p._raise_for_status(401, raw)
+        assert False, "should raise"
+    except Exception as e:
+        msg = str(e)
+        assert "رصيد" in msg and "مفتاحك" in msg  # يشير للرصيد لا للمفتاح
+
+
+def test_invalid_key_hint_unchanged():
+    import json as _json
+    p = _p("https://api.groq.com/openai/v1")
+    try:
+        p._raise_for_status(401, _json.dumps({"error": "Invalid API key"}))
+        assert False
+    except Exception as e:
+        assert "غير صحيح أو منتهي" in str(e)
+
+
 def test_anthropic_tool_response_to_openai():
     data = {"id": "m", "stop_reason": "tool_use", "content": [
         {"type": "text", "text": "سأقرأ"},
