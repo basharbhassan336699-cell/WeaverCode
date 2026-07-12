@@ -1,5 +1,30 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## v1.6.0 — ميزات متقدمة: MCP + Hooks + وكلاء فرعيون + إدارة سياق + بثّ مع أدوات
+
+### أُضيف
+- **دعم MCP** (`core/mcp.py`) — عميل MCP عبر stdio (JSON-RPC 2.0): يشغّل خوادم
+  MCP من `config/mcp.json`، يهيّئ الاتصال، يجلب أدواتها ويسجّلها كأدوات WeaverCode
+  باسم `mcp__<server>__<tool>`. مثال في `config/mcp.json.example`.
+- **نظام Hooks** (`core/hooks.py`) — دورة حياة `UserPromptSubmit` / `PreToolUse`
+  (يمكنه منع التنفيذ برمز خروج ≠ 0) / `PostToolUse` / `Stop`، من `.claude/hooks.json`.
+  مثال في `.claude/hooks.json.example`.
+- **وكلاء فرعيون** — أداة `Agent` تشغّل وكيلاً فرعياً معزولاً لمهمة فرعية
+  (مع حدّ عمق `WEAVER_MAX_AGENT_DEPTH`).
+- **إدارة السياق (Context compaction)** — عند طول المحادثة يُلخَّص الأقدم تلقائياً
+  عند حدّ آمن (رسالة user) مع الحفاظ على أحدث الرسائل. التحكم: `WEAVER_COMPACTION`،
+  `WEAVER_COMPACT_THRESHOLD`، `WEAVER_KEEP_RECENT`.
+- **البثّ مع الأدوات** — `stream_run` أصبح حلقة وكيلية متدفقة كاملة: ينفّذ الأدوات
+  (مع الصلاحيات وhooks) ويبثّ الرد النهائي (كان البثّ سابقاً بلا أدوات).
+- **أوامر السلاش** (`core/commands.py`) — تحميل وتشغيل `.claude/commands/*.md`
+  فعلياً داخل الوضع التفاعلي (`/weaver-status`، `/review ...`، مع `$ARGUMENTS`).
+  و`/commands` لعرض القائمة.
+- **أدوات جديدة**: `MultiEdit` (تعديلات متعددة ذرّية على ملف)، و`Agent`.
+  إجمالي الأدوات المدمجة الحقيقية الآن **27** + أدوات MCP الخارجية.
+
+### أُصلح
+- تصحيح ادّعاء «44/46 أداة» في README وregistry إلى العدد الحقيقي.
+
 ## v1.5.0 — تفعيل نظام الصلاحيات (الأمان أولاً)
 
 ### أُضيف

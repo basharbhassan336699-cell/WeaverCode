@@ -1,0 +1,12 @@
+{
+  "_ملاحظة": "انسخ إلى .claude/hooks.json لتفعيل hooks دورة الحياة. الأحداث: UserPromptSubmit, PreToolUse, PostToolUse, Stop. في PreToolUse: رمز خروج غير صفري يمنع تنفيذ الأداة. المتغيرات المتاحة: $WEAVER_EVENT, $WEAVER_TOOL, $WEAVER_TOOL_ARGS, $WEAVER_PROMPT.",
+  "PreToolUse": [
+    {
+      "matcher": "Bash|Write|Edit|MultiEdit|GitPush",
+      "command": "echo \"[$(date)] $WEAVER_TOOL: $WEAVER_TOOL_ARGS\" >> ~/.weaver/audit.log"
+    }
+  ],
+  "PostToolUse": [],
+  "UserPromptSubmit": [],
+  "Stop": []
+}

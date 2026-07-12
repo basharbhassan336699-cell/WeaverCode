@@ -21,6 +21,9 @@ from core.engine.provider import get_provider
 from core.engine.query_engine import QueryEngine
 from core.tools.registry import ToolRegistry
 from core.memory.store import MemoryStore
+from core.commands import SlashCommands
+from core.hooks import HookManager
+from core.mcp import MCPManager
 from prompts.system import get_system_prompt
 from core.ui import (
     draw_welcome, draw_split_header, draw_tool_call,
@@ -96,41 +99,62 @@ def load_env():
             os.environ.setdefault(key, val)
 
 
-async def run_once(prompt: str, mode: str = "main", stream: bool = False):
-    """تشغيل مهمة واحدة"""
-    load_env()
-
+async def build_engine(mode: str = "main"):
+    """
+    تهيئة كاملة للمحرّك: المزوّد + الأدوات + الذاكرة + hooks + خوادم MCP.
+    يُرجع (engine, provider, mcp) — على المتصل استدعاء mcp.stop_all() في النهاية.
+    """
     provider = get_provider()
     memory = MemoryStore()
     tools = ToolRegistry()
-    system = get_system_prompt(mode)
+    hooks = HookManager()
+
+    # تشغيل خوادم MCP (إن وُجد config/mcp.json) وتسجيل أدواتها
+    mcp = MCPManager()
+    try:
+        registered = await mcp.start_all(tools)
+        if registered:
+            draw_info(f"MCP: {len(registered)} أداة خارجية مُحمّلة")
+    except Exception:
+        pass
 
     engine = QueryEngine(
         provider=provider,
         tool_registry=tools,
         memory=memory,
-        system_prompt=system,
+        system_prompt=get_system_prompt(mode),
+        hooks=hooks if hooks.has_any() else None,
     )
+    return engine, provider, mcp
+
+
+async def run_once(prompt: str, mode: str = "main", stream: bool = False):
+    """تشغيل مهمة واحدة"""
+    load_env()
+
+    engine, provider, mcp = await build_engine(mode)
 
     draw_welcome(provider.config.model, provider.config.base_url)
     draw_split_header(provider.config.model,
                       provider.config.base_url.split("//")[-1].split("/")[0])
 
+    spinner = Spinner("يعالج...")
+
+    def on_tool(name, args):
+        spinner.clear()
+        key_arg = str(list(args.values())[0]) if args else ""
+        draw_tool_call(name, key_arg)
+
+    on_permission = make_permission_handler(spinner)
+
     if stream:
         print(f"\n{ORANGE}🕸️{RESET}  ", end="", flush=True)
-        async for chunk in engine.stream_run(prompt):
+        async for chunk in engine.stream_run(prompt, on_tool=on_tool,
+                                             on_permission=on_permission):
             print(chunk, end="", flush=True)
         print("\n")
+        await mcp.stop_all()
     else:
-        spinner = Spinner("يعالج...")
-
-        def on_tool(name, args):
-            spinner.clear()
-            key_arg = str(list(args.values())[0]) if args else ""
-            draw_tool_call(name, key_arg)
-
-        on_permission = make_permission_handler(spinner)
-
         spinner.start()
         try:
             result = await engine.run(prompt, on_tool=on_tool,
@@ -145,6 +169,8 @@ async def run_once(prompt: str, mode: str = "main", stream: bool = False):
             if result.tool_calls_made:
                 draw_stats(result.turns, result.tool_calls_made)
 
+        await mcp.stop_all()
+
     await provider.close()
 
 
@@ -152,18 +178,12 @@ async def interactive_mode():
     """وضع المحادثة التفاعلية"""
     load_env()
 
-    provider = get_provider()
-    memory = MemoryStore()
-    tools = ToolRegistry()
-    engine = QueryEngine(
-        provider=provider,
-        tool_registry=tools,
-        memory=memory,
-        system_prompt=get_system_prompt("main"),
-    )
+    engine, provider, mcp = await build_engine("main")
+    commands = SlashCommands()
 
     draw_welcome(provider.config.model, provider.config.base_url)
-    print(f"{GRAY}اكتب 'خروج' للإنهاء | '/mode <mode>' لتغيير الوضع | '/model <name>' لتبديل النموذج{RESET}")
+    print(f"{GRAY}اكتب 'خروج' للإنهاء | '/mode <mode>' | '/model <name>' | "
+          f"'/commands' لعرض الأوامر{RESET}")
     draw_separator()
 
     history = []
@@ -199,6 +219,23 @@ async def interactive_mode():
             draw_info(f"محادثات محفوظة: {stats['conversations']} | حقائق: {stats['facts']}")
             continue
 
+        if prompt.strip() in ("/commands", "/help"):
+            names = commands.names()
+            draw_info("أوامر السلاش المتاحة: " + ", ".join("/" + n for n in names))
+            continue
+
+        # ── أوامر السلاش من .claude/commands/ ────────────────────────────────
+        parsed = commands.parse(prompt)
+        if parsed:
+            cmd_name, cmd_args = parsed
+            rendered = commands.render(cmd_name, cmd_args)
+            if rendered:
+                draw_info(f"تشغيل الأمر /{cmd_name}")
+                prompt = rendered  # نشغّل قالب الأمر كبروموه
+            else:
+                draw_error(f"تعذّر تحميل الأمر /{cmd_name}")
+                continue
+
         spinner = Spinner("يعالج...")
 
         def on_tool(name, args):
@@ -222,6 +259,7 @@ async def interactive_mode():
             if result.tool_calls_made:
                 draw_stats(result.turns, result.tool_calls_made)
 
+    await mcp.stop_all()
     await provider.close()
 
 

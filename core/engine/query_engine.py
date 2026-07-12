@@ -136,6 +136,8 @@ class QueryEngine:
         memory: Optional[MemoryStore] = None,
         system_prompt: Optional[str] = None,
         max_turns: int = MAX_TURNS,
+        hooks: Optional[Any] = None,
+        depth: int = 0,
     ):
         self.provider = provider or get_provider()
         self.tools = tool_registry or ToolRegistry()
@@ -145,6 +147,82 @@ class QueryEngine:
         # صلاحيات: قائمة سماح للجلسة + وضع الموافقة التلقائية
         self.auto_approve = _auto_approve_enabled()
         self.session_allow: set = set()
+        # hooks دورة الحياة (اختياري)
+        self.hooks = hooks
+        # الوكلاء الفرعيون: عمق الاستدعاء الحالي وحدّه الأقصى
+        self.depth = depth
+        self.max_depth = int(os.environ.get("WEAVER_MAX_AGENT_DEPTH", "2"))
+        # إدارة السياق (context compaction)
+        self.enable_compaction = os.environ.get(
+            "WEAVER_COMPACTION", "1").strip().lower() not in ("0", "false", "off", "no")
+        self.compact_threshold = int(os.environ.get("WEAVER_COMPACT_THRESHOLD", "30"))
+        self.keep_recent = int(os.environ.get("WEAVER_KEEP_RECENT", "8"))
+        # تمكين أداة Agent من تشغيل وكيل فرعي
+        self.tools.agent_runner = self._run_subagent
+
+    async def _run_subagent(self, prompt: str, mode: str = "main") -> str:
+        """تشغيل وكيل فرعي معزول لمهمة فرعية، وإرجاع خلاصته النصية."""
+        if self.depth >= self.max_depth:
+            return "تعذّر: تم بلوغ الحد الأقصى لعمق الوكلاء الفرعيين."
+        try:
+            from prompts.system import get_system_prompt
+            sub_system = get_system_prompt(mode)
+        except Exception:
+            sub_system = self.system_prompt
+        sub = QueryEngine(
+            provider=self.provider,
+            tool_registry=ToolRegistry(work_dir=self.tools.work_dir),
+            memory=self.memory,
+            system_prompt=sub_system,
+            max_turns=self.max_turns,
+            hooks=self.hooks,
+            depth=self.depth + 1,
+        )
+        # الوكيل الفرعي غير تفاعلي: يرث الموافقة التلقائية فقط (وإلا تُرفض الأدوات الخطرة)
+        result = await sub.run(prompt)
+        return result.text or (result.error or "(لا نتيجة)")
+
+    async def _maybe_compact(self, messages: List[Message]) -> List[Message]:
+        """
+        تلخيص أقدم أجزاء المحادثة عند تجاوز العتبة، مع الحفاظ على أحدث الرسائل.
+        يقسم عند حدّ رسالة user (حد آمن يحافظ على اقتران tool_call/tool_result).
+        """
+        if not self.enable_compaction or len(messages) <= self.compact_threshold:
+            return messages
+
+        system_msgs = [m for m in messages if m.role == "system"]
+        convo = [m for m in messages if m.role != "system"]
+        if len(convo) <= self.keep_recent:
+            return messages
+
+        # اختر حدّ القطع عند أقرب رسالة user تُبقي على الأقل keep_recent رسالة حديثة
+        split = None
+        for i in range(len(convo) - self.keep_recent, 0, -1):
+            if convo[i].role == "user":
+                split = i
+                break
+        if not split:
+            return messages
+
+        older, recent = convo[:split], convo[split:]
+        digest = "\n".join(
+            f"{m.role}: {(m.content or '')[:400]}" for m in older if (m.content or "").strip()
+        )
+        try:
+            resp = await self.provider.complete([
+                Message(role="system", content=(
+                    "لخّص المحادثة التالية بإيجاز شديد محتفظاً بالقرارات والحقائق "
+                    "وأسماء الملفات والمهام المعلّقة. لا تذكر أي هوية.")),
+                Message(role="user", content=digest),
+            ])
+            summary = resp["choices"][0]["message"].get("content") or ""
+        except Exception:
+            return messages  # لا نُفشل التشغيل بسبب فشل التلخيص
+
+        if not summary.strip():
+            return messages
+        summary_msg = Message(role="system", content=f"## ملخص ما سبق:\n{summary}")
+        return system_msgs + [summary_msg] + recent
 
     def _tool_pre_approved(self, name: str) -> bool:
         """هل الأداة مسموحة مسبقاً (وضع تلقائي أو سُمح بها في هذه الجلسة)؟"""
@@ -221,6 +299,13 @@ class QueryEngine:
 
         messages.append(Message(role="user", content=_guard_user_prompt(prompt)))
 
+        # hook: تسليم رسالة المستخدم
+        if self.hooks:
+            self.hooks.run("UserPromptSubmit", prompt=prompt)
+
+        # إدارة السياق: تلخيص الأقدم إن طالت المحادثة
+        messages = await self._maybe_compact(messages)
+
         tools_schema = self.tools.get_schema()
         result = QueryResult(text="")
         turns = 0
@@ -288,10 +373,26 @@ class QueryEngine:
                         )
                         continue
 
+                # ── hook: PreToolUse (يمكنه منع التنفيذ) ─────────────────────
+                if self.hooks and not self.hooks.run("PreToolUse", tool_name, args, prompt):
+                    tool_results.append(
+                        Message(
+                            role="tool",
+                            content="🚫 مُنع تنفيذ الأداة بواسطة hook (PreToolUse).",
+                            tool_call_id=tool_id,
+                            name=tool_name,
+                        )
+                    )
+                    continue
+
                 try:
                     tool_output = await self.tools.execute(tool_name, args)
                 except Exception as e:
                     tool_output = f"خطأ في تنفيذ {tool_name}: {e}"
+
+                # ── hook: PostToolUse ────────────────────────────────────────
+                if self.hooks:
+                    self.hooks.run("PostToolUse", tool_name, args, prompt)
 
                 tool_results.append(
                     Message(
@@ -309,6 +410,10 @@ class QueryEngine:
         # شبكة الأمان الأخيرة: تنقية أي تسريب لهوية أخرى من الرد
         result.text = _sanitize_identity(result.text)
 
+        # hook: انتهاء الرد
+        if self.hooks:
+            self.hooks.run("Stop", prompt=prompt)
+
         # حفظ في الذاكرة (بعد التنقية)
         await self.memory.save(prompt, result.text, result.tool_calls_made)
 
@@ -318,15 +423,94 @@ class QueryEngine:
         self,
         prompt: str,
         history: Optional[List[Message]] = None,
+        on_tool: Optional[Callable[[str, Dict], None]] = None,
+        on_permission: Optional[Callable[[str, Dict], str]] = None,
     ) -> AsyncGenerator[str, None]:
-        """نسخة متدفقة — تُرجع النص كلمة كلمة"""
-        messages = [
-            Message(role="system", content=self.system_prompt),
-            Message(role="user", content=_guard_user_prompt(prompt)),
-        ]
+        """
+        نسخة متدفقة تدعم الأدوات فعلياً (حلقة وكيلية متدفقة):
+        - تبثّ نص كل دور فور وصوله.
+        - تنفّذ الأدوات (مع الصلاحيات وhooks) ثم تكمل.
+        الأدوات ذات الدور الأخير النصّي تُبثّ للمستخدم.
+        """
+        messages: List[Message] = [Message(role="system", content=self.system_prompt)]
         if history:
-            messages[1:1] = history
+            messages.extend(history)
+        messages.append(Message(role="user", content=_guard_user_prompt(prompt)))
 
-        # تنقية الهوية لكل جزء (أفضل جهد؛ قد تفوت عبارة مقسومة بين جزأين)
-        async for chunk in self.provider.stream(messages):
-            yield _sanitize_identity(chunk)
+        if self.hooks:
+            self.hooks.run("UserPromptSubmit", prompt=prompt)
+        messages = await self._maybe_compact(messages)
+
+        tools_schema = self.tools.get_schema()
+        turns = 0
+        final_text = ""
+
+        while turns < self.max_turns:
+            turns += 1
+            try:
+                response = await self.provider.complete(messages, tools=tools_schema)
+            except Exception as e:
+                yield _sanitize_identity(f"\n❌ خطأ: {e}")
+                break
+
+            choice = response["choices"][0]
+            msg = choice["message"]
+            finish_reason = choice.get("finish_reason", "stop")
+
+            messages.append(Message(
+                role="assistant",
+                content=msg.get("content") or "",
+                tool_calls=msg.get("tool_calls"),
+            ))
+
+            # لا أدوات → هذا هو الرد النهائي؛ ابثّه كلمةً كلمة
+            if finish_reason == "stop" or not msg.get("tool_calls"):
+                final_text = msg.get("content") or ""
+                clean = _sanitize_identity(final_text)
+                for word in clean.split(" "):
+                    yield word + " "
+                break
+
+            # تنفيذ الأدوات (مع الصلاحيات وhooks)
+            tool_results = []
+            for tc in msg["tool_calls"]:
+                tool_name = tc["function"]["name"]
+                tool_id = tc["id"]
+                try:
+                    args = json.loads(tc["function"]["arguments"])
+                except json.JSONDecodeError:
+                    args = {}
+
+                if on_tool:
+                    on_tool(tool_name, args)
+
+                if self.tools.requires_permission(tool_name) and \
+                        not self._tool_pre_approved(tool_name):
+                    decision = self._request_permission(tool_name, args, on_permission)
+                    if decision == PERM_ALLOW_ALWAYS:
+                        self.session_allow.add(tool_name)
+                    if decision == PERM_DENY:
+                        tool_results.append(Message(role="tool",
+                            content="🚫 رُفض تنفيذ الأداة.", tool_call_id=tool_id, name=tool_name))
+                        continue
+
+                if self.hooks and not self.hooks.run("PreToolUse", tool_name, args, prompt):
+                    tool_results.append(Message(role="tool",
+                        content="🚫 مُنع بواسطة hook.", tool_call_id=tool_id, name=tool_name))
+                    continue
+
+                try:
+                    tool_output = await self.tools.execute(tool_name, args)
+                except Exception as e:
+                    tool_output = f"خطأ في تنفيذ {tool_name}: {e}"
+
+                if self.hooks:
+                    self.hooks.run("PostToolUse", tool_name, args, prompt)
+
+                tool_results.append(Message(role="tool", content=str(tool_output),
+                                            tool_call_id=tool_id, name=tool_name))
+            messages.extend(tool_results)
+
+        if self.hooks:
+            self.hooks.run("Stop", prompt=prompt)
+        await self.memory.save(prompt, _sanitize_identity(final_text), [])

@@ -1,6 +1,7 @@
 """
 registry.py — سجل الأدوات المدمجة في WeaverCode
-يماثل الأدوات الـ 46 المدمجة في Claude Code لكن بشكل مستقل
+27 أداة مدمجة حقيقية (ملفات/بحث/تنفيذ/ذاكرة/مهام/ويب/git/تعديل متعدد/وكيل فرعي)،
+مع إمكانية تسجيل أدوات خارجية ديناميكياً عبر MCP (register_dynamic).
 """
 
 import os
@@ -48,6 +49,9 @@ class ToolRegistry:
     def __init__(self, work_dir: Optional[str] = None):
         self.work_dir = work_dir or os.getcwd()
         self._tools: Dict[str, Tool] = {}
+        # يضبطه QueryEngine ليمكّن أداة Agent من تشغيل وكيل فرعي
+        # التوقيع: async (prompt: str, mode: str) -> str
+        self.agent_runner: Optional[Callable] = None
         self._register_all()
 
     def _register_all(self):
@@ -438,10 +442,65 @@ class ToolRegistry:
             fn=self._ask_user,
         ))
 
+        # ── تعديل متعدد الكتل في ملف واحد ────────────────────────────────────
+        self._add(Tool(
+            name="MultiEdit",
+            description="تطبيق عدة تعديلات (استبدالات) متتابعة على ملف واحد بعملية واحدة",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "edits": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_string": {"type": "string"},
+                                "new_string": {"type": "string"},
+                                "replace_all": {"type": "boolean", "default": False},
+                            },
+                            "required": ["old_string", "new_string"],
+                        },
+                    },
+                },
+                "required": ["path", "edits"],
+            },
+            fn=self._multi_edit,
+            requires_permission=True,
+        ))
+
+        # ── وكيل فرعي (subagent) ─────────────────────────────────────────────
+        self._add(Tool(
+            name="Agent",
+            description=("تشغيل وكيل فرعي مستقل لمهمة فرعية محددة (بحث/تحليل/تنفيذ) "
+                         "ثم إرجاع خلاصته. مفيد لعزل المهام الكبيرة."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "المهمة الفرعية"},
+                    "mode": {"type": "string",
+                             "enum": ["main", "coding", "project", "security",
+                                      "autonomous", "analysis"],
+                             "default": "main"},
+                },
+                "required": ["prompt"],
+            },
+            fn=self._agent,
+        ))
+
     # ── تنفيذ الأدوات ────────────────────────────────────────────────────────
 
     def _add(self, tool: Tool):
         self._tools[tool.name] = tool
+
+    def register_dynamic(self, name: str, description: str, parameters: Dict,
+                         fn: Callable, requires_permission: bool = True) -> None:
+        """تسجيل أداة خارجية ديناميكياً (تُستخدم لأدوات MCP)."""
+        self._add(Tool(name=name, description=description, parameters=parameters,
+                       fn=fn, requires_permission=requires_permission))
+
+    def names(self) -> List[str]:
+        return list(self._tools.keys())
 
     def get_schema(self) -> List[Dict]:
         return [t.to_schema() for t in self._tools.values()]
@@ -505,6 +564,44 @@ class ToolRegistry:
             return f"✅ تم التعديل في {path}"
         except Exception as e:
             return f"خطأ في التعديل: {e}"
+
+    def _multi_edit(self, path: str, edits: List[Dict[str, Any]]) -> str:
+        """تطبيق عدة استبدالات على ملف واحد بشكل ذرّي (كلها أو لا شيء)."""
+        try:
+            p = Path(path)
+            content = p.read_text(encoding="utf-8")
+        except Exception as e:
+            return f"خطأ في قراءة {path}: {e}"
+        applied = 0
+        for i, ed in enumerate(edits, 1):
+            old = ed.get("old_string", "")
+            new = ed.get("new_string", "")
+            replace_all = ed.get("replace_all", False)
+            if old not in content:
+                return f"التعديل رقم {i} فشل: لم يُعثر على النص المطلوب (لم يُحفظ أي تغيير)."
+            count = content.count(old)
+            if count > 1 and not replace_all:
+                return (f"التعديل رقم {i}: النص موجود {count} مرات. "
+                        f"استخدم replace_all=true أو أضف سياقاً (لم يُحفظ أي تغيير).")
+            content = content.replace(old, new)
+            applied += 1
+        try:
+            p.write_text(content, encoding="utf-8")
+        except Exception as e:
+            return f"خطأ في الكتابة: {e}"
+        return f"✅ طُبّقت {applied} تعديلات على {path}"
+
+    async def _agent(self, prompt: str, mode: str = "main") -> str:
+        """تشغيل وكيل فرعي عبر agent_runner الذي يضبطه QueryEngine."""
+        if self.agent_runner is None:
+            return "خطأ: الوكلاء الفرعيون غير مفعّلين في هذا السياق."
+        try:
+            result = self.agent_runner(prompt, mode)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return str(result)
+        except Exception as e:
+            return f"خطأ في الوكيل الفرعي: {e}"
 
     def _glob(self, pattern: str, base_dir: Optional[str] = None) -> str:
         try:

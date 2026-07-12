@@ -113,22 +113,24 @@ weaver --key groq
 
 ---
 
-## Built-in Tools (44 tools)
+## Built-in Tools (27 built-in + MCP)
 
 | Category | Tools |
 |----------|-------|
-| **Files** | Read, Write, Edit, Glob, Grep |
-| **Execution** | Bash, Monitor, PythonRun |
+| **Files** | Read, Write, Edit, MultiEdit, Glob, Grep |
+| **Execution** | Bash, PythonRun, PipInstall |
 | **Memory** | MemorySave, MemorySearch, MemoryDelete, MemoryList |
 | **Tasks** | TaskCreate, TaskList, TaskUpdate |
 | **Web** | WebFetch, WebSearch |
 | **Git** | GitStatus, GitClone, GitCommit, GitPush |
-| **Agents** | Agent, CronCreate, CronList, CronDelete |
-| **Planning** | EnterPlanMode, ExitPlanMode |
-| **Code** | LSP, ReportFindings, NotebookEdit |
+| **Agents** | Agent (subagents) |
 | **System** | EnvSet, EnvGet, DirectoryList, AskUser |
-| **Output** | SendUserFile, PushNotification, ToolSearch |
-| **Worktree** | EnterWorktree, ExitWorktree |
+| **External** | Any MCP server tool (`mcp__<server>__<tool>`) |
+
+> Additional capabilities: a real **permission system** (asks before dangerous
+> tools), **lifecycle hooks** (`.claude/hooks.json`), **context compaction** for
+> long chats, **streaming with tools**, and **slash commands** loaded from
+> `.claude/commands/`.
 
 ---
 
