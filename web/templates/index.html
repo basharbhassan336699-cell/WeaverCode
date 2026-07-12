@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>🕸️ WeaverCode Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+  <link rel="icon" href="/static/spider.svg" type="image/svg+xml"/>
+</head>
+<body>
+  <!-- Header -->
+  <header class="wc-header">
+    <div class="wc-brand">
+      <img src="/static/spider.svg" class="wc-logo" alt="WeaverCode"/>
+      <span class="wc-title">WeaverCode</span>
+      <span id="stateBadge" class="badge idle">—</span>
+    </div>
+    <div class="wc-header-right">
+      <span id="modelChip" class="chip" title="النموذج">…</span>
+      <button id="themeBtn" class="icon-btn" title="الوضع">🌓</button>
+    </div>
+  </header>
+
+  <!-- Background Activity Bar -->
+  <div id="activityBar" class="activity-bar hidden">
+    <span class="spinner"></span>
+    <span id="activityText">Still working on it...</span>
+    <span id="diffCounter" class="diff hidden">
+      <span class="diff-add">+<span id="diffAdd">0</span></span>
+      <span class="diff-del">-<span id="diffDel">0</span></span>
+    </span>
+  </div>
+
+  <!-- Terminal Bar -->
+  <div class="terminal-bar">
+    <span class="prompt-sign">&gt;_</span>
+    <input id="cmdInput" type="text" placeholder="اكتب مهمة أو /model groq /key … /provider deepseek /status" autocomplete="off"/>
+    <button id="sendBtn" class="send-btn">إرسال</button>
+  </div>
+
+  <!-- Tabs -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="feed">📡 المباشر</button>
+    <button class="tab" data-tab="files">📁 الملفات</button>
+    <button class="tab" data-tab="chats">💬 المحادثات</button>
+    <button class="tab" data-tab="settings">⚙️ الإعدادات</button>
+    <button class="tab" data-tab="github">🔗 GitHub</button>
+  </nav>
+
+  <main class="content">
+    <!-- Live Feed -->
+    <section id="tab-feed" class="tabpane active">
+      <div id="feed" class="feed"></div>
+    </section>
+
+    <!-- Files -->
+    <section id="tab-files" class="tabpane">
+      <div class="row-between">
+        <div class="filters" id="fileFilters">
+          <button class="fbtn active" data-f="all">الكل</button>
+          <button class="fbtn" data-f="py">Python</button>
+          <button class="fbtn" data-f="json">JSON</button>
+          <button class="fbtn" data-f="db">DB</button>
+          <button class="fbtn" data-f="zip">ZIP</button>
+          <button class="fbtn" data-f="other">أخرى</button>
+        </div>
+        <a class="btn primary" href="/api/files/download-zip">⬇️ تحميل الكل ZIP</a>
+      </div>
+      <div class="muted small" id="outputsDir"></div>
+      <div id="fileGrid" class="file-grid"></div>
+    </section>
+
+    <!-- Chats -->
+    <section id="tab-chats" class="tabpane">
+      <input id="chatSearch" class="search" type="text" placeholder="🔍 ابحث في المحادثات…"/>
+      <div id="chatList" class="chat-list"></div>
+    </section>
+
+    <!-- Settings -->
+    <section id="tab-settings" class="tabpane">
+      <label class="field"><span>المزود</span>
+        <select id="providerSel">
+          <option value="">— اختر —</option>
+          <option value="aerolink">aerolink</option>
+          <option value="groq">groq</option>
+          <option value="deepseek">deepseek</option>
+          <option value="openrouter">openrouter</option>
+          <option value="anthropic">anthropic</option>
+          <option value="openai">openai</option>
+        </select>
+      </label>
+      <label class="field"><span>النموذج</span>
+        <input id="modelInput" type="text" placeholder="claude-fable-5"/>
+      </label>
+      <label class="field"><span>المفتاح</span>
+        <div class="key-row">
+          <input id="keyInput" type="password" placeholder="WEAVER_API_KEY"/>
+          <button id="keyToggle" class="icon-btn">👁️</button>
+        </div>
+      </label>
+      <div class="row">
+        <button id="saveSettings" class="btn primary">حفظ</button>
+        <button id="testConn" class="btn">اختبر الاتصال</button>
+      </div>
+      <div id="settingsMsg" class="muted small"></div>
+    </section>
+
+    <!-- GitHub -->
+    <section id="tab-github" class="tabpane">
+      <div id="ghInfo" class="muted small"></div>
+      <ul id="ghCommits" class="commits"></ul>
+      <div class="row">
+        <input id="ghMsg" type="text" placeholder="رسالة الالتزام" value="🕸️ WeaverCode update"/>
+        <button id="ghPush" class="btn primary">رفع التغييرات</button>
+      </div>
+      <pre id="ghOutput" class="output"></pre>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

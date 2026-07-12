@@ -84,6 +84,14 @@ python3 weaver.py "Your task here"
 bash scripts/install_termux.sh
 ```
 
+### 🌐 Web Dashboard + Background Mode
+```bash
+python3 weaver.py --background   # لوحة ويب + خلفية → http://localhost:7878
+python3 weaver.py --web          # لوحة الويب فقط
+```
+واجهة متجاوبة (dark/light/system) على كل الأجهزة: بثّ حيّ للأحداث، إدارة المهام
+والمحادثات والإعدادات وGitHub، و**تحميل الملفات بلا حدّ حجم** (1GB فأكثر).
+
 ---
 
 ## Usage

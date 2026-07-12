@@ -316,6 +316,12 @@ def main():
     parser.add_argument("--plan", action="store_true",
                         help="وضع التخطيط: يخطّط ويستأذنك قبل تنفيذ أي تعديل")
     parser.add_argument("--interactive", "-i", action="store_true", help="وضع المحادثة التفاعلية")
+    parser.add_argument("--background", "--bg", "-b", action="store_true",
+                        help="تشغيل لوحة الويب + الخلفية (http://localhost:7878)")
+    parser.add_argument("--web", "-w", action="store_true",
+                        help="تشغيل لوحة الويب في المقدّمة فقط")
+    parser.add_argument("--daemon", action="store_true",
+                        help="تشغيل الـ daemon (الخلفية) بلا واجهة ويب")
     parser.add_argument("--model", help="اسم النموذج (يتجاوز WEAVER_MODEL)")
     parser.add_argument("--key", help="مفتاح API (يتجاوز WEAVER_API_KEY)")
     parser.add_argument("--url", help="عنوان API (يتجاوز WEAVER_BASE_URL)")
@@ -367,6 +373,20 @@ def main():
 
     if args.plan:
         os.environ["WEAVER_PLAN_MODE"] = "1"
+
+    # ── أوضاع الويب/الخلفية ─────────────────────────────────────────────────
+    if args.background:
+        script = Path(__file__).parent / "scripts" / "weaver-bg.sh"
+        os.system(f"bash '{script}'")
+        return
+    if args.web:
+        from web.server import main as web_main
+        web_main()
+        return
+    if args.daemon:
+        from background.daemon import daemon_main
+        asyncio.run(daemon_main())
+        return
 
     if args.interactive:
         asyncio.run(interactive_mode())
