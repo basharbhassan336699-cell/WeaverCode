@@ -135,3 +135,42 @@ body {
   padding: 10px; margin-top: 10px; white-space: pre-wrap; font-size: 12px; max-height: 300px; overflow: auto; }
 .muted { color: var(--text-secondary); } .small { font-size: 12px; }
 #outputsDir { margin: 6px 0; word-break: break-all; }
+
+/* مجموعات المحادثات حسب التاريخ */
+.date-group { color: var(--text-secondary); font-size: 12px; margin: 14px 2px 6px;
+  font-weight: 600; }
+.chat-item { position: relative; }
+.chat-status { position: absolute; inset-inline-end: 10px; top: 10px; font-size: 13px; }
+
+/* زر عائم New session */
+.fab { position: fixed; inset-inline-start: 16px; bottom: 18px; z-index: 20;
+  background: var(--orange); color: #fff; border: none; border-radius: 24px;
+  padding: 13px 20px; font-size: 15px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+.fab:active { transform: scale(.97); }
+
+/* النوافذ المنبثقة (Overlays / Sheets) */
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30;
+  display: flex; align-items: flex-end; justify-content: center; }
+.overlay.hidden { display: none; }
+.sheet { background: var(--bg-secondary); width: 100%; max-width: 640px;
+  border-radius: 16px 16px 0 0; padding: 16px; border: 1px solid var(--border);
+  border-bottom: none; max-height: 85vh; display: flex; flex-direction: column; }
+.sheet.tall { height: 85vh; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px; font-weight: 700; color: var(--orange); }
+.sheet textarea, .sheet input { width: 100%; background: var(--bg-primary);
+  border: 1px solid var(--border); color: var(--text-primary); padding: 10px 12px;
+  border-radius: 8px; font-size: 14px; font-family: inherit; }
+.sheet select { background: var(--bg-primary); border: 1px solid var(--border);
+  color: var(--text-primary); padding: 10px; border-radius: 8px; }
+
+.session-body { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px;
+  margin-bottom: 10px; }
+.bubble { padding: 10px 12px; border-radius: 12px; max-width: 92%; white-space: pre-wrap;
+  word-break: break-word; font-size: 14px; }
+.bubble.user { background: var(--orange); color: #fff; align-self: flex-start; }
+.bubble.agent { background: var(--bg-card); border: 1px solid var(--border); align-self: flex-end; }
+.bubble .who { font-size: 11px; opacity: .7; margin-bottom: 3px; }
+.session-input { display: flex; gap: 8px; align-items: center; }
+.session-input input { flex: 1; }

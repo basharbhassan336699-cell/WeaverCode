@@ -70,8 +70,12 @@
       <div id="fileGrid" class="file-grid"></div>
     </section>
 
-    <!-- Chats -->
+    <!-- Sessions / Chats -->
     <section id="tab-chats" class="tabpane">
+      <div class="row-between">
+        <button id="newSessionTop" class="btn primary">➕ محادثة جديدة</button>
+        <span id="sessCount" class="muted small"></span>
+      </div>
       <input id="chatSearch" class="search" type="text" placeholder="🔍 ابحث في المحادثات…"/>
       <div id="chatList" class="chat-list"></div>
     </section>
@@ -116,6 +120,46 @@
       <pre id="ghOutput" class="output"></pre>
     </section>
   </main>
+
+  <!-- زر عائم: محادثة جديدة -->
+  <button id="fabNew" class="fab">➕ محادثة جديدة</button>
+
+  <!-- نافذة إنشاء محادثة جديدة -->
+  <div id="composeOverlay" class="overlay hidden">
+    <div class="sheet">
+      <div class="sheet-head">
+        <span>🕸️ محادثة جديدة</span>
+        <button class="icon-btn" data-close="composeOverlay">✕</button>
+      </div>
+      <textarea id="composeInput" rows="4" placeholder="اكتب مهمتك… مثال: أنشئ سكربت بايثون يرتّب ملفات المجلد"></textarea>
+      <div class="row">
+        <select id="composeMode">
+          <option value="main">عام</option>
+          <option value="coding">برمجة</option>
+          <option value="project">مشروع</option>
+          <option value="security">أمن</option>
+          <option value="analysis">تحليل</option>
+          <option value="autonomous">مستقل</option>
+        </select>
+        <button id="composeSend" class="btn primary">إرسال</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- نافذة عرض/متابعة محادثة -->
+  <div id="sessionOverlay" class="overlay hidden">
+    <div class="sheet tall">
+      <div class="sheet-head">
+        <span id="sessionTitle">محادثة</span>
+        <button class="icon-btn" data-close="sessionOverlay">✕</button>
+      </div>
+      <div id="sessionBody" class="session-body"></div>
+      <div class="session-input">
+        <input id="sessionFollow" type="text" placeholder="أضف ملاحظة أو تابع المحادثة…"/>
+        <button id="sessionSend" class="btn primary">↑</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

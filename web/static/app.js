@@ -148,18 +148,41 @@
     b.classList.add("active"); curFilter = b.dataset.f; renderFiles();
   });
 
-  // ── المحادثات ──
+  // ── المحادثات / الجلسات ──
+  function dateGroup(ts) {
+    if (!ts) return "أقدم";
+    const now = Date.now() / 1000, diff = now - ts;
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    const todayStart = startOfDay.getTime() / 1000;
+    if (ts >= todayStart) return "اليوم";
+    if (ts >= todayStart - 86400) return "أمس";
+    if (diff < 7 * 86400) return "آخر ٧ أيام";
+    if (diff < 31 * 86400) return "آخر شهر";
+    return "أقدم";
+  }
   async function loadChats(search) {
-    const r = await api("/api/conversations?limit=30" + (search ? "&search=" + encodeURIComponent(search) : ""));
+    const r = await api("/api/conversations?limit=100" + (search ? "&search=" + encodeURIComponent(search) : ""));
+    const convs = r.conversations || [];
     const list = $("#chatList");
-    list.innerHTML = (r.conversations || []).length ? "" : '<div class="muted small">لا محادثات.</div>';
-    (r.conversations || []).forEach((c) => {
+    $("#sessCount").textContent = convs.length + " محادثة";
+    if (!convs.length) { list.innerHTML = '<div class="muted small">لا محادثات بعد. اضغط «➕ محادثة جديدة».</div>'; return; }
+    list.innerHTML = "";
+    let lastGroup = "";
+    convs.forEach((c) => {
+      const g = dateGroup(c.timestamp);
+      if (g !== lastGroup) {
+        lastGroup = g;
+        const h = document.createElement("div");
+        h.className = "date-group"; h.textContent = g;
+        list.appendChild(h);
+      }
       const el = document.createElement("div");
       el.className = "chat-item";
-      el.innerHTML = '<div class="chat-prompt">' + escapeHtml(c.prompt || "") + "</div>" +
-        '<div class="chat-time">' + fmtTime(c.timestamp) + " · " + (c.tools || []).join(", ") + "</div>" +
-        '<div class="chat-resp">' + escapeHtml(c.response || "") + "</div>";
-      el.onclick = () => el.classList.toggle("open");
+      el.innerHTML =
+        '<div class="chat-status">' + ((c.tools || []).length ? "🔧" : "💬") + "</div>" +
+        '<div class="chat-prompt">' + escapeHtml((c.prompt || "").slice(0, 90)) + "</div>" +
+        '<div class="chat-time">' + fmtTime(c.timestamp) + " · " + (c.tools || []).slice(0, 4).join(", ") + "</div>";
+      el.onclick = () => openSession(c);
       list.appendChild(el);
     });
   }
@@ -167,6 +190,49 @@
   $("#chatSearch").addEventListener("input", (e) => {
     clearTimeout(searchT); searchT = setTimeout(() => loadChats(e.target.value), 300);
   });
+
+  // ── عرض/متابعة محادثة ──
+  function openSession(c) {
+    $("#sessionTitle").textContent = (c.prompt || "محادثة").slice(0, 40);
+    const body = $("#sessionBody");
+    body.innerHTML =
+      '<div class="bubble user"><div class="who">أنت</div>' + escapeHtml(c.prompt || "") + "</div>" +
+      '<div class="bubble agent"><div class="who">🕸️ WeaverCode</div>' + escapeHtml(c.response || "(لا رد محفوظ)") + "</div>";
+    $("#sessionFollow").value = "";
+    show("sessionOverlay");
+    body.scrollTop = body.scrollHeight;
+  }
+  $("#sessionSend").onclick = async () => {
+    const v = $("#sessionFollow").value.trim();
+    if (!v) return;
+    const body = $("#sessionBody");
+    body.insertAdjacentHTML("beforeend", '<div class="bubble user"><div class="who">أنت</div>' + escapeHtml(v) + "</div>");
+    $("#sessionFollow").value = "";
+    await api("/api/task", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: v, mode: "main" }) });
+    body.insertAdjacentHTML("beforeend", '<div class="bubble agent"><div class="who">🕸️</div>أُضيفت للطابور — تابع البثّ في تبويب «المباشر».</div>');
+    body.scrollTop = body.scrollHeight;
+  };
+  $("#sessionFollow").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#sessionSend").click(); });
+
+  // ── محادثة جديدة ──
+  function openCompose() { $("#composeInput").value = ""; show("composeOverlay"); setTimeout(() => $("#composeInput").focus(), 50); }
+  $("#fabNew").onclick = openCompose;
+  $("#newSessionTop").onclick = openCompose;
+  $("#composeSend").onclick = async () => {
+    const v = $("#composeInput").value.trim();
+    if (!v) return;
+    await api("/api/task", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: v, mode: $("#composeMode").value }) });
+    hide("composeOverlay");
+    pushFeed("thinking", "بدأت محادثة جديدة", v);
+    // انتقل لتبويب المباشر لمتابعة البثّ
+    document.querySelector('.tab[data-tab="feed"]').click();
+  };
+
+  // إغلاق النوافذ
+  $$("[data-close]").forEach((b) => b.onclick = () => hide(b.dataset.close));
+  $$(".overlay").forEach((o) => o.addEventListener("click", (e) => { if (e.target === o) hide(o.id); }));
+  function show(id) { $("#" + id).classList.remove("hidden"); }
+  function hide(id) { $("#" + id).classList.add("hidden"); }
 
   // ── الإعدادات ──
   async function loadSettings() {
