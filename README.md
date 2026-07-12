@@ -133,7 +133,10 @@ weaver --key groq
 > tools), **plan mode** (`--plan` — plans and asks approval before edits),
 > **Bash sandbox** (blocks catastrophic commands), **lifecycle hooks**
 > (`.claude/hooks.json`), **context compaction** for long chats, **token-level
-> streaming with tools**, and **slash commands** from `.claude/commands/`.
+> streaming with tools**, **slash commands** from `.claude/commands/`, plus
+> **self-healing**: automatic retry on transient network errors and automatic
+> **provider fallback** (`config/providers.json`) when the primary runs out of
+> credit or fails.
 
 ---
 

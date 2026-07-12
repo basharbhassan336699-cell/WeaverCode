@@ -48,6 +48,8 @@ class ProviderConfig:
     proxy: Optional[str] = None
     follow_redirects: bool = True
     timeout: int = 180
+    retries: int = 2
+    retry_base: float = 1.0
     extra_headers: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -72,11 +74,23 @@ class ProviderConfig:
                    or None),
             follow_redirects=_bool("WEAVER_FOLLOW_REDIRECTS", True),
             timeout=int(os.environ.get("WEAVER_TIMEOUT", "180")),
+            retries=int(os.environ.get("WEAVER_RETRIES", "2")),
+            retry_base=float(os.environ.get("WEAVER_RETRY_BASE", "1.0")),
         )
 
 
 class ProviderError(RuntimeError):
     """خطأ اتصال أو استجابة من المزود — رسالته عربية واضحة"""
+
+
+class TransientProviderError(ProviderError):
+    """خطأ عابر (شبكة/DNS/مهلة/429/5xx) — يستحق إعادة المحاولة."""
+
+
+# أكواد خروج curl العابرة: 6 resolve, 7 connect, 28 timeout, 35 ssl, 52 empty, 56 recv
+_CURL_TRANSIENT_CODES = {6, 7, 28, 35, 52, 55, 56}
+# حالات HTTP العابرة (تُعاد المحاولة)؛ ما عداها (401/403/404/رصيد) دائم
+_HTTP_TRANSIENT = {408, 425, 429, 500, 502, 503, 504}
 
 
 class WeaverProvider:
@@ -314,7 +328,22 @@ class WeaverProvider:
         return args
 
     async def _run_curl(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """ينفّذ طلب POST عبر curl ويُرجع الاستجابة كـ JSON (غير متدفق)"""
+        """POST عبر curl مع إعادة محاولة تلقائية للأخطاء العابرة فقط."""
+        attempts = max(1, self.config.retries + 1)
+        delay = self.config.retry_base
+        for i in range(attempts):
+            try:
+                return await self._run_curl_once(url, payload)
+            except TransientProviderError:
+                if i >= attempts - 1:
+                    raise
+                await asyncio.sleep(delay)
+                delay *= 2  # تأخير متصاعد
+        # لن يصل هنا
+        raise ProviderError("❌ فشل غير متوقع في الاتصال.")
+
+    async def _run_curl_once(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """محاولة واحدة عبر curl. يرفع TransientProviderError للأخطاء القابلة للإعادة."""
         args = self._curl_args(url) + ["-w", "\nWEAVER_HTTP_STATUS:%{http_code}"]
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
@@ -331,12 +360,16 @@ class WeaverProvider:
 
         if proc.returncode != 0:
             detail = err.decode("utf-8", "replace").strip() or f"رمز الخروج {proc.returncode}"
-            raise ProviderError(
+            msg = (
                 f"❌ فشل الاتصال بالمزود ({self.config.base_url}).\n"
                 f"   السبب: {detail}\n"
                 f"   تلميح: تحقق من الإنترنت أو من صحة WEAVER_BASE_URL "
                 f"أو اضبط WEAVER_PROXY إذا كنت خلف بروكسي."
             )
+            # أخطاء الشبكة/DNS/المهلة عابرة → أعِد المحاولة
+            if proc.returncode in _CURL_TRANSIENT_CODES:
+                raise TransientProviderError(msg)
+            raise ProviderError(msg)
 
         raw = out.decode("utf-8", "replace")
         status = 0
@@ -398,7 +431,8 @@ class WeaverProvider:
         else:
             hint = hints.get(status, "راجع عنوان المزود والمفتاح والنموذج.")
 
-        raise ProviderError(
+        err_cls = TransientProviderError if status in _HTTP_TRANSIENT else ProviderError
+        raise err_cls(
             f"❌ رفض المزود الطلب (HTTP {status}).\n"
             f"   التفصيل: {snippet}\n"
             f"   تلميح: {hint}"
@@ -566,15 +600,115 @@ class WeaverProvider:
         await self.close()
 
 
+class ResilientProvider:
+    """
+    مزوّد صامد: يجرّب سلسلة مزوّدين بالترتيب.
+    إذا فشل الأساسي (نفاد رصيد/مصادقة/شبكة بعد إعادة المحاولة) ينتقل تلقائياً
+    للمزوّد الاحتياطي التالي — دون تدخّل المستخدم.
+    """
+
+    def __init__(self, providers: List["WeaverProvider"]):
+        if not providers:
+            raise ProviderError("لا يوجد أي مزوّد مُهيّأ.")
+        self.providers = providers
+
+    @property
+    def config(self):
+        # للبانر/العرض: إعدادات المزوّد الأساسي
+        return self.providers[0].config
+
+    async def complete(self, messages, tools=None):
+        errors = []
+        for i, p in enumerate(self.providers):
+            try:
+                return await p.complete(messages, tools)
+            except ProviderError as e:
+                errors.append(f"[{i+1}] {p.config.base_url}: {str(e).splitlines()[0]}")
+                continue
+        raise ProviderError("❌ فشل كل المزوّدين:\n   " + "\n   ".join(errors))
+
+    async def stream_events(self, messages, tools=None):
+        errors = []
+        for i, p in enumerate(self.providers):
+            yielded = False
+            try:
+                async for ev in p.stream_events(messages, tools):
+                    yielded = True
+                    yield ev
+                return
+            except ProviderError as e:
+                if yielded:
+                    raise  # لا يمكن التبديل بعد بدء البثّ
+                errors.append(f"[{i+1}] {p.config.base_url}: {str(e).splitlines()[0]}")
+                continue
+        raise ProviderError("❌ فشل كل المزوّدين:\n   " + "\n   ".join(errors))
+
+    async def stream(self, messages, tools=None):
+        async for ev in self.stream_events(messages, tools):
+            if ev.get("type") == "text":
+                yield ev["text"]
+
+    async def close(self):
+        for p in self.providers:
+            await p.close()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+
+
+def _load_fallback_configs() -> List[ProviderConfig]:
+    """
+    تحميل المزوّدين الاحتياطيين من:
+    1) config/providers.json → {"fallbacks":[{base_url,api_key,model,...}]}
+    2) متغيرات البيئة WEAVER_FALLBACK_BASE_URL / _API_KEY / _MODEL
+    """
+    fallbacks: List[ProviderConfig] = []
+
+    # (1) ملف providers.json
+    from pathlib import Path
+    cfg_path = Path(__file__).resolve().parent.parent.parent / "config" / "providers.json"
+    if cfg_path.exists():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            for item in data.get("fallbacks", []):
+                if not item.get("base_url") or not item.get("api_key"):
+                    continue
+                fallbacks.append(ProviderConfig(
+                    api_key=item["api_key"].strip(),
+                    base_url=item["base_url"].strip(),
+                    model=(item.get("model") or "").strip(),
+                    max_tokens=int(item.get("max_tokens", 8192)),
+                    temperature=float(item.get("temperature", 0.7)),
+                ))
+        except Exception:
+            pass
+
+    # (2) متغير بيئة مبسّط لمزوّد احتياطي واحد
+    fb_url = os.environ.get("WEAVER_FALLBACK_BASE_URL")
+    fb_key = os.environ.get("WEAVER_FALLBACK_API_KEY")
+    fb_model = os.environ.get("WEAVER_FALLBACK_MODEL")
+    if fb_url and fb_key:
+        fallbacks.append(ProviderConfig(
+            api_key=fb_key.strip(), base_url=fb_url.strip(),
+            model=(fb_model or "").strip(),
+        ))
+    return fallbacks
+
+
 def get_provider(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
     **kwargs,
-) -> WeaverProvider:
+):
     """
     مصنع مريح للحصول على مزود جاهز.
     الأولوية: المعاملات المباشرة > متغيرات البيئة.
+    إذا وُجد مزوّدون احتياطيون (providers.json أو WEAVER_FALLBACK_*) يُرجَع
+    ResilientProvider يتنقّل بينهم تلقائياً عند الفشل.
     """
     config = ProviderConfig.from_env()
     if api_key:
@@ -586,4 +720,9 @@ def get_provider(
     for k, v in kwargs.items():
         if hasattr(config, k):
             setattr(config, k, v)
-    return WeaverProvider(config)
+
+    primary = WeaverProvider(config)
+    fallbacks = _load_fallback_configs()
+    if fallbacks:
+        return ResilientProvider([primary] + [WeaverProvider(c) for c in fallbacks])
+    return primary
