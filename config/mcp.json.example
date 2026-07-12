@@ -1,0 +1,17 @@
+{
+  "_ملاحظة": "انسخ هذا الملف إلى config/mcp.json لتفعيل خوادم MCP. كل خادم يُشغّل كعملية stdio، وتُسجَّل أدواته باسم mcp__<server>__<tool>.",
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "env": {},
+      "disabled": true
+    },
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "."],
+      "env": {},
+      "disabled": true
+    }
+  }
+}
