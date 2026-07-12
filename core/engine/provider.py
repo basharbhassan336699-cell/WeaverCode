@@ -463,6 +463,88 @@ class WeaverProvider:
             detail = err.decode("utf-8", "replace").strip() or "خطأ غير معروف"
             raise ProviderError(f"❌ فشل البثّ من المزود: {detail}")
 
+    async def stream_events(
+        self,
+        messages: List[Message],
+        tools: Optional[List[Dict]] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        بثّ مُنمّط على مستوى التوكِن يدعم استدعاءات الأدوات.
+        يُنتج أحداثاً:
+            {"type": "text", "text": "..."}            نصّ تدريجي (توكِن)
+            {"type": "tool_calls", "tool_calls": [...]}  استدعاءات أدوات مكتملة
+            {"type": "done", "finish_reason": "..."}    نهاية الدور
+        صيغة OpenAI: بثّ SSE حقيقي مع تجميع deltas للأدوات.
+        صيغة Anthropic: يعتمد complete() ثم يُصدر الحدث دفعةً (توافق).
+        """
+        # Anthropic: احتياطي موثوق (SSE الخاص به أعقد)
+        if self._is_anthropic():
+            data = await self.complete(messages, tools)
+            msg = data["choices"][0]["message"]
+            if msg.get("content"):
+                yield {"type": "text", "text": msg["content"]}
+            if msg.get("tool_calls"):
+                yield {"type": "tool_calls", "tool_calls": msg["tool_calls"]}
+            yield {"type": "done",
+                   "finish_reason": data["choices"][0].get("finish_reason", "stop")}
+            return
+
+        # OpenAI: بثّ SSE حقيقي
+        payload = self._build_openai_payload(messages, tools, stream=True)
+        args = self._curl_args(self._openai_url(), stream=True)
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        proc = await asyncio.create_subprocess_exec(
+            *args, stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        assert proc.stdin and proc.stdout
+        proc.stdin.write(body)
+        await proc.stdin.drain()
+        proc.stdin.close()
+
+        tool_acc: Dict[int, Dict[str, Any]] = {}   # index -> {id,name,arguments}
+        finish = "stop"
+
+        async for raw_line in proc.stdout:
+            line = raw_line.decode("utf-8", "replace").strip()
+            if not line or not line.startswith("data: "):
+                continue
+            chunk = line[6:]
+            if chunk == "[DONE]":
+                break
+            try:
+                data = json.loads(chunk)
+                choice = data["choices"][0]
+            except (json.JSONDecodeError, KeyError, IndexError):
+                continue
+            if choice.get("finish_reason"):
+                finish = choice["finish_reason"]
+            delta = choice.get("delta", {})
+            if delta.get("content"):
+                yield {"type": "text", "text": delta["content"]}
+            for tcd in delta.get("tool_calls", []) or []:
+                idx = tcd.get("index", 0)
+                slot = tool_acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                if tcd.get("id"):
+                    slot["id"] = tcd["id"]
+                fn = tcd.get("function", {})
+                if fn.get("name"):
+                    slot["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["arguments"] += fn["arguments"]
+
+        await proc.wait()
+
+        if tool_acc:
+            tool_calls = [{
+                "id": v["id"] or f"call_{i}",
+                "type": "function",
+                "function": {"name": v["name"], "arguments": v["arguments"] or "{}"},
+            } for i, v in sorted(tool_acc.items())]
+            yield {"type": "tool_calls", "tool_calls": tool_calls}
+        yield {"type": "done", "finish_reason": finish}
+
     async def close(self):
         """موجود للتوافق — لا يوجد اتصال دائم مع curl"""
         return None

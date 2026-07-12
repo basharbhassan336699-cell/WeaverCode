@@ -488,6 +488,91 @@ class ToolRegistry:
             fn=self._agent,
         ))
 
+        # ── مهام مجدولة (crontab) ────────────────────────────────────────────
+        self._add(Tool(
+            name="CronCreate",
+            description="جدولة مهمة WeaverCode دورية عبر crontab (Linux/Termux)",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "schedule": {"type": "string",
+                                 "description": "تعبير cron مثل '0 9 * * *' (كل يوم 9 صباحاً)"},
+                    "task": {"type": "string", "description": "المهمة التي ستُمرَّر لـ weaver.py"},
+                    "name": {"type": "string", "description": "اسم مميّز للمهمة"},
+                },
+                "required": ["schedule", "task", "name"],
+            },
+            fn=self._cron_create,
+            requires_permission=True,
+        ))
+        self._add(Tool(
+            name="CronList",
+            description="عرض مهام WeaverCode المجدولة",
+            parameters={"type": "object", "properties": {}},
+            fn=self._cron_list,
+        ))
+        self._add(Tool(
+            name="CronDelete",
+            description="حذف مهمة WeaverCode مجدولة بالاسم",
+            parameters={
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+            fn=self._cron_delete,
+            requires_permission=True,
+        ))
+
+        # ── مراقبة (تشغيل أمر حتى ينجح أو تنتهي المهلة) ──────────────────────
+        self._add(Tool(
+            name="Monitor",
+            description=("تشغيل أمر بشكل متكرر حتى ينجح (رمز خروج 0) أو تنتهي المهلة. "
+                         "مفيد لانتظار خدمة أو شرط."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "timeout": {"type": "integer", "default": 60},
+                    "interval": {"type": "integer", "default": 3},
+                },
+                "required": ["command"],
+            },
+            fn=self._monitor,
+            requires_permission=True,
+        ))
+
+        # ── تشخيص لغوي (LSP-lite) ────────────────────────────────────────────
+        self._add(Tool(
+            name="LSP",
+            description=("فحص أخطاء الصياغة/التشخيص لملف كود (Python/JS/JSON) "
+                         "وإرجاع الأخطاء إن وُجدت."),
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+            fn=self._lsp,
+        ))
+
+        # ── وضع التخطيط ──────────────────────────────────────────────────────
+        self._add(Tool(
+            name="EnterPlanMode",
+            description="الدخول في وضع التخطيط: لا تُنفَّذ أي أدوات تعديل حتى تعتمد الخطة",
+            parameters={"type": "object", "properties": {}},
+            fn=lambda: "✅ دخلت وضع التخطيط. خطّط أولاً ثم استدعِ ExitPlanMode.",
+        ))
+        self._add(Tool(
+            name="ExitPlanMode",
+            description=("تقديم الخطة النهائية للمستخدم لاعتمادها قبل التنفيذ. "
+                         "مرّر الخطة في 'plan'."),
+            parameters={
+                "type": "object",
+                "properties": {"plan": {"type": "string", "description": "الخطة المقترحة"}},
+                "required": ["plan"],
+            },
+            fn=lambda plan="": "PLAN_SUBMITTED",  # يعالجها المحرّك خصيصاً
+        ))
+
     # ── تنفيذ الأدوات ────────────────────────────────────────────────────────
 
     def _add(self, tool: Tool):
@@ -524,6 +609,109 @@ class ToolRegistry:
         if asyncio.iscoroutine(result):
             return await result
         return result
+
+    # ── مهام مجدولة عبر crontab ───────────────────────────────────────────────
+
+    _CRON_TAG = "# WEAVER_CRON"
+
+    def _cron_create(self, schedule: str, task: str, name: str) -> str:
+        weaver = str(Path(self.work_dir) / "weaver.py")
+        safe_task = task.replace('"', r'\"')
+        line = f'{schedule} cd {self.work_dir} && python3 {weaver} --yes "{safe_task}"  {self._CRON_TAG} {name}'
+        try:
+            current = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+            existing = current.stdout if current.returncode == 0 else ""
+            lines = [l for l in existing.splitlines()
+                     if not l.strip().endswith(f"{self._CRON_TAG} {name}")]
+            lines.append(line)
+            proc = subprocess.run(["crontab", "-"], input="\n".join(lines) + "\n", text=True,
+                                  capture_output=True)
+            if proc.returncode != 0:
+                return f"تعذّر ضبط crontab: {proc.stderr.strip()}"
+            return f"✅ جُدولت المهمة '{name}' ({schedule})."
+        except FileNotFoundError:
+            return "خطأ: crontab غير متوفر على هذا النظام."
+        except Exception as e:
+            return f"خطأ: {e}"
+
+    def _cron_list(self) -> str:
+        try:
+            current = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+            if current.returncode != 0:
+                return "لا توجد مهام مجدولة."
+            jobs = [l for l in current.stdout.splitlines() if self._CRON_TAG in l]
+            return "\n".join(jobs) if jobs else "لا توجد مهام WeaverCode مجدولة."
+        except FileNotFoundError:
+            return "خطأ: crontab غير متوفر."
+        except Exception as e:
+            return f"خطأ: {e}"
+
+    def _cron_delete(self, name: str) -> str:
+        try:
+            current = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+            if current.returncode != 0:
+                return "لا توجد مهام."
+            lines = current.stdout.splitlines()
+            kept = [l for l in lines if not l.strip().endswith(f"{self._CRON_TAG} {name}")]
+            if len(kept) == len(lines):
+                return f"لم يُعثر على مهمة باسم '{name}'."
+            subprocess.run(["crontab", "-"], input="\n".join(kept) + "\n", text=True)
+            return f"✅ حُذفت المهمة '{name}'."
+        except FileNotFoundError:
+            return "خطأ: crontab غير متوفر."
+        except Exception as e:
+            return f"خطأ: {e}"
+
+    # ── مراقبة: تشغيل أمر حتى ينجح أو تنتهي المهلة ─────────────────────────────
+
+    def _monitor(self, command: str, timeout: int = 60, interval: int = 3) -> str:
+        danger = self._is_dangerous_command(command)
+        if danger:
+            return f"🛑 رُفض أمر المراقبة لخطورته (النمط: {danger})."
+        import time as _time
+        start = _time.time()
+        attempts = 0
+        last = ""
+        while _time.time() - start < timeout:
+            attempts += 1
+            try:
+                r = subprocess.run(command, shell=True, capture_output=True, text=True,
+                                   timeout=min(timeout, 30), cwd=self.work_dir)
+                last = (r.stdout or "") + (r.stderr or "")
+                if r.returncode == 0:
+                    return f"✅ نجح بعد {attempts} محاولة:\n{last[:2000]}"
+            except subprocess.TimeoutExpired:
+                last = "(انتهت مهلة المحاولة)"
+            _time.sleep(interval)
+        return f"⏱️ لم ينجح خلال {timeout}ث ({attempts} محاولة). آخر إخراج:\n{last[:2000]}"
+
+    # ── تشخيص لغوي بسيط (LSP-lite) ────────────────────────────────────────────
+
+    def _lsp(self, path: str) -> str:
+        p = Path(path)
+        if not p.exists():
+            return f"الملف غير موجود: {path}"
+        ext = p.suffix.lower()
+        try:
+            if ext == ".py":
+                r = subprocess.run(["python3", "-m", "py_compile", str(p)],
+                                   capture_output=True, text=True, timeout=30)
+                return "✅ لا أخطاء صياغة." if r.returncode == 0 else f"❌ أخطاء:\n{r.stderr.strip()}"
+            if ext in (".js", ".mjs", ".cjs"):
+                r = subprocess.run(["node", "--check", str(p)],
+                                   capture_output=True, text=True, timeout=30)
+                return "✅ لا أخطاء صياغة." if r.returncode == 0 else f"❌ أخطاء:\n{r.stderr.strip()}"
+            if ext == ".json":
+                try:
+                    json.loads(p.read_text(encoding="utf-8"))
+                    return "✅ JSON صالح."
+                except json.JSONDecodeError as e:
+                    return f"❌ JSON غير صالح: {e}"
+            return f"لا يوجد فاحص متاح للامتداد '{ext}'. المدعوم: .py .js .json"
+        except FileNotFoundError as e:
+            return f"الفاحص غير مثبّت: {e}"
+        except Exception as e:
+            return f"خطأ: {e}"
 
     # ── تنفيذ كل أداة ────────────────────────────────────────────────────────
 
@@ -648,7 +836,35 @@ class ToolRegistry:
         except Exception as e:
             return f"خطأ: {e}"
 
+    # أنماط أوامر كارثية تُرفض دائماً (حتى لو وافق المستخدم بالخطأ)
+    _BASH_DENY = [
+        r"\brm\s+-rf?\s+(?:--no-preserve-root\s+)?/(?:\s|$|\*)",  # rm -rf /
+        r":\(\)\s*\{\s*:\|:&\s*\}\s*;\s*:",                      # fork bomb
+        r"\bmkfs\.",                                              # تهيئة قرص
+        r"\bdd\b[^\n]*\bof=/dev/(?:sd|nvme|mmcblk|disk)",        # dd على قرص
+        r">\s*/dev/(?:sd|nvme|mmcblk)",                          # كتابة على قرص
+        r"\bchmod\s+-R?\s*777\s+/(?:\s|$)",                      # chmod 777 /
+        r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:bash|sh)\b",  # تنزيل ثم تنفيذ
+    ]
+
+    def _is_dangerous_command(self, command: str) -> Optional[str]:
+        """يُرجع سبب الرفض إن كان الأمر كارثياً، وإلا None."""
+        for pat in self._BASH_DENY:
+            if re.search(pat, command):
+                return pat
+        return None
+
     def _bash(self, command: str, timeout: int = 120, work_dir: Optional[str] = None) -> str:
+        # ── حماية (sandbox خفيف): رفض الأوامر الكارثية دائماً ────────────────
+        danger = self._is_dangerous_command(command)
+        if danger:
+            return ("🛑 رُفض الأمر لأنه يطابق نمطاً خطيراً جداً "
+                    f"(قد يُتلف النظام أو البيانات). النمط: {danger}\n"
+                    "إن كنت متأكداً فنفّذه يدوياً خارج WeaverCode.")
+        # في وضع sandbox: امنع sudo وحصر التنفيذ داخل مجلد العمل
+        if os.environ.get("WEAVER_BASH_SANDBOX", "0").strip().lower() in ("1", "true", "yes", "on"):
+            if re.search(r"\bsudo\b", command):
+                return "🛑 وضع sandbox: أوامر sudo ممنوعة."
         try:
             result = subprocess.run(
                 command, shell=True, capture_output=True, text=True,

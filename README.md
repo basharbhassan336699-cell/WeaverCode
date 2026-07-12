@@ -113,24 +113,27 @@ weaver --key groq
 
 ---
 
-## Built-in Tools (27 built-in + MCP)
+## Built-in Tools (34 built-in + MCP)
 
 | Category | Tools |
 |----------|-------|
 | **Files** | Read, Write, Edit, MultiEdit, Glob, Grep |
-| **Execution** | Bash, PythonRun, PipInstall |
+| **Execution** | Bash (sandboxed), PythonRun, PipInstall, Monitor |
 | **Memory** | MemorySave, MemorySearch, MemoryDelete, MemoryList |
 | **Tasks** | TaskCreate, TaskList, TaskUpdate |
+| **Scheduling** | CronCreate, CronList, CronDelete |
 | **Web** | WebFetch, WebSearch |
 | **Git** | GitStatus, GitClone, GitCommit, GitPush |
-| **Agents** | Agent (subagents) |
+| **Agents/Planning** | Agent (subagents), EnterPlanMode, ExitPlanMode |
+| **Code** | LSP (diagnostics) |
 | **System** | EnvSet, EnvGet, DirectoryList, AskUser |
 | **External** | Any MCP server tool (`mcp__<server>__<tool>`) |
 
 > Additional capabilities: a real **permission system** (asks before dangerous
-> tools), **lifecycle hooks** (`.claude/hooks.json`), **context compaction** for
-> long chats, **streaming with tools**, and **slash commands** loaded from
-> `.claude/commands/`.
+> tools), **plan mode** (`--plan` — plans and asks approval before edits),
+> **Bash sandbox** (blocks catastrophic commands), **lifecycle hooks**
+> (`.claude/hooks.json`), **context compaction** for long chats, **token-level
+> streaming with tools**, and **slash commands** from `.claude/commands/`.
 
 ---
 
