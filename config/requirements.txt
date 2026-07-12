@@ -17,9 +17,8 @@ beautifulsoup4>=4.12.0 # تحليل HTML
 lxml>=5.0.0            # محلل XML/HTML سريع
 
 # ── لوحة الويب (weaver --web / --background) ──
-fastapi>=0.110.0       # خادم الـ Dashboard
-uvicorn>=0.27.0        # تشغيل ASGI
-# (يُثبَّتان تلقائياً عند أول تشغيل للوحة إن لم يوجدا)
+# لا تبعيات! الخادم مبني على مكتبة بايثون القياسية (http.server)
+# فيعمل على Termux/أندرويد مباشرةً دون fastapi/Rust.
 
 # ── Python الأساسي (مدمج — لا يحتاج تثبيت) ──
 # asyncio, sqlite3, json, os, pathlib, subprocess

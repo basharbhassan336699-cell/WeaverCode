@@ -96,10 +96,10 @@
     if (on) { bar.classList.remove("hidden"); $("#activityText").textContent = text || "Still working on it..."; }
     else bar.classList.add("hidden");
   }
-  function connectWS() {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(proto + "://" + location.host + "/ws");
-    ws.onmessage = (ev) => {
+  function connectSSE() {
+    // Server-Sent Events — يعمل عبر HTTP عادي (بلا WebSocket، بلا تبعيات)
+    const es = new EventSource("/events");
+    es.onmessage = (ev) => {
       let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
       pushFeed(d.type, d.message, d.detail);
       if (["thinking", "tool_start", "file_view", "file_edit", "file_create", "bash_run"].includes(d.type))
@@ -112,9 +112,9 @@
         }
       }
     };
-    ws.onclose = () => setTimeout(connectWS, 2000);
+    es.onerror = () => { /* EventSource يعيد الاتصال تلقائياً */ };
   }
-  connectWS();
+  connectSSE();
 
   // ── الملفات ──
   let allFiles = []; let curFilter = "all";
