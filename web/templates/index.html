@@ -34,7 +34,7 @@
   <!-- Terminal Bar -->
   <div class="terminal-bar">
     <span class="prompt-sign">&gt;_</span>
-    <input id="cmdInput" type="text" placeholder="اكتب مهمة أو /model groq /key … /provider deepseek /status" autocomplete="off"/>
+    <input id="cmdInput" type="text" placeholder="اكتب مهمة… أو /help للأوامر" autocomplete="off"/>
     <button id="sendBtn" class="send-btn">إرسال</button>
   </div>
 
@@ -50,6 +50,7 @@
   <main class="content">
     <!-- Live Feed -->
     <section id="tab-feed" class="tabpane active">
+      <div id="feedEmpty" class="note">🕸️ ابدأ بكتابة مهمة في الأعلى أو اضغط «➕ محادثة جديدة». ستظهر خطوات WeaverCode هنا مباشرةً أثناء العمل.</div>
       <div id="feed" class="feed"></div>
     </section>
 
@@ -111,6 +112,7 @@
 
     <!-- GitHub -->
     <section id="tab-github" class="tabpane">
+      <div class="note">🔒 يقرأ مستودع <b>git المحلي على جهازك</b> فقط (نفس ما يظهره الأمر <code>git</code>). لا يدخل حساب GitHub ولا يحتاج كلمة مرور.</div>
       <div id="ghInfo" class="muted small"></div>
       <ul id="ghCommits" class="commits"></ul>
       <div class="row">

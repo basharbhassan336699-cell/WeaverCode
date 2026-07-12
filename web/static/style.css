@@ -82,8 +82,25 @@ body {
   padding: 8px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap; font-size: 14px; }
 .tab.active { background: var(--bg-card); color: var(--orange); }
 
-.content { padding: 16px; max-width: 900px; margin: 0 auto; }
+.content { padding: 16px 16px 100px; max-width: 900px; margin: 0 auto; }
 .tabpane { display: none; } .tabpane.active { display: block; }
+
+/* ملاحظة توضيحية */
+.note { background: var(--bg-card); border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--orange); border-radius: 8px;
+  padding: 10px 12px; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+.note code { background: var(--bg-primary); padding: 1px 5px; border-radius: 4px; }
+
+/* عرض Markdown */
+code { background: var(--bg-primary); border: 1px solid var(--border);
+  padding: 1px 5px; border-radius: 4px; font-family: monospace; font-size: .92em; }
+pre.code { background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px; overflow-x: auto; font-family: monospace;
+  font-size: 12.5px; direction: ltr; text-align: left; margin: 6px 0; white-space: pre; }
+.li-num { display: block; }
+.bubble a, .fi-detail a { color: var(--orange-light); }
+.feed-item.is-response { border-inline-start: 3px solid var(--orange); }
+.feed-item.is-response .fi-detail { color: var(--text-primary); margin-top: 6px; line-height: 1.6; }
 
 .feed { display: flex; flex-direction: column; gap: 8px; }
 .feed-item { background: var(--bg-card); border: 1px solid var(--border);

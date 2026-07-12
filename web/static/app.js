@@ -83,11 +83,15 @@
   };
   function pushFeed(type, message, detail) {
     const feed = $("#feed");
+    const empty = $("#feedEmpty"); if (empty) empty.style.display = "none";
     const el = document.createElement("div");
-    el.className = "feed-item";
+    el.className = "feed-item" + (type === "response" ? " is-response" : "");
+    // ردود الوكيل تُعرض بتنسيق Markdown؛ الباقي كنص خام مُهرَّب
+    const detailHtml = detail
+      ? '<div class="fi-detail">' + (type === "response" ? md(detail) : escapeHtml(detail)) + "</div>"
+      : "";
     el.innerHTML = '<span class="fi-icon">' + (ICONS[type] || "•") + "</span>" +
-      "<span>" + escapeHtml(message) + "</span>" +
-      (detail ? '<div class="fi-detail">' + escapeHtml(detail) + "</div>" : "");
+      "<span>" + escapeHtml(type === "response" ? "رد WeaverCode" : message) + "</span>" + detailHtml;
     feed.prepend(el);
     while (feed.children.length > 100) feed.removeChild(feed.lastChild);
   }
@@ -197,7 +201,7 @@
     const body = $("#sessionBody");
     body.innerHTML =
       '<div class="bubble user"><div class="who">أنت</div>' + escapeHtml(c.prompt || "") + "</div>" +
-      '<div class="bubble agent"><div class="who">🕸️ WeaverCode</div>' + escapeHtml(c.response || "(لا رد محفوظ)") + "</div>";
+      '<div class="bubble agent"><div class="who">🕸️ WeaverCode</div>' + md(c.response || "(لا رد محفوظ)") + "</div>";
     $("#sessionFollow").value = "";
     show("sessionOverlay");
     body.scrollTop = body.scrollHeight;
@@ -273,6 +277,7 @@
     $("#ghCommits").innerHTML = (r.commits || []).map((c) => "<li>" + escapeHtml(c) + "</li>").join("");
   }
   $("#ghPush").onclick = async () => {
+    if (!confirm("سيُنفَّذ: git add -A ثم commit ثم push إلى مستودعك المحلي. متابعة؟")) return;
     $("#ghOutput").textContent = "…جارٍ الرفع";
     const r = await api("/api/github/push", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -286,4 +291,19 @@
   function humanSize(n) { if (n < 1024) return n + " B"; if (n < 1048576) return (n / 1024).toFixed(1) + " KB"; if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB"; return (n / 1073741824).toFixed(2) + " GB"; }
   function fmtTime(ts) { if (!ts) return ""; const d = new Date(ts * 1000); return d.toLocaleString("ar"); }
   function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  // عرض Markdown مبسّط وآمن (يُهرَّب HTML أولاً ثم يُنسَّق)
+  function md(s) {
+    let t = escapeHtml(String(s == null ? "" : s));
+    t = t.replace(/```([\s\S]*?)```/g, (m, c) => '<pre class="code">' + c.replace(/^\n/, "") + "</pre>");
+    t = t.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+    t = t.replace(/^#{1,6}\s?(.*)$/gm, "<b>$1</b>");
+    t = t.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+    t = t.replace(/^\s*[-*]\s+(.*)$/gm, "• $1");
+    t = t.replace(/^\s*\d+\.\s+(.*)$/gm, "<span class='li-num'>$&</span>");
+    t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    t = t.replace(/\n/g, "<br>");
+    return t;
+  }
+  window.__md = md;
 })();
