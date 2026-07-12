@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: اختبار WeaverCode (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: استنساخ المستودع
+        uses: actions/checkout@v4
+
+      - name: تهيئة Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: تثبيت التبعيات
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          if [ -f config/requirements.txt ]; then pip install -r config/requirements.txt; fi
+
+      - name: فحص الصياغة (py_compile)
+        run: |
+          python -m py_compile weaver.py \
+            core/*.py core/engine/*.py core/tools/*.py core/memory/*.py \
+            prompts/*.py
+
+      - name: تشغيل الاختبارات
+        run: python -m pytest tests/ -q

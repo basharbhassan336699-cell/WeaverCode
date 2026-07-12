@@ -2,8 +2,11 @@
 # pip install -r config/requirements.txt --break-system-packages
 
 # ── الأساسيات ────────────────────────────────
-httpx>=0.27.0          # HTTP client async
-python-dotenv>=1.0.0   # قراءة .env
+# ملاحظة: المزوّد يستخدم curl داخلياً (لا httpx)، فلا تبعية شبكة إلزامية.
+python-dotenv>=1.0.0   # قراءة .env (اختياري — weaver.py يحمّل .env بنفسه)
+
+# ── التطوير/الاختبار ─────────────────────────
+# pytest>=7.0.0        # لتشغيل tests/ (فعّلها للتطوير)
 
 # ── اختياري للواجهة التفاعلية ────────────────
 rich>=13.0.0           # تنسيق جميل للـ terminal
