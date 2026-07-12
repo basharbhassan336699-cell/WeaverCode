@@ -1,5 +1,19 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## v1.9.1 — لوحة الويب بلا تبعيات (إصلاح Termux)
+
+### أُصلح
+- **`web/server.py`** — إعادة كتابة الخادم على **مكتبة بايثون القياسية فقط**
+  (`http.server`) بدل FastAPI. السبب: FastAPI تعتمد `pydantic-core` التي تحتاج
+  مترجم Rust ليُبنى على Termux/أندرويد (aarch64)، فكان تثبيتها يفشل
+  (`Failed to build pydantic-core` / `Rust not found`) ولا يبدأ الخادم
+  (`ERR_CONNECTION_REFUSED`). الآن يعمل على Termux مباشرةً **دون أي تثبيت**.
+  - البثّ الحيّ صار عبر **SSE** (Server-Sent Events) بدل WebSocket (`app.js`
+    يستخدم `EventSource`) — يعمل عبر HTTP عادي.
+  - تحميل الملفات بلا حدّ محفوظ (بثّ 1MB/دفعة — تم التحقق بملف **800MB**)،
+    وحماية path traversal، والـ daemon يعمل في خيط خلفي مع جسر أحداث آمن.
+- حُذفت تبعيتا fastapi/uvicorn من `requirements.txt`.
+
 ## v1.9.0 — لوحة الويب + وضع الخلفية
 
 ### أُضيف
