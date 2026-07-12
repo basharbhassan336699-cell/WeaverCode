@@ -80,6 +80,21 @@ _SANITIZE_FULL = [
 _DEDUP = re.compile(r"\bWeaverCode(?:\s+WeaverCode)+\b")
 
 
+# ── صلاحيات تنفيذ الأدوات ─────────────────────────────────────────────────────
+# طبقة أمان محلية بحتة (لا علاقة لها بالمزوّد أو المفتاح أو النموذج):
+# قبل تنفيذ أداة خطرة (Bash/Write/Edit/GitPush/PipInstall...) يُطلب إذن المستخدم.
+# التحكم: WEAVER_AUTO_APPROVE=1 لتعطيل السؤال (وضع تلقائي).
+PERM_ALLOW_ONCE = "allow_once"
+PERM_ALLOW_ALWAYS = "allow_always"
+PERM_DENY = "deny"
+
+
+def _auto_approve_enabled() -> bool:
+    return os.environ.get("WEAVER_AUTO_APPROVE", "0").strip().lower() in (
+        "1", "true", "yes", "on", "نعم"
+    )
+
+
 def _sanitize_identity(text: str) -> str:
     """تنقية أي تسريب لهوية أخرى من نص الرد النهائي."""
     if not text:
@@ -127,6 +142,29 @@ class QueryEngine:
         self.memory = memory or MemoryStore()
         self.system_prompt = system_prompt or self._default_system()
         self.max_turns = max_turns
+        # صلاحيات: قائمة سماح للجلسة + وضع الموافقة التلقائية
+        self.auto_approve = _auto_approve_enabled()
+        self.session_allow: set = set()
+
+    def _tool_pre_approved(self, name: str) -> bool:
+        """هل الأداة مسموحة مسبقاً (وضع تلقائي أو سُمح بها في هذه الجلسة)؟"""
+        return self.auto_approve or name in self.session_allow
+
+    def _request_permission(
+        self,
+        name: str,
+        args: Dict[str, Any],
+        on_permission: Optional[Callable[[str, Dict], str]],
+    ) -> str:
+        """طلب إذن تنفيذ أداة. يُرجع أحد PERM_*"""
+        if on_permission is None:
+            # لا توجد واجهة للسؤال → الافتراض الآمن: رفض (ما لم يكن الوضع تلقائياً)
+            return PERM_ALLOW_ONCE if self.auto_approve else PERM_DENY
+        try:
+            decision = on_permission(name, args)
+        except (EOFError, KeyboardInterrupt):
+            return PERM_DENY
+        return decision or PERM_DENY
 
     def _default_system(self) -> str:
         """البروموه الافتراضي — يستعمل بروموه الوضع الرئيسي مع قلب الهوية.
@@ -152,15 +190,18 @@ class QueryEngine:
         history: Optional[List[Message]] = None,
         on_text: Optional[Callable[[str], None]] = None,
         on_tool: Optional[Callable[[str, Dict], None]] = None,
+        on_permission: Optional[Callable[[str, Dict], str]] = None,
     ) -> QueryResult:
         """
         تشغيل الحلقة الوكيلية الكاملة
-        
+
         Args:
             prompt: المهمة المطلوبة
             history: سجل المحادثة السابق
             on_text: callback عند وصول نص
             on_tool: callback عند تنفيذ أداة
+            on_permission: callback لطلب إذن تنفيذ أداة خطرة؛
+                يُرجع "allow_once" | "allow_always" | "deny"
         Returns:
             QueryResult مع النتيجة النهائية
         """
@@ -228,6 +269,24 @@ class QueryEngine:
 
                 if on_tool:
                     on_tool(tool_name, args)
+
+                # ── فحص الصلاحية قبل تنفيذ الأدوات الخطرة ─────────────────────
+                if self.tools.requires_permission(tool_name) and \
+                        not self._tool_pre_approved(tool_name):
+                    decision = self._request_permission(tool_name, args, on_permission)
+                    if decision == PERM_ALLOW_ALWAYS:
+                        self.session_allow.add(tool_name)
+                    if decision == PERM_DENY:
+                        tool_results.append(
+                            Message(
+                                role="tool",
+                                content=("🚫 رفض المستخدم تنفيذ هذه الأداة. "
+                                         "لا تُعد المحاولة؛ اقترح بديلاً أو اسأل المستخدم."),
+                                tool_call_id=tool_id,
+                                name=tool_name,
+                            )
+                        )
+                        continue
 
                 try:
                     tool_output = await self.tools.execute(tool_name, args)

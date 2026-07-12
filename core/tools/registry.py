@@ -446,6 +446,17 @@ class ToolRegistry:
     def get_schema(self) -> List[Dict]:
         return [t.to_schema() for t in self._tools.values()]
 
+    def get_tool(self, name: str) -> Optional[Tool]:
+        """إرجاع تعريف الأداة (أو None إن لم توجد)"""
+        return self._tools.get(name)
+
+    def requires_permission(self, name: str) -> bool:
+        """هل تحتاج الأداة إذناً قبل التنفيذ؟ (الأدوات المجهولة تُعتبر خطرة)"""
+        tool = self._tools.get(name)
+        if tool is None:
+            return True
+        return tool.requires_permission
+
     async def execute(self, name: str, args: Dict[str, Any]) -> Any:
         if name not in self._tools:
             return f"خطأ: الأداة '{name}' غير موجودة"

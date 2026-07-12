@@ -26,8 +26,48 @@ from core.ui import (
     draw_welcome, draw_split_header, draw_tool_call,
     draw_response, draw_error, draw_success, draw_info,
     draw_stats, draw_prompt, draw_separator, clear_line,
-    Spinner, ORANGE, GRAY, RESET, BOLD
+    draw_permission_request, Spinner, ORANGE, GRAY, RESET, BOLD
 )
+
+
+# ── مفاتيح المعاينة لكل أداة عند طلب الصلاحية ────────────────────────────────
+_PERMISSION_PREVIEW_KEYS = ("command", "cmd", "path", "file_path", "package",
+                            "url", "message", "key", "value")
+
+
+def _permission_preview(args: dict) -> str:
+    """اختيار أهم وسيط لعرضه في طلب الصلاحية"""
+    if not args:
+        return ""
+    for k in _PERMISSION_PREVIEW_KEYS:
+        if k in args and args[k]:
+            return str(args[k])
+    return str(list(args.values())[0])
+
+
+def make_permission_handler(spinner=None):
+    """
+    بناء دالة طلب الصلاحية التفاعلية.
+    تُرجع "allow_once" | "allow_always" | "deny".
+    """
+    def on_permission(name, args):
+        # لا تسأل أبداً في سياق غير تفاعلي (أنبوب/أتمتة) — الافتراض الآمن: رفض.
+        # للأتمتة استخدم --yes أو WEAVER_AUTO_APPROVE=1.
+        if not sys.stdin.isatty():
+            return "deny"
+        if spinner is not None:
+            spinner.clear()
+        draw_permission_request(name, _permission_preview(args))
+        try:
+            choice = input(f"  {ORANGE}اختيارك [y/a/n]:{RESET} ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return "deny"
+        if choice in ("y", "yes", "نعم", "ن"):
+            return "allow_once"
+        if choice in ("a", "always", "دائم", "د"):
+            return "allow_always"
+        return "deny"
+    return on_permission
 
 
 def load_env():
@@ -89,9 +129,12 @@ async def run_once(prompt: str, mode: str = "main", stream: bool = False):
             key_arg = str(list(args.values())[0]) if args else ""
             draw_tool_call(name, key_arg)
 
+        on_permission = make_permission_handler(spinner)
+
         spinner.start()
         try:
-            result = await engine.run(prompt, on_tool=on_tool)
+            result = await engine.run(prompt, on_tool=on_tool,
+                                      on_permission=on_permission)
         finally:
             await spinner.stop()
 
@@ -163,9 +206,12 @@ async def interactive_mode():
             key_arg = str(list(args.values())[0]) if args else ""
             draw_tool_call(name, key_arg)
 
+        on_permission = make_permission_handler(spinner)
+
         spinner.start()
         try:
-            result = await engine.run(prompt, history=history, on_tool=on_tool)
+            result = await engine.run(prompt, history=history, on_tool=on_tool,
+                                      on_permission=on_permission)
         finally:
             await spinner.stop()
 
@@ -201,6 +247,8 @@ def main():
     parser.add_argument("--model", help="اسم النموذج (يتجاوز WEAVER_MODEL)")
     parser.add_argument("--key", help="مفتاح API (يتجاوز WEAVER_API_KEY)")
     parser.add_argument("--url", help="عنوان API (يتجاوز WEAVER_BASE_URL)")
+    parser.add_argument("--yes", "-y", action="store_true",
+                        help="الموافقة التلقائية على كل الأدوات دون سؤال (احذر)")
     parser.add_argument("--version", "-v", action="store_true",
                         help="عرض إصدار WeaverCode والخروج")
     parser.add_argument("--print-system", action="store_true",
@@ -218,6 +266,8 @@ def main():
         os.environ["WEAVER_API_KEY"] = args.key
     if args.url:
         os.environ["WEAVER_BASE_URL"] = args.url
+    if args.yes:
+        os.environ["WEAVER_AUTO_APPROVE"] = "1"
 
     # ── تشخيص: عرض الإصدار ──────────────────────────────────────────────────
     if args.version:
@@ -228,6 +278,8 @@ def main():
         print(f"    النموذج:  {os.environ.get('WEAVER_MODEL', 'غير محدد')}")
         print(f"    المزود:   {os.environ.get('WEAVER_BASE_URL', 'غير محدد')}")
         print(f"    حارس الهوية: {guard}")
+        auto = os.environ.get("WEAVER_AUTO_APPROVE", "0").lower() in ("1", "true", "yes", "on", "نعم")
+        print(f"    الصلاحيات: {'موافقة تلقائية (بلا سؤال)' if auto else 'تسأل قبل الأدوات الخطرة'}")
         return
 
     # ── تشخيص: طباعة البروموه النظامي الفعلي ────────────────────────────────

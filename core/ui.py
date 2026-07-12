@@ -372,6 +372,21 @@ def draw_separator():
     print(f"{OR}{'·' * max(60, term_width())}{RST}")
 
 
+def draw_permission_request(name: str, preview: str = ""):
+    """عرض صندوق طلب صلاحية قبل تنفيذ أداة خطرة"""
+    w = max(44, min(term_width(), 64))
+    p = f"  {DIM}{preview[:80]}{RST}" if preview else ""
+    print(f"\n{OR}{'─' * w}{RST}")
+    print(f"  {OR}{BLD}🔐 طلب صلاحية{RST}")
+    print(f"  {GRY}الأداة:{RST} {OR}{name}{RST}")
+    if p:
+        print(p)
+    print(f"  {GRN}[y]{RST} سماح مرة   "
+          f"{OR}[a]{RST} سماح دائم   "
+          f"{RED}[n]{RST} رفض")
+    print(f"{OR}{'─' * w}{RST}")
+
+
 # ── مؤشر تفكير غير متزامن (Spinner) ───────────────────────────────────────
 
 class Spinner:
