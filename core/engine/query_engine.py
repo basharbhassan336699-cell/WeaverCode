@@ -138,6 +138,7 @@ class QueryEngine:
         max_turns: int = MAX_TURNS,
         hooks: Optional[Any] = None,
         depth: int = 0,
+        plan_mode: bool = False,
     ):
         self.provider = provider or get_provider()
         self.tools = tool_registry or ToolRegistry()
@@ -147,6 +148,9 @@ class QueryEngine:
         # صلاحيات: قائمة سماح للجلسة + وضع الموافقة التلقائية
         self.auto_approve = _auto_approve_enabled()
         self.session_allow: set = set()
+        # وضع التخطيط: لا تُنفَّذ أدوات التعديل حتى تُعتمد الخطة
+        self.plan_mode = plan_mode or os.environ.get(
+            "WEAVER_PLAN_MODE", "0").strip().lower() in ("1", "true", "yes", "on")
         # hooks دورة الحياة (اختياري)
         self.hooks = hooks
         # الوكلاء الفرعيون: عمق الاستدعاء الحالي وحدّه الأقصى
@@ -269,6 +273,7 @@ class QueryEngine:
         on_text: Optional[Callable[[str], None]] = None,
         on_tool: Optional[Callable[[str, Dict], None]] = None,
         on_permission: Optional[Callable[[str, Dict], str]] = None,
+        on_plan: Optional[Callable[[str], bool]] = None,
     ) -> QueryResult:
         """
         تشغيل الحلقة الوكيلية الكاملة
@@ -354,6 +359,36 @@ class QueryEngine:
 
                 if on_tool:
                     on_tool(tool_name, args)
+
+                # ── وضع التخطيط ──────────────────────────────────────────────
+                if tool_name == "EnterPlanMode":
+                    self.plan_mode = True
+                    tool_results.append(Message(role="tool",
+                        content="✅ وضع التخطيط مُفعّل. خطّط دون تنفيذ ثم استدعِ ExitPlanMode(plan).",
+                        tool_call_id=tool_id, name=tool_name))
+                    continue
+                if tool_name == "ExitPlanMode":
+                    plan_text = args.get("plan", "") if isinstance(args, dict) else ""
+                    approved = True
+                    if on_plan:
+                        approved = bool(on_plan(plan_text))
+                    if approved:
+                        self.plan_mode = False
+                        tool_results.append(Message(role="tool",
+                            content="✅ اعتمد المستخدم الخطة. نفّذها الآن خطوةً خطوة.",
+                            tool_call_id=tool_id, name=tool_name))
+                    else:
+                        tool_results.append(Message(role="tool",
+                            content="🚫 لم يعتمد المستخدم الخطة. عدّلها وفق ملاحظاته ثم أعد العرض.",
+                            tool_call_id=tool_id, name=tool_name))
+                    continue
+                # في وضع التخطيط: امنع أدوات التعديل (اسمح بالقراءة للبحث)
+                if self.plan_mode and self.tools.requires_permission(tool_name):
+                    tool_results.append(Message(role="tool",
+                        content=("🔬 أنت في وضع التخطيط: لا تنفّذ أدوات التعديل الآن. "
+                                 "ابحث بأدوات القراءة، جهّز خطة، ثم استدعِ ExitPlanMode(plan)."),
+                        tool_call_id=tool_id, name=tool_name))
+                    continue
 
                 # ── فحص الصلاحية قبل تنفيذ الأدوات الخطرة ─────────────────────
                 if self.tools.requires_permission(tool_name) and \
@@ -447,33 +482,35 @@ class QueryEngine:
 
         while turns < self.max_turns:
             turns += 1
+
+            # بثّ حقيقي على مستوى التوكِن + تجميع استدعاءات الأدوات
+            text_buf = ""
+            tool_calls: List[Dict[str, Any]] = []
+            finish_reason = "stop"
             try:
-                response = await self.provider.complete(messages, tools=tools_schema)
+                async for ev in self.provider.stream_events(messages, tools=tools_schema):
+                    if ev["type"] == "text":
+                        text_buf += ev["text"]
+                        yield _sanitize_identity(ev["text"])
+                    elif ev["type"] == "tool_calls":
+                        tool_calls = ev["tool_calls"]
+                    elif ev["type"] == "done":
+                        finish_reason = ev.get("finish_reason", "stop")
             except Exception as e:
                 yield _sanitize_identity(f"\n❌ خطأ: {e}")
                 break
 
-            choice = response["choices"][0]
-            msg = choice["message"]
-            finish_reason = choice.get("finish_reason", "stop")
+            messages.append(Message(role="assistant", content=text_buf,
+                                    tool_calls=tool_calls or None))
 
-            messages.append(Message(
-                role="assistant",
-                content=msg.get("content") or "",
-                tool_calls=msg.get("tool_calls"),
-            ))
-
-            # لا أدوات → هذا هو الرد النهائي؛ ابثّه كلمةً كلمة
-            if finish_reason == "stop" or not msg.get("tool_calls"):
-                final_text = msg.get("content") or ""
-                clean = _sanitize_identity(final_text)
-                for word in clean.split(" "):
-                    yield word + " "
+            # لا أدوات → انتهى الرد النهائي (بُثّ فعلاً أعلاه)
+            if finish_reason == "stop" or not tool_calls:
+                final_text = text_buf
                 break
 
             # تنفيذ الأدوات (مع الصلاحيات وhooks)
             tool_results = []
-            for tc in msg["tool_calls"]:
+            for tc in tool_calls:
                 tool_name = tc["function"]["name"]
                 tool_id = tc["id"]
                 try:

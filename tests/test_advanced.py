@@ -123,18 +123,20 @@ def test_subagent_runs(monkeypatch):
 
 
 class _StreamMock:
+    """يحاكي stream_events: أول دور استدعاء أداة، ثم نصّ نهائي مبثوث."""
     def __init__(self):
         self.n = 0
 
-    async def complete(self, messages, tools=None):
+    async def stream_events(self, messages, tools=None):
         self.n += 1
         if self.n == 1:
-            return {"choices": [{"message": {"role": "assistant", "content": "",
-                    "tool_calls": [{"id": "s1", "type": "function", "function": {
-                        "name": "Glob", "arguments": json.dumps({"pattern": "*.py"})}}]},
-                    "finish_reason": "tool_calls"}]}
-        return {"choices": [{"message": {"role": "assistant",
-                "content": "تمّت القراءة"}, "finish_reason": "stop"}]}
+            yield {"type": "tool_calls", "tool_calls": [{"id": "s1", "type": "function",
+                   "function": {"name": "Glob", "arguments": json.dumps({"pattern": "*.py"})}}]}
+            yield {"type": "done", "finish_reason": "tool_calls"}
+            return
+        for tok in ["تمّت", " القراءة"]:
+            yield {"type": "text", "text": tok}
+        yield {"type": "done", "finish_reason": "stop"}
 
 
 def test_streaming_runs_tools():

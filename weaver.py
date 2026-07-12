@@ -48,6 +48,25 @@ def _permission_preview(args: dict) -> str:
     return str(list(args.values())[0])
 
 
+def make_plan_handler(spinner=None):
+    """بناء دالة اعتماد الخطة التفاعلية. تُرجع True (اعتماد) أو False (رفض)."""
+    def on_plan(plan_text):
+        if spinner is not None:
+            spinner.clear()
+        print(f"\n{ORANGE}{'─' * 50}{RESET}")
+        print(f"  {ORANGE}📋 الخطة المقترحة:{RESET}")
+        print(f"{plan_text}")
+        print(f"{ORANGE}{'─' * 50}{RESET}")
+        if not sys.stdin.isatty():
+            return False  # سياق غير تفاعلي → لا تعتمد تلقائياً
+        try:
+            choice = input(f"  {ORANGE}اعتماد الخطة والتنفيذ؟ [y/n]:{RESET} ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        return choice in ("y", "yes", "نعم", "ن")
+    return on_plan
+
+
 def make_permission_handler(spinner=None):
     """
     بناء دالة طلب الصلاحية التفاعلية.
@@ -99,7 +118,7 @@ def load_env():
             os.environ.setdefault(key, val)
 
 
-async def build_engine(mode: str = "main"):
+async def build_engine(mode: str = "main", plan_mode: bool = False):
     """
     تهيئة كاملة للمحرّك: المزوّد + الأدوات + الذاكرة + hooks + خوادم MCP.
     يُرجع (engine, provider, mcp) — على المتصل استدعاء mcp.stop_all() في النهاية.
@@ -124,15 +143,17 @@ async def build_engine(mode: str = "main"):
         memory=memory,
         system_prompt=get_system_prompt(mode),
         hooks=hooks if hooks.has_any() else None,
+        plan_mode=plan_mode,
     )
     return engine, provider, mcp
 
 
-async def run_once(prompt: str, mode: str = "main", stream: bool = False):
+async def run_once(prompt: str, mode: str = "main", stream: bool = False,
+                   plan_mode: bool = False):
     """تشغيل مهمة واحدة"""
     load_env()
 
-    engine, provider, mcp = await build_engine(mode)
+    engine, provider, mcp = await build_engine(mode, plan_mode=plan_mode)
 
     draw_welcome(provider.config.model, provider.config.base_url)
     draw_split_header(provider.config.model,
@@ -146,6 +167,7 @@ async def run_once(prompt: str, mode: str = "main", stream: bool = False):
         draw_tool_call(name, key_arg)
 
     on_permission = make_permission_handler(spinner)
+    on_plan = make_plan_handler(spinner)
 
     if stream:
         print(f"\n{ORANGE}🕸️{RESET}  ", end="", flush=True)
@@ -158,7 +180,7 @@ async def run_once(prompt: str, mode: str = "main", stream: bool = False):
         spinner.start()
         try:
             result = await engine.run(prompt, on_tool=on_tool,
-                                      on_permission=on_permission)
+                                      on_permission=on_permission, on_plan=on_plan)
         finally:
             await spinner.stop()
 
@@ -183,7 +205,7 @@ async def interactive_mode():
 
     draw_welcome(provider.config.model, provider.config.base_url)
     print(f"{GRAY}اكتب 'خروج' للإنهاء | '/mode <mode>' | '/model <name>' | "
-          f"'/commands' لعرض الأوامر{RESET}")
+          f"'/plan' وضع التخطيط | '/commands' لعرض الأوامر{RESET}")
     draw_separator()
 
     history = []
@@ -224,6 +246,15 @@ async def interactive_mode():
             draw_info("أوامر السلاش المتاحة: " + ", ".join("/" + n for n in names))
             continue
 
+        if prompt.strip() in ("/plan", "/plan on"):
+            engine.plan_mode = True
+            draw_success("وضع التخطيط مُفعّل — سأخطّط قبل التنفيذ حتى تعتمد الخطة.")
+            continue
+        if prompt.strip() == "/plan off":
+            engine.plan_mode = False
+            draw_success("وضع التخطيط مُعطّل.")
+            continue
+
         # ── أوامر السلاش من .claude/commands/ ────────────────────────────────
         parsed = commands.parse(prompt)
         if parsed:
@@ -244,11 +275,12 @@ async def interactive_mode():
             draw_tool_call(name, key_arg)
 
         on_permission = make_permission_handler(spinner)
+        on_plan = make_plan_handler(spinner)
 
         spinner.start()
         try:
             result = await engine.run(prompt, history=history, on_tool=on_tool,
-                                      on_permission=on_permission)
+                                      on_permission=on_permission, on_plan=on_plan)
         finally:
             await spinner.stop()
 
@@ -281,6 +313,8 @@ def main():
                         choices=["main", "coding", "project", "security", "autonomous", "analysis"],
                         help="وضع عمل الوكيل")
     parser.add_argument("--stream", action="store_true", help="وضع التدفق")
+    parser.add_argument("--plan", action="store_true",
+                        help="وضع التخطيط: يخطّط ويستأذنك قبل تنفيذ أي تعديل")
     parser.add_argument("--interactive", "-i", action="store_true", help="وضع المحادثة التفاعلية")
     parser.add_argument("--model", help="اسم النموذج (يتجاوز WEAVER_MODEL)")
     parser.add_argument("--key", help="مفتاح API (يتجاوز WEAVER_API_KEY)")
@@ -331,10 +365,14 @@ def main():
         print("ملاحظة: يُضاف أيضاً تذكير هوية إلى نص المستخدم نفسه (حارس الهوية).")
         return
 
+    if args.plan:
+        os.environ["WEAVER_PLAN_MODE"] = "1"
+
     if args.interactive:
         asyncio.run(interactive_mode())
     elif args.prompt:
-        asyncio.run(run_once(args.prompt, mode=args.mode, stream=args.stream))
+        asyncio.run(run_once(args.prompt, mode=args.mode, stream=args.stream,
+                             plan_mode=args.plan))
     else:
         parser.print_help()
 
