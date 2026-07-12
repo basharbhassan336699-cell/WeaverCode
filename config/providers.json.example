@@ -1,0 +1,15 @@
+{
+  "_ملاحظة": "انسخ إلى config/providers.json لتفعيل المزوّدين الاحتياطيين. المزوّد الأساسي يبقى في config/.env؛ هذه القائمة تُجرَّب بالترتيب إذا فشل الأساسي (نفاد رصيد/مصادقة/شبكة). لا حاجة لضبط الصيغة يدوياً — تُكتشف من الـ URL تلقائياً.",
+  "fallbacks": [
+    {
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key": "gsk_ضع_مفتاح_groq_هنا",
+      "model": "llama-3.3-70b-versatile"
+    },
+    {
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": "sk-or-v1-ضع_مفتاحك",
+      "model": "anthropic/claude-sonnet-4-6"
+    }
+  ]
+}
