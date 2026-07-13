@@ -111,10 +111,13 @@
     const who = role === "user" ? "أنت" : "🕸️ WeaverCode";
     return '<div class="bubble ' + role + '"><div class="who">' + who + "</div>" + html + "</div>";
   }
+  let chatHistory = []; // سياق المحادثة الحالية (يُرسَل مع كل متابعة)
   function openSession(c) {
     $("#chatTitle").textContent = (c.prompt || "محادثة").slice(0, 30);
     $("#chatMsgs").innerHTML = bubble("user", escapeHtml(c.prompt || "")) +
       bubble("agent", md(c.response || "(لا رد محفوظ)"));
+    chatHistory = [{ role: "user", content: c.prompt || "" }, { role: "assistant", content: c.response || "" }];
+    $("#chatAttachList").innerHTML = ""; chatAttached = [];
     go("v-chat");
     scrollChat();
   }
@@ -143,41 +146,53 @@
   }
   function localFolder() { return (ghRepo && ghRepo.split("/").pop()) || "WeaverCode"; }
 
-  // ── إرفاق الملفات ──
-  $("#attachBtn").onclick = () => $("#fileInput").click();
-  $("#fileInput").addEventListener("change", async (e) => {
-    for (const f of e.target.files) {
-      if (f.size > 25 * 1024 * 1024) { alert("الملف " + f.name + " أكبر من 25MB"); continue; }
-      const b64 = await fileToB64(f);
-      const r = await post("/api/upload", { name: f.name, data_base64: b64 });
-      if (r.ok) attached.push({ name: r.name, path: r.path });
-    }
-    e.target.value = ""; renderAttached();
-  });
-  function renderAttached() {
-    const box = $("#attachList");
-    box.innerHTML = attached.map((a, i) =>
-      '<span class="attach-chip">📎 ' + escapeHtml(a.name) + ' <b data-rm="' + i + '">✕</b></span>').join("");
-    $$("#attachList [data-rm]").forEach((b) => b.onclick = () => { attached.splice(+b.dataset.rm, 1); renderAttached(); });
+  // ── إرفاق الملفات (لشاشتَي الإنشاء والمحادثة) ──
+  let chatAttached = [];
+  function fileToB64(f) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); }); }
+  function renderAtt(listId, arr) {
+    const box = $("#" + listId);
+    box.innerHTML = arr.map((a, i) => a.loading
+      ? '<span class="attach-chip">⏳ ' + escapeHtml(a.name) + "…</span>"
+      : '<span class="attach-chip">📎 ' + escapeHtml(a.name) + ' <b data-rm="' + i + '">✕</b></span>').join("");
+    $$("#" + listId + " [data-rm]").forEach((b) => b.onclick = () => { arr.splice(+b.dataset.rm, 1); renderAtt(listId, arr); });
   }
-  function fileToB64(f) { return new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f); }); }
+  async function handleFiles(files, arr, listId) {
+    for (const f of files) {
+      if (f.size > 25 * 1024 * 1024) { alert("الملف " + f.name + " أكبر من 25MB"); continue; }
+      const slot = { name: f.name, loading: true };
+      arr.push(slot); renderAtt(listId, arr);
+      try {
+        const b64 = await fileToB64(f);
+        const r = await post("/api/upload", { name: f.name, data_base64: b64 });
+        if (r && r.ok) { slot.loading = false; slot.path = r.path; slot.name = r.name; }
+        else { arr.splice(arr.indexOf(slot), 1); alert("تعذّر رفع " + f.name + (r && r.error ? ": " + r.error : "")); }
+      } catch (err) { arr.splice(arr.indexOf(slot), 1); alert("خطأ في رفع " + f.name); }
+      renderAtt(listId, arr);
+    }
+  }
+  $("#attachBtn").onclick = () => $("#fileInput").click();
+  $("#fileInput").addEventListener("change", async (e) => { await handleFiles(e.target.files, attached, "attachList"); e.target.value = ""; });
+  function renderAttached() { renderAtt("attachList", attached); }
+  $("#chatAttachBtn").onclick = () => $("#chatFileInput").click();
+  $("#chatFileInput").addEventListener("change", async (e) => { await handleFiles(e.target.files, chatAttached, "chatAttachList"); e.target.value = ""; });
   $("#modelPick").onclick = () => go("v-settings");
   $$(".sug").forEach((b) => b.onclick = () => { $("#buildInput").value = b.dataset.sug; $("#buildInput").focus(); });
   $("#buildSend").onclick = startBuild;
   $("#buildInput").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); startBuild(); } });
   async function startBuild() {
     let v = $("#buildInput").value.trim();
-    if (!v && !attached.length) return;
+    const files = attached.filter((a) => a.path);
+    if (!v && !files.length) return;
     let prompt = v;
-    if (attached.length) {
-      prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" +
-        attached.map((a) => "- " + a.path).join("\n");
-    }
-    await post("/api/task", { prompt: prompt, mode: $("#buildMode").value });
+    if (files.length) prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" + files.map((a) => "- " + a.path).join("\n");
+    chatHistory = []; // محادثة جديدة
+    await post("/api/task", { prompt: prompt, mode: $("#buildMode").value, history: [] });
+    chatHistory.push({ role: "user", content: prompt });
     $("#chatTitle").textContent = (v || "ملفات مرفقة").slice(0, 30);
     $("#chatMsgs").innerHTML = bubble("user", escapeHtml(v) +
-      (attached.length ? '<div class="who">📎 ' + attached.length + " ملف مرفق</div>" : ""));
+      (files.length ? '<div class="who">📎 ' + files.length + " ملف مرفق</div>" : ""));
     attached = []; renderAttached();
+    $("#chatAttachList").innerHTML = ""; chatAttached = [];
     go("v-chat");
     scrollChat();
   }
@@ -186,10 +201,18 @@
   $("#chatSend").onclick = sendFollow;
   $("#chatInput").addEventListener("keydown", (e) => { if (e.key === "Enter") sendFollow(); });
   async function sendFollow() {
-    const v = $("#chatInput").value.trim(); if (!v) return;
-    $("#chatMsgs").insertAdjacentHTML("beforeend", bubble("user", escapeHtml(v)));
+    const v = $("#chatInput").value.trim();
+    const files = chatAttached.filter((a) => a.path);
+    if (!v && !files.length) return;
+    let prompt = v;
+    if (files.length) prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" + files.map((a) => "- " + a.path).join("\n");
+    $("#chatMsgs").insertAdjacentHTML("beforeend", bubble("user", escapeHtml(v) +
+      (files.length ? '<div class="who">📎 ' + files.length + " ملف</div>" : "")));
     $("#chatInput").value = "";
-    await post("/api/task", { prompt: v, mode: "main" });
+    // أرسل سياق المحادثة السابق ليفهم المتابعة
+    await post("/api/task", { prompt: prompt, mode: "main", history: chatHistory.slice() });
+    chatHistory.push({ role: "user", content: prompt });
+    chatAttached = []; $("#chatAttachList").innerHTML = "";
     scrollChat();
   }
   function scrollChat() { const m = $("#chatMsgs"); m.scrollTop = m.scrollHeight; window.scrollTo(0, document.body.scrollHeight); }
@@ -205,7 +228,9 @@
       const chat = $("#v-chat");
       if (!chat.classList.contains("active")) { return; }
       if (d.type === "response") {
-        $("#chatMsgs").insertAdjacentHTML("beforeend", bubble("agent", md(d.detail || d.message)));
+        const txt = d.detail || d.message;
+        $("#chatMsgs").insertAdjacentHTML("beforeend", bubble("agent", md(txt)));
+        chatHistory.push({ role: "assistant", content: txt });
       } else if (d.type === "done") {
         $("#chatMsgs").insertAdjacentHTML("beforeend", '<div class="bubble event">✅ اكتملت</div>');
       } else if (d.type !== "status") {

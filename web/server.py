@@ -451,7 +451,10 @@ class Handler(BaseHTTPRequestHandler):
             prompt = (body.get("prompt") or "").strip()
             if not prompt:
                 return self._json({"error": "prompt مطلوب"}, 400)
-            pos = st.queue_task(prompt, body.get("mode", "main"))
+            history = body.get("history")
+            if not isinstance(history, list):
+                history = []
+            pos = st.queue_task(prompt, body.get("mode", "main"), history[-20:])
             return self._json({"queued": True, "position": pos})
         if path == "/api/command":
             return self._json(_run_command(body.get("command", "")))

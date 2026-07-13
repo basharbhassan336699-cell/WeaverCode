@@ -125,6 +125,10 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   padding: 13px 16px; border-radius: 20px; font-size: 15px; outline: none; }
 .round-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--orange); color: #fff;
   border: none; font-size: 20px; cursor: pointer; flex: none; }
+.chat-composer .ic { width: 40px; height: 40px; font-size: 18px; flex: none;
+  background: var(--card); border: 1px solid var(--line); }
+.chat-attach { position: fixed; inset-inline: 0; bottom: 74px; padding: 0 18px; z-index: 6; }
+.chat-attach:empty { display: none; }
 
 /* Markdown */
 pre.code { background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
