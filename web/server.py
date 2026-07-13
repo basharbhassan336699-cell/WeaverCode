@@ -174,6 +174,86 @@ def _api_github() -> dict:
             "branch": _git("branch", "--show-current")}
 
 
+# ── الارتباطات (Integrations) ────────────────────────────────────────────────
+
+_INTEGRATIONS_FILE = WEAVER_ROOT / "config" / "integrations.json"
+
+
+def _repo_slug() -> str:
+    """استخراج owner/repo من عنوان git remote (إن وُجد)."""
+    remote = _git("remote", "get-url", "origin")
+    import re
+    m = re.search(r"github\.com[:/]+([^/]+/[^/.\s]+)", remote or "")
+    return m.group(1) if m else ""
+
+
+def _default_integrations() -> list:
+    """ارتباطات افتراضية متناسقة، مع اشتقاق روابط GitHub/Colab من المستودع."""
+    slug = _repo_slug()
+    gh = f"https://github.com/{slug}" if slug else "https://github.com"
+    colab = (f"https://colab.research.google.com/github/{slug}"
+             if slug else "https://colab.research.google.com")
+    return [
+        {"id": "github", "name": "GitHub", "icon": "🐙", "url": gh,
+         "token": "", "enabled": True, "builtin": True},
+        {"id": "colab", "name": "Google Colab", "icon": "📓", "url": colab,
+         "token": "", "enabled": True, "builtin": True},
+        {"id": "canva", "name": "Canva", "icon": "🎨", "url": "https://www.canva.com",
+         "token": "", "enabled": True, "builtin": True},
+        {"id": "vercel", "name": "Vercel", "icon": "▲", "url": "https://vercel.com/dashboard",
+         "token": "", "enabled": False, "builtin": True},
+        {"id": "huggingface", "name": "Hugging Face", "icon": "🤗", "url": "https://huggingface.co",
+         "token": "", "enabled": False, "builtin": True},
+        {"id": "replit", "name": "Replit", "icon": "🖥️", "url": "https://replit.com",
+         "token": "", "enabled": False, "builtin": True},
+    ]
+
+
+def _load_integrations() -> list:
+    """يدمج المحفوظ مع الافتراضي (يحدّث الروابط المشتقّة، ويبقي إعدادات المستخدم)."""
+    saved = {}
+    if _INTEGRATIONS_FILE.exists():
+        try:
+            data = json.loads(_INTEGRATIONS_FILE.read_text(encoding="utf-8"))
+            for it in data.get("integrations", []):
+                if it.get("id"):
+                    saved[it["id"]] = it
+        except Exception:
+            pass
+    result = []
+    seen = set()
+    for d in _default_integrations():
+        s = saved.get(d["id"], {})
+        merged = {**d, **{k: v for k, v in s.items() if k in ("url", "token", "enabled", "name", "icon")}}
+        result.append(merged)
+        seen.add(d["id"])
+    # ارتباطات مخصّصة أضافها المستخدم
+    for iid, it in saved.items():
+        if iid not in seen:
+            it.setdefault("builtin", False)
+            result.append(it)
+    return result
+
+
+def _save_integrations(items: list) -> None:
+    _INTEGRATIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    clean = []
+    for it in items:
+        if not it.get("id") or not it.get("name"):
+            continue
+        clean.append({
+            "id": str(it["id"])[:40],
+            "name": str(it["name"])[:40],
+            "icon": str(it.get("icon", "🔗"))[:8],
+            "url": str(it.get("url", ""))[:500],
+            "token": str(it.get("token", ""))[:500],
+            "enabled": bool(it.get("enabled", True)),
+            "builtin": bool(it.get("builtin", False)),
+        })
+    _INTEGRATIONS_FILE.write_text(
+        json.dumps({"integrations": clean}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _github_push(msg: str) -> dict:
     branch = _git("branch", "--show-current") or "main"
     out = []
@@ -303,6 +383,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"settings": s})
         if path == "/api/github":
             return self._json(_api_github())
+        if path == "/api/integrations":
+            return self._json({"integrations": _load_integrations()})
         if path == "/api/files/download-zip":
             return self._zip()
         if path.startswith("/api/files/download/"):
@@ -334,6 +416,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_test_connection())
         if path == "/api/github/push":
             return self._json(_github_push(body.get("message", "🕸️ WeaverCode update")))
+        if path == "/api/integrations":
+            items = body.get("integrations", [])
+            if isinstance(items, list):
+                _save_integrations(items)
+                return self._json({"integrations": _load_integrations()})
+            return self._json({"error": "صيغة غير صالحة"}, 400)
         return self._json({"error": "not found"}, 404)
 
     # -- SSE (البثّ الحيّ) --
