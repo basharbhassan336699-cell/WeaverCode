@@ -2,167 +2,125 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>🕸️ WeaverCode Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+  <title>WeaverCode</title>
   <link rel="stylesheet" href="/static/style.css"/>
   <link rel="icon" href="/static/spider.svg" type="image/svg+xml"/>
 </head>
 <body>
-  <!-- Header -->
-  <header class="wc-header">
-    <div class="wc-brand">
-      <img src="/static/spider.svg" class="wc-logo" alt="WeaverCode"/>
-      <span class="wc-title">WeaverCode</span>
-      <span id="stateBadge" class="badge idle">—</span>
-    </div>
-    <div class="wc-header-right">
-      <span id="modelChip" class="chip" title="النموذج">…</span>
-      <button id="themeBtn" class="icon-btn" title="الوضع">🌓</button>
-    </div>
-  </header>
 
-  <!-- Background Activity Bar -->
-  <div id="activityBar" class="activity-bar hidden">
-    <span class="spinner"></span>
-    <span id="activityText">Still working on it...</span>
-    <span id="diffCounter" class="diff hidden">
-      <span class="diff-add">+<span id="diffAdd">0</span></span>
-      <span class="diff-del">-<span id="diffDel">0</span></span>
-    </span>
+<!-- شريط علوي -->
+<header class="topbar">
+  <button id="menuBtn" class="ic" title="القائمة">☰</button>
+  <span id="stateDot" class="state-dot" title="الحالة"></span>
+  <button id="filterBtn" class="ic" title="أدوات">⚙️</button>
+</header>
+
+<!-- ══════════ شاشة الجلسات ══════════ -->
+<section id="v-sessions" class="view active">
+  <h1 class="display">WeaverCode</h1>
+  <div id="sessions" class="sessions"></div>
+</section>
+
+<!-- ══════════ شاشة محادثة جديدة ══════════ -->
+<section id="v-compose" class="view">
+  <div class="sub-head">
+    <button class="ic" data-back>‹</button>
+    <button id="modelPick" class="model-pick">…</button>
+    <span class="ic-spacer"></span>
+  </div>
+  <div class="center-chip"><span id="provChip" class="prov-chip">…</span></div>
+
+  <div class="sug-wrap">
+    <div class="sug-label">اقتراحات</div>
+    <button class="sug" data-sug="أنشئ أو حدّث ملف CLAUDE.md لهذا المشروع">أنشئ أو حدّث ملف <code>CLAUDE.md</code></button>
+    <button class="sug" data-sug="ابحث عن تعليق TODO في الكود وأصلحه">ابحث عن تعليق <code>TODO</code> وأصلحه</button>
+    <button class="sug" data-sug="اقترح مناطق لتحسين الاختبارات في المشروع">اقترح تحسينات للاختبارات</button>
   </div>
 
-  <!-- Terminal Bar -->
-  <div class="terminal-bar">
-    <span class="prompt-sign">&gt;_</span>
-    <input id="cmdInput" type="text" placeholder="اكتب مهمة… أو /help للأوامر" autocomplete="off"/>
-    <button id="sendBtn" class="send-btn">إرسال</button>
-  </div>
-
-  <!-- Tabs -->
-  <nav class="tabs">
-    <button class="tab active" data-tab="feed">📡 المباشر</button>
-    <button class="tab" data-tab="files">📁 الملفات</button>
-    <button class="tab" data-tab="chats">💬 المحادثات</button>
-    <button class="tab" data-tab="settings">⚙️ الإعدادات</button>
-    <button class="tab" data-tab="github">🔗 GitHub</button>
-  </nav>
-
-  <main class="content">
-    <!-- Live Feed -->
-    <section id="tab-feed" class="tabpane active">
-      <div id="feedEmpty" class="note">🕸️ ابدأ بكتابة مهمة في الأعلى أو اضغط «➕ محادثة جديدة». ستظهر خطوات WeaverCode هنا مباشرةً أثناء العمل.</div>
-      <div id="feed" class="feed"></div>
-    </section>
-
-    <!-- Files -->
-    <section id="tab-files" class="tabpane">
-      <div class="row-between">
-        <div class="filters" id="fileFilters">
-          <button class="fbtn active" data-f="all">الكل</button>
-          <button class="fbtn" data-f="py">Python</button>
-          <button class="fbtn" data-f="json">JSON</button>
-          <button class="fbtn" data-f="db">DB</button>
-          <button class="fbtn" data-f="zip">ZIP</button>
-          <button class="fbtn" data-f="other">أخرى</button>
-        </div>
-        <a class="btn primary" href="/api/files/download-zip">⬇️ تحميل الكل ZIP</a>
-      </div>
-      <div class="muted small" id="outputsDir"></div>
-      <div id="fileGrid" class="file-grid"></div>
-    </section>
-
-    <!-- Sessions / Chats -->
-    <section id="tab-chats" class="tabpane">
-      <div class="row-between">
-        <button id="newSessionTop" class="btn primary">➕ محادثة جديدة</button>
-        <span id="sessCount" class="muted small"></span>
-      </div>
-      <input id="chatSearch" class="search" type="text" placeholder="🔍 ابحث في المحادثات…"/>
-      <div id="chatList" class="chat-list"></div>
-    </section>
-
-    <!-- Settings -->
-    <section id="tab-settings" class="tabpane">
-      <label class="field"><span>المزود</span>
-        <select id="providerSel">
-          <option value="">— اختر —</option>
-          <option value="aerolink">aerolink</option>
-          <option value="groq">groq</option>
-          <option value="deepseek">deepseek</option>
-          <option value="openrouter">openrouter</option>
-          <option value="anthropic">anthropic</option>
-          <option value="openai">openai</option>
+  <div class="composer">
+    <div class="repo-chip" id="repoChip"><span>…</span> <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></div>
+    <div class="build-box">
+      <textarea id="buildInput" rows="2" placeholder="صِف ما تريد بناءه…"></textarea>
+      <div class="build-actions">
+        <select id="buildMode" class="mode-sel" title="الوضع">
+          <option value="main">عام</option><option value="coding">برمجة</option>
+          <option value="project">مشروع</option><option value="security">أمن</option>
+          <option value="analysis">تحليل</option><option value="autonomous">مستقل</option>
         </select>
-      </label>
-      <label class="field"><span>النموذج</span>
-        <input id="modelInput" type="text" placeholder="claude-fable-5"/>
-      </label>
-      <label class="field"><span>المفتاح</span>
-        <div class="key-row">
-          <input id="keyInput" type="password" placeholder="WEAVER_API_KEY"/>
-          <button id="keyToggle" class="icon-btn">👁️</button>
-        </div>
-      </label>
-      <div class="row">
-        <button id="saveSettings" class="btn primary">حفظ</button>
-        <button id="testConn" class="btn">اختبر الاتصال</button>
-      </div>
-      <div id="settingsMsg" class="muted small"></div>
-    </section>
-
-    <!-- GitHub -->
-    <section id="tab-github" class="tabpane">
-      <div class="note">🔒 يقرأ مستودع <b>git المحلي على جهازك</b> فقط (نفس ما يظهره الأمر <code>git</code>). لا يدخل حساب GitHub ولا يحتاج كلمة مرور.</div>
-      <div id="ghInfo" class="muted small"></div>
-      <ul id="ghCommits" class="commits"></ul>
-      <div class="row">
-        <input id="ghMsg" type="text" placeholder="رسالة الالتزام" value="🕸️ WeaverCode update"/>
-        <button id="ghPush" class="btn primary">رفع التغييرات</button>
-      </div>
-      <pre id="ghOutput" class="output"></pre>
-    </section>
-  </main>
-
-  <!-- زر عائم: محادثة جديدة -->
-  <button id="fabNew" class="fab">➕ محادثة جديدة</button>
-
-  <!-- نافذة إنشاء محادثة جديدة -->
-  <div id="composeOverlay" class="overlay hidden">
-    <div class="sheet">
-      <div class="sheet-head">
-        <span>🕸️ محادثة جديدة</span>
-        <button class="icon-btn" data-close="composeOverlay">✕</button>
-      </div>
-      <textarea id="composeInput" rows="4" placeholder="اكتب مهمتك… مثال: أنشئ سكربت بايثون يرتّب ملفات المجلد"></textarea>
-      <div class="row">
-        <select id="composeMode">
-          <option value="main">عام</option>
-          <option value="coding">برمجة</option>
-          <option value="project">مشروع</option>
-          <option value="security">أمن</option>
-          <option value="analysis">تحليل</option>
-          <option value="autonomous">مستقل</option>
-        </select>
-        <button id="composeSend" class="btn primary">إرسال</button>
+        <button id="buildSend" class="accept">إرسال ›</button>
       </div>
     </div>
   </div>
+</section>
 
-  <!-- نافذة عرض/متابعة محادثة -->
-  <div id="sessionOverlay" class="overlay hidden">
-    <div class="sheet tall">
-      <div class="sheet-head">
-        <span id="sessionTitle">محادثة</span>
-        <button class="icon-btn" data-close="sessionOverlay">✕</button>
-      </div>
-      <div id="sessionBody" class="session-body"></div>
-      <div class="session-input">
-        <input id="sessionFollow" type="text" placeholder="أضف ملاحظة أو تابع المحادثة…"/>
-        <button id="sessionSend" class="btn primary">↑</button>
-      </div>
-    </div>
+<!-- ══════════ شاشة المحادثة ══════════ -->
+<section id="v-chat" class="view">
+  <div class="sub-head">
+    <button class="ic" data-back>‹</button>
+    <div class="chat-title" id="chatTitle">محادثة</div>
+    <span class="ic-spacer"></span>
   </div>
+  <div id="chatMsgs" class="chat-msgs"></div>
+  <div class="chat-composer">
+    <input id="chatInput" type="text" placeholder="أضف ملاحظة أو تابع…"/>
+    <button id="chatSend" class="round-btn">↑</button>
+  </div>
+</section>
 
-  <script src="/static/app.js"></script>
+<!-- ══════════ لوحة القائمة (ملفات/إعدادات/GitHub) ══════════ -->
+<div id="menu" class="menu">
+  <div class="menu-panel">
+    <div class="menu-head"><span>WeaverCode</span><button class="ic" data-close="menu">✕</button></div>
+    <button class="menu-item" data-view="files">📁 الملفات</button>
+    <button class="menu-item" data-view="settings">⚙️ الإعدادات</button>
+    <button class="menu-item" data-view="github">🔗 GitHub</button>
+    <div class="menu-sep"></div>
+    <div id="menuStatus" class="muted small"></div>
+  </div>
+</div>
+
+<!-- ملفات -->
+<section id="v-files" class="view">
+  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">الملفات</div>
+    <a class="chip-btn" href="/api/files/download-zip">⬇️ ZIP</a></div>
+  <div id="outputsDir" class="muted small"></div>
+  <div id="fileList" class="file-list"></div>
+</section>
+
+<!-- إعدادات -->
+<section id="v-settings" class="view">
+  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">الإعدادات</div><span class="ic-spacer"></span></div>
+  <label class="field"><span>المزود</span>
+    <select id="providerSel">
+      <option value="">— اختر —</option>
+      <option value="aerolink">aerolink</option><option value="groq">groq</option>
+      <option value="deepseek">deepseek</option><option value="openrouter">openrouter</option>
+      <option value="anthropic">anthropic</option><option value="openai">openai</option>
+    </select></label>
+  <label class="field"><span>النموذج</span><input id="modelInput" type="text" placeholder="claude-fable-5"/></label>
+  <label class="field"><span>المفتاح</span>
+    <div class="key-row"><input id="keyInput" type="password" placeholder="WEAVER_API_KEY"/>
+    <button id="keyToggle" class="ic">👁️</button></div></label>
+  <div class="row"><button id="saveSettings" class="accept">حفظ</button>
+    <button id="testConn" class="chip-btn">اختبر الاتصال</button></div>
+  <div id="settingsMsg" class="muted small"></div>
+</section>
+
+<!-- GitHub -->
+<section id="v-github" class="view">
+  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">GitHub</div><span class="ic-spacer"></span></div>
+  <div class="note">🔒 يقرأ مستودع <b>git المحلي على جهازك</b> فقط — لا يدخل حسابك.</div>
+  <div id="ghInfo" class="muted small"></div>
+  <div id="ghCommits" class="commits"></div>
+  <div class="row"><input id="ghMsg" type="text" value="🕸️ WeaverCode update"/>
+    <button id="ghPush" class="accept">رفع</button></div>
+  <pre id="ghOutput" class="output"></pre>
+</section>
+
+<!-- زر محادثة جديدة -->
+<button id="newBtn" class="new-pill">محادثة جديدة <span class="plus">+</span></button>
+
+<script src="/static/app.js"></script>
 </body>
 </html>
