@@ -30,6 +30,8 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
 .ic:active { background: var(--card); }
 .ic-spacer { width: 38px; }
+.top-center { display: flex; align-items: center; gap: 8px; }
+.ver-badge { color: var(--muted-2); font-size: 11px; font-family: monospace; }
 .state-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted-2); }
 .state-dot.working { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
 .state-dot.idle { background: var(--green); }

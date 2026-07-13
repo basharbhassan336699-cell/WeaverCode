@@ -375,6 +375,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(size))
+        # منع تخزين الواجهة في كاش المتصفح حتى تتطابق دائماً مع الخادم
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Pragma", "no-cache")
         if download_name:
             self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
         self.end_headers()
@@ -414,6 +417,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "not found"}, 404)
         if path == "/events":
             return self._sse()
+        if path == "/api/version":
+            try:
+                from core.ui import WEAVER_VERSION
+            except Exception:
+                WEAVER_VERSION = "?"
+            return self._json({"version": WEAVER_VERSION})
         if path == "/api/status":
             return self._json(_api_status())
         if path == "/api/files":
@@ -554,9 +563,13 @@ def _start_daemon_thread():
 def main():
     host = os.environ.get("WEAVER_WEB_HOST", "0.0.0.0")
     port = int(os.environ.get("WEAVER_WEB_PORT", "7878"))
+    try:
+        from core.ui import WEAVER_VERSION
+    except Exception:
+        WEAVER_VERSION = "?"
     _start_daemon_thread()
     server = ThreadingHTTPServer((host, port), Handler)
-    print(f"🕸️ WeaverCode Dashboard — http://{host}:{port}")
+    print(f"🕸️ WeaverCode Dashboard {WEAVER_VERSION} — http://{host}:{port}")
     if host == "0.0.0.0":
         print("   ⚠️  متاح على شبكتك المحلية. لحصره بجهازك: WEAVER_WEB_HOST=127.0.0.1")
     print("   (خادم مدمج بلا تبعيات — يعمل على Termux مباشرةً)")
