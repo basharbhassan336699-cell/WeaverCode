@@ -121,23 +121,63 @@
 
   // ── محادثة جديدة (compose) ──
   $("#newBtn").onclick = () => go("v-compose");
-  function loadCompose() {
+  let attached = []; // ملفات مرفقة
+  async function loadCompose() {
     $("#modelPick").textContent = (ENV.model || "النموذج") + " ▾";
     $("#provChip").textContent = (ENV.provider || "المزود") + " ☁️";
-    $("#repoChip").querySelector("span").textContent = ghRepo || "المستودع المحلي";
+    // رقاقة المستودع: صادقة — «متصل» فقط إذا رُبط GitHub فعلياً (له توكِن)
+    let ghConnected = false;
+    try {
+      const r = await api("/api/integrations");
+      const gh = (r.integrations || []).find((i) => i.id === "github");
+      ghConnected = !!(gh && gh.enabled && gh.token);
+    } catch (e) {}
+    const chip = $("#repoChip");
+    if (ghConnected && ghRepo) {
+      chip.innerHTML = '<span class="ellip">🔗 ' + escapeHtml(ghRepo) + " (متصل)</span>";
+    } else {
+      chip.innerHTML = '<span class="ellip">📁 ' + escapeHtml(localFolder()) + " · محلي</span>";
+    }
     $("#buildInput").value = "";
+    attached = []; renderAttached();
   }
+  function localFolder() { return (ghRepo && ghRepo.split("/").pop()) || "WeaverCode"; }
+
+  // ── إرفاق الملفات ──
+  $("#attachBtn").onclick = () => $("#fileInput").click();
+  $("#fileInput").addEventListener("change", async (e) => {
+    for (const f of e.target.files) {
+      if (f.size > 25 * 1024 * 1024) { alert("الملف " + f.name + " أكبر من 25MB"); continue; }
+      const b64 = await fileToB64(f);
+      const r = await post("/api/upload", { name: f.name, data_base64: b64 });
+      if (r.ok) attached.push({ name: r.name, path: r.path });
+    }
+    e.target.value = ""; renderAttached();
+  });
+  function renderAttached() {
+    const box = $("#attachList");
+    box.innerHTML = attached.map((a, i) =>
+      '<span class="attach-chip">📎 ' + escapeHtml(a.name) + ' <b data-rm="' + i + '">✕</b></span>').join("");
+    $$("#attachList [data-rm]").forEach((b) => b.onclick = () => { attached.splice(+b.dataset.rm, 1); renderAttached(); });
+  }
+  function fileToB64(f) { return new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f); }); }
   $("#modelPick").onclick = () => go("v-settings");
   $$(".sug").forEach((b) => b.onclick = () => { $("#buildInput").value = b.dataset.sug; $("#buildInput").focus(); });
   $("#buildSend").onclick = startBuild;
   $("#buildInput").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); startBuild(); } });
   async function startBuild() {
-    const v = $("#buildInput").value.trim();
-    if (!v) return;
-    await post("/api/task", { prompt: v, mode: $("#buildMode").value });
-    // افتح شاشة المحادثة الحيّة
-    $("#chatTitle").textContent = v.slice(0, 30);
-    $("#chatMsgs").innerHTML = bubble("user", escapeHtml(v));
+    let v = $("#buildInput").value.trim();
+    if (!v && !attached.length) return;
+    let prompt = v;
+    if (attached.length) {
+      prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" +
+        attached.map((a) => "- " + a.path).join("\n");
+    }
+    await post("/api/task", { prompt: prompt, mode: $("#buildMode").value });
+    $("#chatTitle").textContent = (v || "ملفات مرفقة").slice(0, 30);
+    $("#chatMsgs").innerHTML = bubble("user", escapeHtml(v) +
+      (attached.length ? '<div class="who">📎 ' + attached.length + " ملف مرفق</div>" : ""));
+    attached = []; renderAttached();
     go("v-chat");
     scrollChat();
   }
@@ -160,8 +200,10 @@
     const es = new EventSource("/events");
     es.onmessage = (ev) => {
       let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+      // عند اكتمال مهمة، حدّث قائمة الجلسات إن كانت ظاهرة
+      if (d.type === "done") { refreshStatus(); if ($("#v-sessions").classList.contains("active")) loadSessions(); }
       const chat = $("#v-chat");
-      if (!chat.classList.contains("active")) { refreshStatus(); return; }
+      if (!chat.classList.contains("active")) { return; }
       if (d.type === "response") {
         $("#chatMsgs").insertAdjacentHTML("beforeend", bubble("agent", md(d.detail || d.message)));
       } else if (d.type === "done") {
@@ -254,19 +296,36 @@
     $$("#intgList [data-edit]").forEach((b) => b.onclick = () => editIntg(+b.dataset.edit));
   }
   async function saveIntg() { await post("/api/integrations", { integrations: intg }); loadIntegrations(); }
-  function editIntg(i) {
-    const it = intg[i];
-    const url = prompt("الرابط لخدمة " + it.name + ":", it.url || "");
-    if (url === null) return;
-    const token = prompt("مفتاح/توكِن (اختياري، يُخزَّن محلياً):", it.token || "");
-    it.url = url.trim();
-    if (token !== null) it.token = token.trim();
-    saveIntg();
+
+  // نافذة تعديل/إضافة (بدل prompt الذي كان يفقد الرابط)
+  let editIdx = -1;
+  function openIntgModal(idx) {
+    editIdx = idx;
+    const it = idx >= 0 ? intg[idx] : { name: "", url: "https://", token: "" };
+    $("#intgModalTitle").textContent = idx >= 0 ? "تعديل: " + it.name : "إضافة ارتباط";
+    $("#mName").value = it.name || "";
+    $("#mName").parentElement.style.display = (idx >= 0 && it.builtin) ? "none" : "block";
+    $("#mUrl").value = it.url || "";
+    $("#mToken").value = it.token || "";
+    $("#intgModal").classList.add("open");
   }
-  $("#addIntg").onclick = () => {
-    const name = prompt("اسم الخدمة (مثل Notion):"); if (!name) return;
-    const url = prompt("الرابط:", "https://"); if (url === null) return;
-    intg.push({ id: "custom_" + Date.now(), name: name.trim(), icon: "🔗", url: url.trim(), token: "", enabled: true, builtin: false });
+  function editIntg(i) { openIntgModal(i); }
+  $("#addIntg").onclick = () => openIntgModal(-1);
+  $$("[data-mclose]").forEach((b) => b.onclick = () => $("#intgModal").classList.remove("open"));
+  $("#intgModal").addEventListener("click", (e) => { if (e.target.id === "intgModal") $("#intgModal").classList.remove("open"); });
+  $("#mSave").onclick = () => {
+    const url = $("#mUrl").value.trim();
+    const token = $("#mToken").value.trim();
+    const name = $("#mName").value.trim();
+    if (editIdx >= 0) {
+      intg[editIdx].url = url;
+      intg[editIdx].token = token;
+      if (!intg[editIdx].builtin && name) intg[editIdx].name = name;
+    } else {
+      if (!name) { alert("أدخل اسم الخدمة"); return; }
+      intg.push({ id: "custom_" + Date.now(), name: name, icon: "🔗", url: url, token: token, enabled: true, builtin: false });
+    }
+    $("#intgModal").classList.remove("open");
     saveIntg();
   };
 
