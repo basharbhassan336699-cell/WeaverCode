@@ -33,6 +33,30 @@ BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
 INDEX_HTML = BASE / "templates" / "index.html"
 WEAVER_ROOT = BASE.parent
+UPLOADS = WEAVER_ROOT / "uploads"
+
+
+def _load_dotenv():
+    """تحميل config/.env إلى البيئة حتى يعمل الـ daemon بمفتاح المستخدم عند
+    تشغيل الخادم مباشرةً (scripts/weaver-bg.sh) لا عبر weaver.py فقط."""
+    f = WEAVER_ROOT / "config" / ".env"
+    if not f.exists():
+        return
+    for raw in f.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        k, _, v = line.partition("=")
+        k, v = k.strip(), v.strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+            v = v[1:-1]
+        if k:
+            os.environ.setdefault(k, v)
+
+
+_load_dotenv()
 DB_PATH = Path(os.path.expanduser(os.environ.get("WEAVER_DB_PATH", "~/.weaver/memory.db")))
 
 # ── عملاء SSE (كل عميل طابور آمن بين الخيوط) ──────────────────────────────────
@@ -299,6 +323,28 @@ def _run_command(cmd: str) -> dict:
     return {"queued": True, "position": pos}
 
 
+def _save_upload(body: dict) -> dict:
+    """حفظ ملف مرفوع (base64) في مجلد uploads ليقرأه الوكيل. يُرجع المسار."""
+    import base64
+    name = (body.get("name") or "file").replace("/", "_").replace("\\", "_")[:120]
+    data = body.get("data_base64") or ""
+    if "," in data and data.strip().startswith("data:"):
+        data = data.split(",", 1)[1]  # إزالة بادئة data URL
+    try:
+        raw = base64.b64decode(data)
+    except Exception:
+        return {"error": "بيانات غير صالحة"}
+    UPLOADS.mkdir(parents=True, exist_ok=True)
+    dest = UPLOADS / name
+    # تفادي الكتابة فوق ملف موجود
+    i = 1
+    while dest.exists():
+        dest = UPLOADS / (dest.stem + f"_{i}" + dest.suffix)
+        i += 1
+    dest.write_bytes(raw)
+    return {"ok": True, "name": dest.name, "path": str(dest), "size": len(raw)}
+
+
 def _safe_output_path(rel: str):
     target = (OUTPUTS / rel).resolve()
     if not str(target).startswith(str(OUTPUTS.resolve())):
@@ -422,6 +468,8 @@ class Handler(BaseHTTPRequestHandler):
                 _save_integrations(items)
                 return self._json({"integrations": _load_integrations()})
             return self._json({"error": "صيغة غير صالحة"}, 400)
+        if path == "/api/upload":
+            return self._json(_save_upload(body))
         return self._json({"error": "not found"}, 404)
 
     # -- SSE (البثّ الحيّ) --

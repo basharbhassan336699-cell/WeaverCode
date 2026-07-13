@@ -25,3 +25,10 @@ deps/
 # نظام التشغيل
 .DS_Store
 Thumbs.db
+
+# ملفات المستخدم للوحة الويب
+uploads/
+config/integrations.json
+config/mcp.json
+config/providers.json
+~/.weaver/

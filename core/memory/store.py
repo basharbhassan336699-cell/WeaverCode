@@ -18,10 +18,13 @@ class MemoryStore:
     """
 
     def __init__(self, db_path: Optional[str] = None):
-        self.db_path = db_path or os.environ.get(
+        raw = db_path or os.environ.get(
             "WEAVER_DB_PATH",
             str(Path.home() / ".weaver" / "memory.db")
         )
+        # توسيع ~ دائماً حتى يتطابق المسار بين الطرفية والـ daemon ولوحة الويب
+        # (وإلا كتب أحدهم في مجلد اسمه "~" حرفياً فتختفي المحادثات المحفوظة)
+        self.db_path = os.path.expanduser(raw)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
