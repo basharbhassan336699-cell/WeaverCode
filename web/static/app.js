@@ -61,6 +61,8 @@
     } catch (e) {}
   }
   setInterval(refreshStatus, 4000); refreshStatus();
+  // عرض إصدار الخادم الفعلي (لتتأكد أنك تشغّل أحدث كود)
+  api("/api/version").then((r) => { if (r && r.version) $("#verBadge").textContent = r.version; }).catch(() => {});
 
   // ── الجلسات ──
   function rel(ts) {
