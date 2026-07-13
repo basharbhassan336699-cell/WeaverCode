@@ -7,21 +7,37 @@
   const post = (p, body) => api(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
 
   const viewStack = ["v-sessions"];
-  function show(id) {
-    $$(".view").forEach((v) => v.classList.remove("active"));
+  function show(id, dir) {
+    const cur = $(".view.active");
     const el = document.getElementById(id);
-    if (el) el.classList.add("active");
+    if (!el || (cur && cur.id === id)) { if (el && !el.classList.contains("active")) { el.classList.add("active"); } }
+    // انتقال ناعم (انزلاق حسب الاتجاه)
+    if (cur && cur !== el) {
+      cur.classList.remove("active");
+      cur.classList.add(dir === "back" ? "leave-back" : "leave-fwd");
+      setTimeout(() => cur.classList.remove("leave-back", "leave-fwd"), 260);
+    }
+    el.classList.remove("leave-back", "leave-fwd");
+    el.classList.add("active", dir === "back" ? "enter-back" : "enter-fwd");
+    setTimeout(() => el.classList.remove("enter-back", "enter-fwd"), 260);
     $("#newBtn").classList.toggle("hidden", id !== "v-sessions");
-    // تحميل بيانات الشاشة
     if (id === "v-sessions") loadSessions();
     if (id === "v-files") loadFiles();
     if (id === "v-settings") loadSettings();
     if (id === "v-github") loadGithub();
     if (id === "v-compose") loadCompose();
+    if (id === "v-integrations") loadIntegrations();
     window.scrollTo(0, 0);
   }
-  function go(id) { viewStack.push(id); show(id); }
-  function back() { if (viewStack.length > 1) { viewStack.pop(); show(viewStack[viewStack.length - 1]); } }
+  function go(id) {
+    viewStack.push(id);
+    try { history.pushState({ i: viewStack.length }, "", "#" + id.replace("v-", "")); } catch (e) {}
+    show(id, "fwd");
+  }
+  function back() { if (viewStack.length > 1) history.back(); }
+  window.addEventListener("popstate", () => {
+    if (viewStack.length > 1) { viewStack.pop(); show(viewStack[viewStack.length - 1], "back"); }
+  });
   $$("[data-back]").forEach((b) => b.onclick = back);
 
   // ── القائمة ──
@@ -78,12 +94,13 @@
       if (g !== last) { last = g; const h = document.createElement("div"); h.className = "date-h"; h.textContent = g; box.appendChild(h); }
       const card = document.createElement("div");
       card.className = "sess-card";
-      const tools = (c.tools || []).length;
+      const repo = ghRepo || "المستودع المحلي";
+      const isToday = g === "اليوم";
       card.innerHTML =
         '<div class="sess-time">' + rel(c.timestamp) + "</div>" +
         '<div class="sess-main"><div class="sess-title">' + escapeHtml((c.prompt || "محادثة").slice(0, 60)) + "</div>" +
-        '<div class="sess-sub">' + (ENV.model || "WeaverCode") + " · " + (tools ? tools + " أداة" : "رد") + "</div></div>" +
-        '<div class="sess-badge">🕸️</div>';
+        '<div class="sess-sub"><span class="ellip">' + escapeHtml(repo) + '</span> ☁</div></div>' +
+        '<div class="sess-badge' + (isToday ? " dot" : "") + '">◌</div>';
       card.onclick = () => openSession(c);
       box.appendChild(card);
     });
@@ -206,6 +223,52 @@
     $("#ghOutput").textContent = r.output || "تم"; loadGithub();
   };
   loadGithub();
+
+  // ── الارتباطات (Integrations) ──
+  let intg = [];
+  async function loadIntegrations() {
+    const r = await api("/api/integrations");
+    intg = r.integrations || [];
+    renderIntegrations();
+  }
+  function renderIntegrations() {
+    const box = $("#intgList");
+    box.innerHTML = "";
+    intg.forEach((it, idx) => {
+      const card = document.createElement("div");
+      card.className = "intg-card" + (it.enabled ? "" : " off");
+      const url = it.url || "";
+      card.innerHTML =
+        '<div class="intg-ic">' + escapeHtml(it.icon || "🔗") + "</div>" +
+        '<div class="intg-main"><div class="intg-name">' + escapeHtml(it.name) +
+        (it.token ? ' <span class="tok">🔑</span>' : "") + "</div>" +
+        '<div class="intg-url ellip">' + escapeHtml(url || "—") + "</div></div>" +
+        '<div class="intg-actions">' +
+        (url ? '<a class="chip-btn" href="' + encodeURI(url) + '" target="_blank" rel="noopener">افتح</a>' : "") +
+        '<button class="ic" data-edit="' + idx + '" title="تعديل">✎</button>' +
+        '<button class="ic" data-tog="' + idx + '" title="تفعيل">' + (it.enabled ? "🟢" : "⚪") + "</button>" +
+        "</div>";
+      box.appendChild(card);
+    });
+    $$("#intgList [data-tog]").forEach((b) => b.onclick = () => { const i = +b.dataset.tog; intg[i].enabled = !intg[i].enabled; saveIntg(); });
+    $$("#intgList [data-edit]").forEach((b) => b.onclick = () => editIntg(+b.dataset.edit));
+  }
+  async function saveIntg() { await post("/api/integrations", { integrations: intg }); loadIntegrations(); }
+  function editIntg(i) {
+    const it = intg[i];
+    const url = prompt("الرابط لخدمة " + it.name + ":", it.url || "");
+    if (url === null) return;
+    const token = prompt("مفتاح/توكِن (اختياري، يُخزَّن محلياً):", it.token || "");
+    it.url = url.trim();
+    if (token !== null) it.token = token.trim();
+    saveIntg();
+  }
+  $("#addIntg").onclick = () => {
+    const name = prompt("اسم الخدمة (مثل Notion):"); if (!name) return;
+    const url = prompt("الرابط:", "https://"); if (url === null) return;
+    intg.push({ id: "custom_" + Date.now(), name: name.trim(), icon: "🔗", url: url.trim(), token: "", enabled: true, builtin: false });
+    saveIntg();
+  };
 
   // ── مساعدات ──
   function iconFor(t) { return { py: "🐍", json: "📋", db: "🗄️", zip: "📦", md: "📝", txt: "📄", png: "🖼️", jpg: "🖼️", sh: "⚙️", js: "📜" }[t] || "📄"; }

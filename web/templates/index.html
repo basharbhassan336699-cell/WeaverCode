@@ -73,6 +73,7 @@
   <div class="menu-panel">
     <div class="menu-head"><span>WeaverCode</span><button class="ic" data-close="menu">✕</button></div>
     <button class="menu-item" data-view="files">📁 الملفات</button>
+    <button class="menu-item" data-view="integrations">🔌 الارتباطات</button>
     <button class="menu-item" data-view="settings">⚙️ الإعدادات</button>
     <button class="menu-item" data-view="github">🔗 GitHub</button>
     <div class="menu-sep"></div>
@@ -116,6 +117,14 @@
   <div class="row"><input id="ghMsg" type="text" value="🕸️ WeaverCode update"/>
     <button id="ghPush" class="accept">رفع</button></div>
   <pre id="ghOutput" class="output"></pre>
+</section>
+
+<!-- الارتباطات -->
+<section id="v-integrations" class="view">
+  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">الارتباطات</div>
+    <button id="addIntg" class="ic" title="إضافة">＋</button></div>
+  <div class="note">🔌 روابط سريعة ومتناسقة مع خدماتك. «افتح» يفتح الخدمة، و✎ لتعديل الرابط/المفتاح، والمفتاح يُخزَّن محلياً في <code>config/integrations.json</code>.</div>
+  <div id="intgList" class="intg-list"></div>
 </section>
 
 <!-- زر محادثة جديدة -->
