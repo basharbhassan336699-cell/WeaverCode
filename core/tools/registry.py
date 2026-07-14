@@ -573,6 +573,64 @@ class ToolRegistry:
             fn=lambda plan="": "PLAN_SUBMITTED",  # يعالجها المحرّك خصيصاً
         ))
 
+        # ── أدوات GitHub CLI ────────────────────────────────────────────
+
+        self._add(Tool(
+            name="GitHubCreateRepo",
+            description="إنشاء مستودع جديد على GitHub عبر gh CLI",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "اسم المستودع"},
+                    "description": {"type": "string", "default": ""},
+                    "private": {"type": "boolean", "default": False},
+                },
+                "required": ["name"],
+            },
+            fn=self._gh_create_repo,
+            requires_permission=True,
+        ))
+
+        self._add(Tool(
+            name="GitHubListRepos",
+            description="عرض مستودعات المستخدم على GitHub",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 10},
+                },
+                "required": [],
+            },
+            fn=self._gh_list_repos,
+        ))
+
+        self._add(Tool(
+            name="GitHubCreateIssue",
+            description="إنشاء Issue جديد في مستودع على GitHub",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "body": {"type": "string", "default": ""},
+                    "repo": {"type": "string", "description": "owner/repo أو المستودع الحالي"},
+                },
+                "required": ["title"],
+            },
+            fn=self._gh_create_issue,
+            requires_permission=True,
+        ))
+
+        self._add(Tool(
+            name="GitHubStatus",
+            description="فحص حالة اتصال GitHub وبيانات الحساب المرتبط",
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+            fn=self._gh_status,
+        ))
+
     # ── تنفيذ الأدوات ────────────────────────────────────────────────────────
 
     def _add(self, tool: Tool):
@@ -1067,3 +1125,48 @@ class ToolRegistry:
             return answer
         except Exception:
             return "(لا إجابة)"
+
+    # ── تنفيذ أدوات GitHub CLI ──────────────────────────────────────────
+
+    def _gh_status(self) -> str:
+        """فحص حالة GitHub"""
+        result = self._bash("gh auth status 2>&1 && gh api user --jq '.login + \" (\" + .name + \")\"' 2>/dev/null")
+        if "not logged" in result.lower() or "error" in result.lower():
+            return "❌ غير مرتبط بـ GitHub\nشغّل: gh auth login --web"
+        return f"✅ GitHub مرتبط\n{result}"
+
+    def _gh_create_repo(self, name: str, description: str = "",
+                         private: bool = False) -> str:
+        """إنشاء مستودع جديد"""
+        visibility = "--private" if private else "--public"
+        desc_flag = f'--description "{description}"' if description else ""
+        result = self._bash(
+            f"gh repo create {name} {visibility} {desc_flag} --confirm 2>&1 || "
+            f"gh repo create {name} {visibility} {desc_flag} 2>&1"
+        )
+        if "https://github.com" in result:
+            return f"✅ تم إنشاء المستودع\n{result.strip()}"
+        return f"❌ فشل إنشاء المستودع\n{result}"
+
+    def _gh_list_repos(self, limit: int = 10) -> str:
+        """عرض المستودعات"""
+        result = self._bash(
+            f"gh repo list --limit {limit} "
+            f"--json name,description,isPrivate,updatedAt "
+            f"--jq '.[] | \"\\(.isPrivate | if . then \"🔒\" else \"🌐\" end) \\(.name) — \\(.description // \"\")\"' 2>&1"
+        )
+        if not result.strip():
+            return "لا توجد مستودعات أو GitHub غير مرتبط"
+        return f"مستودعاتك على GitHub:\n{result}"
+
+    def _gh_create_issue(self, title: str, body: str = "",
+                          repo: str = "") -> str:
+        """إنشاء Issue"""
+        repo_flag = f"--repo {repo}" if repo else ""
+        body_flag = f'--body "{body}"' if body else ""
+        result = self._bash(
+            f'gh issue create --title "{title}" {body_flag} {repo_flag} 2>&1'
+        )
+        if "https://github.com" in result:
+            return f"✅ تم إنشاء Issue\n{result.strip()}"
+        return f"❌ فشل\n{result}"
