@@ -102,3 +102,7 @@ WEAVER_DB_PATH=~/.weaver/memory.db
 3. الأدوات تُنفَّذ بالتسلسل أو بالتوازي
 4. النتائج تُحفظ في الذاكرة SQLite
 5. الرد النهائي يُعاد للمستخدم
+
+## GitHub
+مرتبط عبر GitHub CLI (gh). الأدوات: GitHubStatus, GitHubCreateRepo, GitHubListRepos, GitHubCreateIssue.
+للتحقق: `gh auth status`
