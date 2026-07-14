@@ -143,6 +143,19 @@ def test_empty_content_stays_empty_no_crash():
     assert conv["choices"][0]["message"]["content"] == ""
 
 
+def test_refusal_is_surfaced_not_empty():
+    """رد رفض من النموذج (content فارغ + stop_reason=refusal) يُعرض سببه
+    بوضوح بدل تركه فارغاً (حالة aerolink/claude-fable-5 الحقيقية)."""
+    data = {"id": "m", "content": [], "stop_reason": "refusal",
+            "stop_details": {"type": "refusal", "category": "cyber",
+                             "explanation": "blocked under usage policy"}}
+    conv = WeaverProvider._anthropic_to_openai_response(data)
+    text = conv["choices"][0]["message"]["content"]
+    assert "رفض النموذج" in text and "cyber" in text
+    # مهم: ليس فارغاً ⇒ لا يُحفّز تبديل الصيغة العبثي
+    assert WeaverProvider._response_is_empty(conv) is False
+
+
 # ── الشفاء الذاتي: تبديل الصيغة تلقائياً (سبب «النموذج لا يرد») ──────────────
 
 def _wrap_openai(text):
