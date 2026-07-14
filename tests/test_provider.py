@@ -243,6 +243,47 @@ def test_complete_no_switch_on_billing(monkeypatch):
     assert calls["n"] == 1  # لم يحاول الصيغة الأخرى
 
 
+def test_request_too_large_detected_with_limits():
+    from core.engine.provider import RequestTooLargeError
+    p = _p("https://api.groq.com/openai/v1")
+    try:
+        p._raise_for_status(413, '{"error":{"message":"Request too large ... '
+                            'on tokens per minute (TPM): Limit 12000, Requested 13081, '
+                            'please reduce your message size and try again."}}')
+        assert False, "should raise"
+    except RequestTooLargeError as e:
+        assert e.limit == 12000 and e.requested == 13081
+
+
+def test_complete_shrinks_max_tokens_on_413(monkeypatch):
+    """413 (الطلب أكبر من الحدّ) → يقلّل max_tokens تلقائياً ويعيد المحاولة."""
+    from core.engine.provider import RequestTooLargeError
+    p = _p("https://api.groq.com/openai/v1")
+    p.config.max_tokens = 8192
+    INPUT = 4889
+    LIMIT = 12000
+
+    async def fake_format(messages, tools, anthropic):
+        # يحاكي _run_curl داخل _complete_format الحقيقي: نستدعي الأصلي
+        raise AssertionError("should not be called")  # لن يُستخدم — نستبدل _run_curl
+
+    async def fake_run_curl(url, payload):
+        requested = INPUT + payload["max_tokens"]
+        if requested > LIMIT:
+            p._raise_for_status(413, json.dumps({"error": {"message":
+                f"Request too large tokens per minute (TPM): Limit {LIMIT}, "
+                f"Requested {requested}, reduce your message"}}))
+        return _wrap_openai(f"ok mt={payload['max_tokens']}")
+
+    monkeypatch.setattr(p, "_run_curl", fake_run_curl)
+    import asyncio
+    resp = asyncio.run(p.complete([Message(role="user", content="hi")]))
+    content = resp["choices"][0]["message"]["content"]
+    assert content.startswith("ok mt=")
+    assert p.config.max_tokens < 8192  # تعلّم حجماً أصغر
+    assert INPUT + p.config.max_tokens <= LIMIT  # يلائم الحدّ فعلاً
+
+
 def test_complete_forced_format_no_fallback(monkeypatch):
     """عند تثبيت WEAVER_API_FORMAT: لا تبديل تلقائي إطلاقاً."""
     monkeypatch.setenv("WEAVER_API_FORMAT", "openai")

@@ -18,6 +18,7 @@ provider.py — محرك الاتصال بمزودي النماذج
 """
 
 import os
+import re
 import json
 import shutil
 import asyncio
@@ -87,6 +88,17 @@ class TransientProviderError(ProviderError):
     """خطأ عابر (شبكة/DNS/مهلة/429/5xx) — يستحق إعادة المحاولة."""
 
 
+class RequestTooLargeError(ProviderError):
+    """
+    الطلب أكبر من حدّ المزوّد (HTTP 413 أو حدّ التوكِنات/الدقيقة TPM).
+    قابل للإصلاح تلقائياً بتقليل max_tokens وإعادة المحاولة.
+    """
+    def __init__(self, msg: str, limit: int = 0, requested: int = 0):
+        super().__init__(msg)
+        self.limit = limit
+        self.requested = requested
+
+
 # أكواد خروج curl العابرة: 6 resolve, 7 connect, 28 timeout, 35 ssl, 52 empty, 56 recv
 _CURL_TRANSIENT_CODES = {6, 7, 28, 35, 52, 55, 56}
 # حالات HTTP العابرة (تُعاد المحاولة)؛ ما عداها (401/403/404/رصيد) دائم
@@ -150,13 +162,32 @@ class WeaverProvider:
     async def _complete_format(
         self, messages: List[Message], tools: Optional[List[Dict]], anthropic: bool
     ) -> Dict[str, Any]:
-        """تنفيذ استدعاء واحد بصيغة محددة (Anthropic أو OpenAI)."""
-        if anthropic:
-            payload = self._build_anthropic_payload(messages, tools, stream=False)
-            data = await self._run_curl(self._anthropic_url(), payload)
-            return self._anthropic_to_openai_response(data)
-        payload = self._build_openai_payload(messages, tools, stream=False)
-        return await self._run_curl(self._openai_url(), payload)
+        """
+        تنفيذ استدعاء واحد بصيغة محددة (Anthropic أو OpenAI)، مع إصلاح ذاتي
+        لخطأ «الطلب أكبر من الحدّ» (413/TPM): يقلّل max_tokens ليلائم حدّ المزوّد
+        ويعيد المحاولة (حتى 3 مرات)، ويتذكّر الحجم الأصغر لبقية الجلسة.
+        """
+        attempts = 0
+        while True:
+            try:
+                if anthropic:
+                    payload = self._build_anthropic_payload(messages, tools, stream=False)
+                    data = await self._run_curl(self._anthropic_url(), payload)
+                    return self._anthropic_to_openai_response(data)
+                payload = self._build_openai_payload(messages, tools, stream=False)
+                return await self._run_curl(self._openai_url(), payload)
+            except RequestTooLargeError as e:
+                attempts += 1
+                old = self.config.max_tokens
+                if e.limit and e.requested and e.requested > e.limit:
+                    # قلّل بمقدار الفائض فوق الحدّ + هامش أمان
+                    new = old - (e.requested - e.limit) - 256
+                else:
+                    new = old // 2
+                new = max(512, new)
+                if new >= old or attempts > 3:
+                    raise
+                self.config.max_tokens = new  # يبقى مصغّراً لبقية الجلسة
 
     # ── بناء عناوين النقاط النهائية ───────────────────────────────────────────
 
@@ -529,6 +560,26 @@ class WeaverProvider:
                       "insufficient", "quota", "billing", "payment required",
                       "credit", "out of usage", "no credit", "رصيد", "اشتراك")
         low = (snippet or "").lower()
+
+        # ── الطلب أكبر من الحدّ (413 أو TPM) → قابل للإصلاح بتقليل max_tokens ──
+        too_large_kw = ("request too large", "reduce your message",
+                        "tokens per minute", "maximum context",
+                        "context length", "too many tokens", "context_length_exceeded")
+        if status == 413 or any(k in low for k in too_large_kw):
+            lim = re.search(r"limit\s+(\d+)", low)
+            req = re.search(r"requested\s+(\d+)", low)
+            err = RequestTooLargeError(
+                f"❌ الطلب أكبر من حدّ المزوّد (HTTP {status}).\n"
+                f"   التفصيل: {snippet}\n"
+                f"   تلميح: سيُقلّل WeaverCode حجم الطلب تلقائياً ويعيد المحاولة. "
+                f"لتقليل دائم اضبط WEAVER_MAX_TOKENS أصغر (مثلاً 4096).",
+                limit=int(lim.group(1)) if lim else 0,
+                requested=int(req.group(1)) if req else 0,
+            )
+            err.status = status
+            err.billing = False
+            raise err
+
         is_billing = any(k in low for k in billing_kw)
         if is_billing:
             hint = ("رصيد/اشتراك الحساب لدى المزوّد غير كافٍ أو انتهى الاستخدام "
@@ -573,8 +624,11 @@ class WeaverProvider:
         try:
             resp = await self._complete_format(messages, tools, primary)
         except ProviderError as e:
-            # أخطاء الرصيد/المصادقة ستفشل بالصيغتين → لا تبدّل، ارفعها كما هي
-            if getattr(e, "billing", False) or getattr(e, "status", 0) in (401, 403):
+            # أخطاء لا يصلحها تبديل الصيغة → ارفعها كما هي:
+            # الرصيد/المصادقة (تفشل بالصيغتين) و«الطلب أكبر من الحدّ» (حجم لا صيغة)
+            if (isinstance(e, RequestTooLargeError)
+                    or getattr(e, "billing", False)
+                    or getattr(e, "status", 0) in (401, 403)):
                 raise
             # خطأ دائم آخر (404 نقطة غير موجودة مثلاً) → جرّب الصيغة الأخرى
             resp_alt = await self._complete_format(messages, tools, not primary)
