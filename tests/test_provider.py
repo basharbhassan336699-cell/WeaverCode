@@ -98,3 +98,46 @@ def test_anthropic_tool_response_to_openai():
     assert conv["choices"][0]["finish_reason"] == "tool_calls"
     assert tc["function"]["name"] == "Read"
     assert json.loads(tc["function"]["arguments"]) == {"path": "x"}
+
+
+# ── صمود تحويل الردود مهما كان شكل الوسيط (سبب "لا يرد النموذج") ──────────────
+
+def test_openai_shaped_response_on_messages_endpoint():
+    """بوابات 'capi' المتوافقة تُعيد شكل OpenAI حتى على /v1/messages —
+    يجب ألا يضيع النص."""
+    data = {"id": "c1", "model": "m", "object": "chat.completion",
+            "choices": [{"index": 0, "finish_reason": "stop",
+                         "message": {"role": "assistant", "content": "مرحبا"}}]}
+    conv = WeaverProvider._anthropic_to_openai_response(data)
+    assert conv["choices"][0]["message"]["content"] == "مرحبا"
+    assert conv["choices"][0]["finish_reason"] == "stop"
+
+
+def test_openai_shaped_response_with_tool_calls():
+    data = {"choices": [{"finish_reason": "tool_calls", "message": {
+        "role": "assistant", "content": "",
+        "tool_calls": [{"id": "t1", "type": "function",
+                        "function": {"name": "Read", "arguments": "{}"}}]}}]}
+    conv = WeaverProvider._anthropic_to_openai_response(data)
+    assert conv["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == "Read"
+    assert conv["choices"][0]["finish_reason"] == "tool_calls"
+
+
+def test_content_as_plain_string():
+    """بعض الوسطاء يضعون النص مباشرةً في content كسلسلة لا مصفوفة كتل."""
+    data = {"id": "m", "stop_reason": "end_turn", "content": "مرحبا مباشرة"}
+    conv = WeaverProvider._anthropic_to_openai_response(data)
+    assert conv["choices"][0]["message"]["content"] == "مرحبا مباشرة"
+
+
+def test_completion_field_fallback():
+    """احتياطي: النص في حقل completion/text بدل content."""
+    data = {"id": "m", "completion": "نص من completion"}
+    conv = WeaverProvider._anthropic_to_openai_response(data)
+    assert conv["choices"][0]["message"]["content"] == "نص من completion"
+
+
+def test_empty_content_stays_empty_no_crash():
+    data = {"id": "m", "stop_reason": "end_turn", "content": []}
+    conv = WeaverProvider._anthropic_to_openai_response(data)
+    assert conv["choices"][0]["message"]["content"] == ""
