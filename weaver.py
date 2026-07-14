@@ -186,6 +186,8 @@ async def run_once(prompt: str, mode: str = "main", stream: bool = False,
 
         if result.error:
             draw_error(result.error)
+        elif not (result.text or "").strip():
+            _show_empty_diagnostic(provider)
         else:
             draw_response(result.text)
             if result.tool_calls_made:
@@ -194,6 +196,20 @@ async def run_once(prompt: str, mode: str = "main", stream: bool = False,
         await mcp.stop_all()
 
     await provider.close()
+
+
+def _show_empty_diagnostic(provider) -> None:
+    """عند رجوع نصّ فارغ: اعرض الاستجابة الخام من المزوّد بدل الصمت."""
+    raw = (getattr(provider, "last_raw", "") or "").strip()
+    draw_error("النموذج أرجع رداً فارغاً.")
+    if raw:
+        print(f"{GRAY}🔎 آخر استجابة خام من المزوّد (شخّص بها الشكل):{RESET}")
+        print(raw[:1200])
+        print(f"{GRAY}شغّل الفاحص لمعرفة الصيغة الصحيحة:  "
+              f"bash scripts/weaver-doctor.sh{RESET}")
+    else:
+        print(f"{GRAY}لم تُلتقط استجابة خام. شغّل:  "
+              f"bash scripts/weaver-doctor.sh{RESET}")
 
 
 async def interactive_mode():
@@ -286,6 +302,8 @@ async def interactive_mode():
 
         if result.error:
             draw_error(result.error)
+        elif not (result.text or "").strip():
+            _show_empty_diagnostic(provider)
         else:
             draw_response(result.text)
             if result.tool_calls_made:

@@ -103,6 +103,9 @@ class WeaverProvider:
         self.config = config or ProviderConfig.from_env()
         # آخر استجابة خام من المزوّد (لأغراض التشخيص عند رجوع نصّ فارغ)
         self.last_raw: str = ""
+        # تجاوز الصيغة المكتشَف تلقائياً بعد نجاح الصيغة الأخرى (تعلّم ذاتي للجلسة)
+        # None = استخدم الاكتشاف العادي؛ True = Anthropic؛ False = OpenAI
+        self._format_override: Optional[bool] = None
         if not shutil.which("curl"):
             raise ProviderError(
                 "❌ الأداة curl غير مثبّتة على النظام. "
@@ -122,8 +125,38 @@ class WeaverProvider:
             return True
         if forced in ("openai", "chat"):
             return False
+        # تجاوز مُتعلَّم في هذه الجلسة (بعد نجاح الصيغة الأخرى تلقائياً)
+        if self._format_override is not None:
+            return self._format_override
         url = self.config.base_url.lower()
         return "aerolink" in url or "anthropic" in url
+
+    def _format_forced(self) -> bool:
+        """هل ثبّت المستخدم الصيغة صراحةً عبر WEAVER_API_FORMAT؟"""
+        return os.environ.get("WEAVER_API_FORMAT", "").strip().lower() in (
+            "anthropic", "messages", "openai", "chat")
+
+    @staticmethod
+    def _response_is_empty(resp: Dict[str, Any]) -> bool:
+        """هل الرد بلا نصّ وبلا استدعاءات أدوات (فارغ فعلاً)؟"""
+        try:
+            msg = resp["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError):
+            return True
+        has_text = bool((msg.get("content") or "").strip())
+        has_tools = bool(msg.get("tool_calls"))
+        return not (has_text or has_tools)
+
+    async def _complete_format(
+        self, messages: List[Message], tools: Optional[List[Dict]], anthropic: bool
+    ) -> Dict[str, Any]:
+        """تنفيذ استدعاء واحد بصيغة محددة (Anthropic أو OpenAI)."""
+        if anthropic:
+            payload = self._build_anthropic_payload(messages, tools, stream=False)
+            data = await self._run_curl(self._anthropic_url(), payload)
+            return self._anthropic_to_openai_response(data)
+        payload = self._build_openai_payload(messages, tools, stream=False)
+        return await self._run_curl(self._openai_url(), payload)
 
     # ── بناء عناوين النقاط النهائية ───────────────────────────────────────────
 
@@ -478,7 +511,8 @@ class WeaverProvider:
                       "insufficient", "quota", "billing", "payment required",
                       "credit", "out of usage", "no credit", "رصيد", "اشتراك")
         low = (snippet or "").lower()
-        if any(k in low for k in billing_kw):
+        is_billing = any(k in low for k in billing_kw)
+        if is_billing:
             hint = ("رصيد/اشتراك الحساب لدى المزوّد غير كافٍ أو انتهى الاستخدام "
                     "المجاني — أضف رصيداً أو خطة في لوحة المزوّد، أو جرّب مزوّداً آخر. "
                     "(هذه رسالة من خادم المزوّد لا من مفتاحك.)")
@@ -486,11 +520,15 @@ class WeaverProvider:
             hint = hints.get(status, "راجع عنوان المزود والمفتاح والنموذج.")
 
         err_cls = TransientProviderError if status in _HTTP_TRANSIENT else ProviderError
-        raise err_cls(
+        err = err_cls(
             f"❌ رفض المزود الطلب (HTTP {status}).\n"
             f"   التفصيل: {snippet}\n"
             f"   تلميح: {hint}"
         )
+        # بيانات وصفية ليقرّر الشفاء الذاتي: هل نبدّل الصيغة أم لا؟
+        err.status = status
+        err.billing = is_billing
+        raise err
 
     # ── الواجهة العامة ────────────────────────────────────────────────────────
 
@@ -499,14 +537,42 @@ class WeaverProvider:
         messages: List[Message],
         tools: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
-        """استدعاء غير متدفق — يُرجع الرد كاملاً بشكل OpenAI الموحّد"""
-        if self._is_anthropic():
-            payload = self._build_anthropic_payload(messages, tools, stream=False)
-            data = await self._run_curl(self._anthropic_url(), payload)
-            return self._anthropic_to_openai_response(data)
-        else:
-            payload = self._build_openai_payload(messages, tools, stream=False)
-            return await self._run_curl(self._openai_url(), payload)
+        """
+        استدعاء غير متدفق — يُرجع الرد كاملاً بشكل OpenAI الموحّد.
+
+        شفاء ذاتي: إذا فشلت الصيغة المكتشَفة (خطأ دائم غير الرصيد/المصادقة)
+        أو أرجعت رداً فارغاً تماماً، يُعاد المحاولة تلقائياً بالصيغة الأخرى
+        (Anthropic ↔ OpenAI) ويُتذكَّر ما نجح لبقية الجلسة. هذا يحلّ حالة
+        البوابات المتوافقة (مثل capi.aerolink) التي تتكلّم OpenAI لا Anthropic.
+        يمكن تعطيل التبديل بتثبيت WEAVER_API_FORMAT صراحةً.
+        """
+        primary = self._is_anthropic()
+
+        # المستخدم ثبّت الصيغة → لا تبديل، سلوك مباشر
+        if self._format_forced():
+            return await self._complete_format(messages, tools, primary)
+
+        try:
+            resp = await self._complete_format(messages, tools, primary)
+        except ProviderError as e:
+            # أخطاء الرصيد/المصادقة ستفشل بالصيغتين → لا تبدّل، ارفعها كما هي
+            if getattr(e, "billing", False) or getattr(e, "status", 0) in (401, 403):
+                raise
+            # خطأ دائم آخر (404 نقطة غير موجودة مثلاً) → جرّب الصيغة الأخرى
+            resp_alt = await self._complete_format(messages, tools, not primary)
+            self._format_override = not primary  # تعلّم الصيغة الناجحة
+            return resp_alt
+
+        # نجح الطلب لكن الرد فارغ تماماً → قد تكون الصيغة خاطئة، جرّب الأخرى
+        if self._response_is_empty(resp):
+            try:
+                alt = await self._complete_format(messages, tools, not primary)
+            except ProviderError:
+                return resp  # فشلت الأخرى → احتفظ بالأصلي
+            if not self._response_is_empty(alt):
+                self._format_override = not primary  # تعلّم الصيغة الناجحة
+                return alt
+        return resp
 
     async def stream(
         self,

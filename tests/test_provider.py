@@ -141,3 +141,107 @@ def test_empty_content_stays_empty_no_crash():
     data = {"id": "m", "stop_reason": "end_turn", "content": []}
     conv = WeaverProvider._anthropic_to_openai_response(data)
     assert conv["choices"][0]["message"]["content"] == ""
+
+
+# ── الشفاء الذاتي: تبديل الصيغة تلقائياً (سبب «النموذج لا يرد») ──────────────
+
+def _wrap_openai(text):
+    return {"choices": [{"message": {"role": "assistant", "content": text},
+                         "finish_reason": "stop"}]}
+
+
+def test_response_is_empty_detection():
+    assert WeaverProvider._response_is_empty(_wrap_openai("")) is True
+    assert WeaverProvider._response_is_empty(_wrap_openai("مرحبا")) is False
+    with_tools = {"choices": [{"message": {"content": "", "tool_calls": [
+        {"id": "t", "type": "function", "function": {"name": "Read", "arguments": "{}"}}]}}]}
+    assert WeaverProvider._response_is_empty(with_tools) is False
+
+
+def test_raise_for_status_sets_metadata():
+    p = _p("https://capi.aerolink.lat")
+    try:
+        p._raise_for_status(404, '{"error":{"message":"Unknown endpoint"}}')
+    except Exception as e:
+        assert getattr(e, "status", None) == 404 and getattr(e, "billing", None) is False
+    try:
+        p._raise_for_status(401, '{"error":{"message":"Add balance to continue"}}')
+    except Exception as e:
+        assert getattr(e, "billing", None) is True
+
+
+def _make_provider_for_fallback(anthropic_primary=True):
+    url = "https://capi.aerolink.lat" if anthropic_primary else "https://api.groq.com/openai/v1"
+    return _p(url)
+
+
+def test_complete_falls_back_on_404(monkeypatch):
+    """الصيغة الأساسية تفشل 404 → يُبدَّل تلقائياً للأخرى ويُتذكَّر."""
+    from core.engine.provider import ProviderError
+    p = _make_provider_for_fallback(anthropic_primary=True)
+    assert p._is_anthropic() is True
+
+    async def fake_format(messages, tools, anthropic):
+        if anthropic:  # Anthropic غير مدعوم
+            err = ProviderError("HTTP 404"); err.status = 404; err.billing = False
+            raise err
+        return _wrap_openai("مرحبا من OpenAI")
+
+    monkeypatch.setattr(p, "_complete_format", fake_format)
+    import asyncio
+    resp = asyncio.run(p.complete([Message(role="user", content="hi")]))
+    assert resp["choices"][0]["message"]["content"] == "مرحبا من OpenAI"
+    assert p._format_override is False  # تعلّم OpenAI
+    assert p._is_anthropic() is False   # يستخدمها في الطلبات التالية
+
+
+def test_complete_falls_back_on_empty(monkeypatch):
+    """الصيغة الأساسية ترجع فارغاً → يجرّب الأخرى ويأخذ ردها إن كان غير فارغ."""
+    p = _make_provider_for_fallback(anthropic_primary=True)
+
+    async def fake_format(messages, tools, anthropic):
+        return _wrap_openai("" if anthropic else "نص بديل")
+
+    monkeypatch.setattr(p, "_complete_format", fake_format)
+    import asyncio
+    resp = asyncio.run(p.complete([Message(role="user", content="hi")]))
+    assert resp["choices"][0]["message"]["content"] == "نص بديل"
+    assert p._format_override is False
+
+
+def test_complete_no_switch_on_billing(monkeypatch):
+    """خطأ رصيد/مصادقة → لا يُبدَّل (يفشل بالصيغتين) بل يُرفع الخطأ."""
+    from core.engine.provider import ProviderError
+    p = _make_provider_for_fallback(anthropic_primary=True)
+    calls = {"n": 0}
+
+    async def fake_format(messages, tools, anthropic):
+        calls["n"] += 1
+        err = ProviderError("HTTP 401"); err.status = 401; err.billing = True
+        raise err
+
+    monkeypatch.setattr(p, "_complete_format", fake_format)
+    import asyncio
+    try:
+        asyncio.run(p.complete([Message(role="user", content="hi")]))
+        assert False, "should raise"
+    except ProviderError:
+        pass
+    assert calls["n"] == 1  # لم يحاول الصيغة الأخرى
+
+
+def test_complete_forced_format_no_fallback(monkeypatch):
+    """عند تثبيت WEAVER_API_FORMAT: لا تبديل تلقائي إطلاقاً."""
+    monkeypatch.setenv("WEAVER_API_FORMAT", "openai")
+    p = _make_provider_for_fallback(anthropic_primary=True)
+    calls = {"n": 0}
+
+    async def fake_format(messages, tools, anthropic):
+        calls["n"] += 1
+        assert anthropic is False  # الصيغة المثبّتة فقط
+        return _wrap_openai("")  # فارغ لكن لا تبديل
+
+    monkeypatch.setattr(p, "_complete_format", fake_format)
+    import asyncio
+    asyncio.run(p.complete([Message(role="user", content="hi")]))
+    assert calls["n"] == 1
