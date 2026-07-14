@@ -56,25 +56,29 @@ def curl_post(url, headers, payload):
 
 
 def extract_text(body):
-    """يحاول استخراج نص الرد من أي شكل شائع."""
+    """يحاول استخراج نص الرد من أي شكل شائع. يُرجع (text, shape, refusal)."""
     try:
         d = json.loads(body)
     except Exception:
-        return None, "ليس JSON"
+        return None, "ليس JSON", None
+    # رفض صريح من النموذج (وصل الطلب لكن رُفض التوليد)
+    if d.get("stop_reason") == "refusal":
+        det = d.get("stop_details") or {}
+        return None, "رفض من النموذج (stop_reason=refusal)", det
     # OpenAI shape
     if isinstance(d.get("choices"), list) and d["choices"]:
         m = d["choices"][0].get("message", {})
-        return (m.get("content") or "").strip() or None, "OpenAI (choices[0].message.content)"
+        return (m.get("content") or "").strip() or None, "OpenAI (choices[0].message.content)", None
     # Anthropic shape
     c = d.get("content")
     if isinstance(c, list):
         parts = [b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text"]
-        return ("".join(parts).strip() or None), "Anthropic (content[].text)"
+        return ("".join(parts).strip() or None), "Anthropic (content[].text)", None
     if isinstance(c, str):
-        return c.strip() or None, "content كسلسلة"
+        return c.strip() or None, "content كسلسلة", None
     if isinstance(d.get("error"), (dict, str)):
-        return None, f"خطأ من المزوّد: {json.dumps(d['error'], ensure_ascii=False)[:200]}"
-    return None, "شكل غير معروف"
+        return None, f"خطأ من المزوّد: {json.dumps(d['error'], ensure_ascii=False)[:200]}", None
+    return None, "شكل غير معروف", None
 
 
 def main():
@@ -105,12 +109,12 @@ def main():
         {"model": model, "max_tokens": 64,
          "messages": [{"role": "user", "content": "قل مرحبا بكلمة واحدة"}]},
     )
-    text, shape = extract_text(body)
+    text, shape, refusal = extract_text(body)
     print(f"   الحالة HTTP: {st}")
     print(f"   الشكل: {shape}")
     print(f"   النص المستخرَج: {text!r}")
     print(f"   الجسم الخام (أول 600 حرف):\n   {body[:600]}")
-    results["openai"] = (st, bool(text))
+    results["openai"] = (st, bool(text), refusal)
 
     # ── (2) صيغة Anthropic → /v1/messages ────────────────────────────────
     if base.endswith("/messages"):
@@ -127,18 +131,19 @@ def main():
         {"model": model, "max_tokens": 64,
          "messages": [{"role": "user", "content": "قل مرحبا بكلمة واحدة"}]},
     )
-    text2, shape2 = extract_text(body2)
+    text2, shape2, refusal2 = extract_text(body2)
     print(f"   الحالة HTTP: {st2}")
     print(f"   الشكل: {shape2}")
     print(f"   النص المستخرَج: {text2!r}")
     print(f"   الجسم الخام (أول 600 حرف):\n   {body2[:600]}")
-    results["anthropic"] = (st2, bool(text2))
+    results["anthropic"] = (st2, bool(text2), refusal2)
 
     # ── الخلاصة والتوصية ─────────────────────────────────────────────────
     print("\n" + "=" * 55)
     print("📋 الخلاصة:")
     oai_ok = results["openai"][1]
     ant_ok = results["anthropic"][1]
+    refusal = results["anthropic"][2] or results["openai"][2]
     if ant_ok:
         print("✅ صيغة Anthropic تعمل. الإعداد الحالي صحيح — لا تغيّر شيئاً.")
     elif oai_ok:
@@ -146,6 +151,20 @@ def main():
         print("   الحلّ: أجبر صيغة OpenAI بإضافة هذا السطر إلى config/.env:")
         print("       WEAVER_API_FORMAT=openai")
         print("   ثم أعد التشغيل. (سيرسل WeaverCode بصيغة OpenAI لهذا المزوّد.)")
+    elif refusal:
+        cat = refusal.get("category", "")
+        exp = refusal.get("explanation", "")
+        print("⛔ المزوّد متّصل والصيغة صحيحة (HTTP 200)، لكن النموذج **يرفض**")
+        print("   التوليد بحسب سياسة الاستخدام — وليست مشكلة في WeaverCode.")
+        print(f"   • الفئة: {cat}")
+        print(f"   • السبب: {exp}")
+        print("   لاحظ أن حتى «قل مرحبا» رُفض ⇒ غالباً بوابة المزوّد (aerolink)")
+        print("   تحقن محتوى مخفياً في كل طلب يُحفّز رفض المحتوى (cyber).")
+        print("   الحلّ الموثوق: استخدم مزوّداً/مفتاحاً آخر:")
+        print("       • Anthropic الرسمي: https://api.anthropic.com/v1")
+        print("       • OpenRouter: https://openrouter.ai/api/v1")
+        print("       • Groq: https://api.groq.com/openai/v1")
+        print("     غيّرها عبر:  bash scripts/weaver.sh  أو  الأمر /weaver-key")
     else:
         print("❌ لم تُرجِع أيّ صيغة نصاً. غالباً السبب رصيد/مفتاح.")
         print("   افحص رسالة الخطأ في الجسم الخام أعلاه (كثيراً ما تكون: انتهاء")

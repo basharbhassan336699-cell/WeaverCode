@@ -373,6 +373,24 @@ class WeaverProvider:
                     break
 
         stop_reason = data.get("stop_reason", "end_turn")
+
+        # ── حالة (د): رفض صريح من النموذج (stop_reason="refusal") ─────────────
+        # النموذج قبل الاتصال (HTTP 200) لكنه رفض التوليد لسياسة الاستخدام.
+        # نُظهر السبب بوضوح بدل تركه فارغاً حتى لا يظنّ المستخدم أن النظام معطّل.
+        if not text_parts and not tool_calls and stop_reason == "refusal":
+            details = data.get("stop_details") or {}
+            category = details.get("category", "")
+            explanation = details.get("explanation", "")
+            text_parts.append(
+                "⛔ رفض النموذج تنفيذ هذا الطلب (سياسة الاستخدام لدى المزوّد/النموذج).\n"
+                + (f"• الفئة: {category}\n" if category else "")
+                + (f"• السبب: {explanation}\n" if explanation else "")
+                + "\nملاحظة: هذا رفضٌ صادر من النموذج نفسه عبر بوابة المزوّد "
+                "(الطلب وصل بنجاح — لا خطأ في WeaverCode). إن تكرّر الرفض حتى "
+                "لطلبات بسيطة، فغالباً بوابة المزوّد تُضيف محتوى مخفياً يُحفّز الرفض؛ "
+                "جرّب مزوّداً/مفتاحاً آخر (مثل Anthropic الرسمي أو OpenRouter أو Groq)."
+            )
+
         finish_reason = "tool_calls" if (stop_reason == "tool_use" or tool_calls) else "stop"
 
         message: Dict[str, Any] = {
