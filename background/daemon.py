@@ -100,7 +100,12 @@ class WeaverDaemon:
         if result.error:
             await event_bus.emit(WeaverEvent(EventType.ERROR, result.error))
         else:
-            text = result.text or "(لم يُرجع النموذج نصاً — جرّب صياغة أوضح أو نموذجاً آخر.)"
+            text = result.text
+            if not text or not text.strip():
+                raw = (getattr(provider, "last_raw", "") or "").strip()
+                text = "(لم يُرجع النموذج نصاً — جرّب صياغة أوضح أو نموذجاً آخر.)"
+                if raw:
+                    text += f"\n\n🔎 آخر استجابة خام من المزوّد (تشخيص):\n{raw[:800]}"
             await event_bus.emit(WeaverEvent(EventType.RESPONSE, text[:200], text))
         await event_bus.emit(WeaverEvent(EventType.DONE, "اكتملت المهمة"))
         st.save_status("idle")

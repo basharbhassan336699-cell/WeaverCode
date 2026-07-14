@@ -16,7 +16,7 @@ WEB_PID=$!
 echo "$WEB_PID" > ~/.weaver/pids.txt
 sleep 1
 HOST="${WEAVER_WEB_HOST:-0.0.0.0}"
-PORT="${WEAVER_WEB_PORT:-7878}"
+PORT="${WEAVER_WEB_PORT:-8080}"
 # تأكّد أن الخادم الجديد اشتغل فعلاً (لم يفشل بسبب المنفذ)
 if kill -0 "$WEB_PID" 2>/dev/null; then
   echo "🕸️ WeaverCode Dashboard يعمل — http://$HOST:$PORT (PID: $WEB_PID)"

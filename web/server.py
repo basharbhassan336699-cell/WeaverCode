@@ -5,7 +5,7 @@ server.py — WeaverCode Dashboard بخادم مدمج (بلا أي تبعيات
 مبني على مكتبة بايثون القياسية فقط (http.server) — يعمل على Termux/أندرويد
 دون الحاجة لـ fastapi/pydantic/Rust. البثّ الحيّ عبر SSE (Server-Sent Events).
 
-التشغيل:  python3 web/server.py   →   http://<host>:7878
+التشغيل:  python3 web/server.py   →   http://<host>:8080
 """
 
 import os
@@ -562,7 +562,7 @@ def _start_daemon_thread():
 
 def main():
     host = os.environ.get("WEAVER_WEB_HOST", "0.0.0.0")
-    port = int(os.environ.get("WEAVER_WEB_PORT", "7878"))
+    port = int(os.environ.get("WEAVER_WEB_PORT", "8080"))
     try:
         from core.ui import WEAVER_VERSION
     except Exception:

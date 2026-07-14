@@ -101,6 +101,8 @@ class WeaverProvider:
 
     def __init__(self, config: Optional[ProviderConfig] = None):
         self.config = config or ProviderConfig.from_env()
+        # آخر استجابة خام من المزوّد (لأغراض التشخيص عند رجوع نصّ فارغ)
+        self.last_raw: str = ""
         if not shutil.which("curl"):
             raise ProviderError(
                 "❌ الأداة curl غير مثبّتة على النظام. "
@@ -271,12 +273,53 @@ class WeaverProvider:
 
     @staticmethod
     def _anthropic_to_openai_response(data: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(data, dict):
+            data = {}
+
+        # ── حالة (أ): الوسيط أعاد شكل OpenAI أصلاً (شائع في بوابات "capi") ────
+        # بعض الوسطاء المتوافقين (aerolink وغيره) يعيدون {choices:[{message}]}
+        # حتى على /v1/messages. نمرّره كما هو حتى لا يضيع النص.
+        if isinstance(data.get("choices"), list) and data["choices"]:
+            ch0 = data["choices"][0] or {}
+            msg = ch0.get("message") or ch0.get("delta") or {}
+            if isinstance(msg, dict) and ("content" in msg or "tool_calls" in msg):
+                out_msg: Dict[str, Any] = {
+                    "role": msg.get("role", "assistant"),
+                    "content": msg.get("content") or "",
+                }
+                if msg.get("tool_calls"):
+                    out_msg["tool_calls"] = msg["tool_calls"]
+                return {
+                    "id": data.get("id", ""),
+                    "model": data.get("model", ""),
+                    "choices": [{
+                        "index": 0,
+                        "message": out_msg,
+                        "finish_reason": ch0.get("finish_reason")
+                        or ("tool_calls" if out_msg.get("tool_calls") else "stop"),
+                    }],
+                    "usage": data.get("usage", {}),
+                }
+
         text_parts: List[str] = []
         tool_calls: List[Dict[str, Any]] = []
 
-        for block in data.get("content", []) or []:
+        content = data.get("content")
+        # ── حالة (ب): content كسلسلة نصية بدل مصفوفة كتل ─────────────────────
+        if isinstance(content, str):
+            text_parts.append(content)
+            content = []
+        elif content is None:
+            content = []
+
+        for block in content or []:
+            if isinstance(block, str):
+                text_parts.append(block)
+                continue
+            if not isinstance(block, dict):
+                continue
             btype = block.get("type")
-            if btype == "text":
+            if btype == "text" or (btype is None and "text" in block):
                 text_parts.append(block.get("text", ""))
             elif btype == "tool_use":
                 tool_calls.append({
@@ -288,8 +331,16 @@ class WeaverProvider:
                     },
                 })
 
+        # ── حالة (ج): احتياطي — بعض الوسطاء يضعون النص في completion/text ─────
+        if not text_parts and not tool_calls:
+            for k in ("completion", "text", "output_text"):
+                v = data.get(k)
+                if isinstance(v, str) and v.strip():
+                    text_parts.append(v)
+                    break
+
         stop_reason = data.get("stop_reason", "end_turn")
-        finish_reason = "tool_calls" if stop_reason == "tool_use" else "stop"
+        finish_reason = "tool_calls" if (stop_reason == "tool_use" or tool_calls) else "stop"
 
         message: Dict[str, Any] = {
             "role": "assistant",
@@ -383,6 +434,9 @@ class WeaverProvider:
                 status = 0
 
         self._raise_for_status(status, raw)
+
+        # نحتفظ بآخر استجابة خام للتشخيص (مقتطع محدود)
+        self.last_raw = raw[:2000]
 
         try:
             return json.loads(raw)
@@ -616,6 +670,14 @@ class ResilientProvider:
     def config(self):
         # للبانر/العرض: إعدادات المزوّد الأساسي
         return self.providers[0].config
+
+    @property
+    def last_raw(self) -> str:
+        """آخر استجابة خام من أي مزوّد فرعي (للتشخيص)."""
+        for p in self.providers:
+            if getattr(p, "last_raw", ""):
+                return p.last_raw
+        return ""
 
     async def complete(self, messages, tools=None):
         errors = []

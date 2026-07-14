@@ -317,7 +317,7 @@ def main():
                         help="وضع التخطيط: يخطّط ويستأذنك قبل تنفيذ أي تعديل")
     parser.add_argument("--interactive", "-i", action="store_true", help="وضع المحادثة التفاعلية")
     parser.add_argument("--background", "--bg", "-b", action="store_true",
-                        help="تشغيل لوحة الويب + الخلفية (http://localhost:7878)")
+                        help="تشغيل لوحة الويب + الخلفية (http://localhost:8080)")
     parser.add_argument("--web", "-w", action="store_true",
                         help="تشغيل لوحة الويب في المقدّمة فقط")
     parser.add_argument("--daemon", action="store_true",
