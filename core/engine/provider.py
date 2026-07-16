@@ -683,10 +683,48 @@ class WeaverProvider:
             if first_resp is None:
                 first_resp = resp
 
+        # ── احتياط أخير للبوابات التي ترفض الطلبات الكبيرة (305/3xx) ─────────
+        # كثيراً ما ترفض البوابات المجانية max_tokens الكبير أو البرومبت الطويل
+        # بـ «305 Service Unavailable». نُجرّب طلباً أدنى يطابق ما ينجح يدوياً:
+        # max_tokens صغير + بلا أدوات + برومبت هوية قصير. ونتذكّر ما نجح للجلسة.
+        if last_err is not None and 300 <= getattr(last_err, "status", 0) < 400:
+            saved_mt = self.config.max_tokens
+            self.config.max_tokens = min(saved_mt, 1024)
+            minimal_msgs = self._minimal_messages(messages)
+            for fmt in (primary, not primary):
+                try:
+                    resp_min = await self._complete_format(minimal_msgs, None, fmt)
+                except ProviderError:
+                    continue
+                if not self._response_is_empty(resp_min):
+                    # نجح الطلب الأدنى → نتذكّر (max_tokens الصغير + إسقاط الأدوات)
+                    self._drop_tools = True
+                    if fmt != primary:
+                        self._format_override = fmt
+                    return resp_min
+            self.config.max_tokens = saved_mt  # فشل الأدنى أيضاً → استرجِع
+
         # لم ينجح أي مرشّح بردٍّ حقيقي
         if first_resp is not None:
             return first_resp  # أرجِع أفضل ما توفّر (فارغ) بدل رمي خطأ
         raise last_err or ProviderError("❌ فشل كل محاولات الاتصال بالمزوّد.")
+
+    @staticmethod
+    def _minimal_messages(messages: List[Message]) -> List[Message]:
+        """طلب أدنى يطابق ما ينجح يدوياً: برومبت هوية قصير + رسائل المحادثة فقط.
+
+        نستبدل رسائل النظام الطويلة (البرومبت الكامل + الذاكرة) بسطر هوية قصير،
+        لأن بعض البوابات ترفض الطلبات الكبيرة. نُبقي هوية WeaverCode.
+        """
+        out: List[Message] = [Message(
+            role="system",
+            content=("أنت WeaverCode، مساعد برمجي مستقل. أجب مباشرةً وبالعربية. "
+                     "لا تقل إنك Claude أو Anthropic أو أي نموذج/شركة."))]
+        for m in messages:
+            if m.role == "system":
+                continue
+            out.append(m)
+        return out
 
     async def stream(
         self,
