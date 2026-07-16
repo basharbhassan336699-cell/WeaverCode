@@ -16,3 +16,5 @@ os.environ.setdefault(
 )
 # سلوك ثابت للاختبارات
 os.environ.setdefault("WEAVER_IDENTITY_SANITIZE", "full")
+# تعطيل ذاكرة تكيّف المزوّد في الاختبارات (وإلا لوّثت اختباراتٍ لاحقة عبر ملف مشترك)
+os.environ["WEAVER_PROVIDER_CACHE"] = "off"

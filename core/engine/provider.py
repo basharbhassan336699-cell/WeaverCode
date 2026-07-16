@@ -135,14 +135,21 @@ class WeaverProvider:
 
     @staticmethod
     def _quirk_cache_path():
+        """مسار ملف ذاكرة تكيّف المزوّد. يحترم WEAVER_PROVIDER_CACHE:
+        قيمة off/0/none/'' → تعطيل تام (يُرجع None)؛ مسار → يُستخدم كما هو."""
         from pathlib import Path
+        override = os.environ.get("WEAVER_PROVIDER_CACHE")
+        if override is not None:
+            if override.strip().lower() in ("off", "0", "none", "no", "false", ""):
+                return None
+            return Path(os.path.expanduser(override))
         return Path(os.path.expanduser("~/.weaver/provider_cache.json"))
 
     def _load_quirk_cache(self) -> None:
         """تحميل ما تعلّمناه سابقاً عن هذا المزوّد (bare/صيغة/إسقاط أدوات)."""
         try:
             path = self._quirk_cache_path()
-            if not path.exists():
+            if path is None or not path.exists():
                 return
             data = json.loads(path.read_text(encoding="utf-8"))
             q = data.get(self.config.base_url.rstrip("/"))
@@ -163,6 +170,8 @@ class WeaverProvider:
         """حفظ ما تعلّمناه لهذا المزوّد كي لا نُعيد اكتشافه في التشغيل القادم."""
         try:
             path = self._quirk_cache_path()
+            if path is None:
+                return
             path.parent.mkdir(parents=True, exist_ok=True)
             data = {}
             if path.exists():
