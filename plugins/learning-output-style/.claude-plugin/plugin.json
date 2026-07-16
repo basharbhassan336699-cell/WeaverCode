@@ -1,5 +1,6 @@
 {
   "name": "learning-output-style",
   "version": "0.1.0",
-  "description": "نمط مخرجات learning عبر SessionStart hook"
+  "description": "نمط مخرجات learning (تعاوني: يطلب مساهمة المستخدم بالكود) — معطّل؛ يناقض استقلالية الوكيل",
+  "disabled": true
 }
