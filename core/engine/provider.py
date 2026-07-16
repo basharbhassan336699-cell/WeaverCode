@@ -120,11 +120,66 @@ class WeaverProvider:
         self._format_override: Optional[bool] = None
         # بعد نجاح إرسال بلا أدوات على بوابة ترفض الأدوات (305)، نتذكّره للجلسة
         self._drop_tools: bool = False
+        # قاطع دائرة: بعد نجاح «الوضع الأدنى» على بوابة مقيّدة، نرسل به مباشرةً
+        # (طلب واحد) بدل سلّم المرشّحين — حتى لا نستنزف توكينات المستخدم.
+        self._bare_mode: bool = False
+        # نحمّل ما تعلّمناه سابقاً عن هذا المزوّد (يُوفّر إعادة الاكتشاف عبر التشغيلات)
+        self._load_quirk_cache()
         if not shutil.which("curl"):
             raise ProviderError(
                 "❌ الأداة curl غير مثبّتة على النظام. "
                 "ثبّتها أولاً:  sudo apt install curl  (أو pkg install curl على Termux)"
             )
+
+    # ── ذاكرة تكيّف المزوّد (تُوفّر إعادة الاكتشاف واستنزاف التوكينات) ─────────
+
+    @staticmethod
+    def _quirk_cache_path():
+        from pathlib import Path
+        return Path(os.path.expanduser("~/.weaver/provider_cache.json"))
+
+    def _load_quirk_cache(self) -> None:
+        """تحميل ما تعلّمناه سابقاً عن هذا المزوّد (bare/صيغة/إسقاط أدوات)."""
+        try:
+            path = self._quirk_cache_path()
+            if not path.exists():
+                return
+            data = json.loads(path.read_text(encoding="utf-8"))
+            q = data.get(self.config.base_url.rstrip("/"))
+            if not isinstance(q, dict):
+                return
+            if q.get("bare_mode"):
+                self._bare_mode = True
+            if isinstance(q.get("format_override"), bool):
+                self._format_override = q["format_override"]
+            if q.get("drop_tools"):
+                self._drop_tools = True
+            if isinstance(q.get("max_tokens"), int) and q["max_tokens"] > 0:
+                self.config.max_tokens = min(self.config.max_tokens, q["max_tokens"])
+        except Exception:
+            pass  # الكاش مساعِد فقط — لا يُسقط النظام
+
+    def _save_quirk_cache(self) -> None:
+        """حفظ ما تعلّمناه لهذا المزوّد كي لا نُعيد اكتشافه في التشغيل القادم."""
+        try:
+            path = self._quirk_cache_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = {}
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    data = {}
+            data[self.config.base_url.rstrip("/")] = {
+                "bare_mode": self._bare_mode,
+                "format_override": self._format_override,
+                "drop_tools": self._drop_tools,
+                "max_tokens": self.config.max_tokens,
+            }
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                            encoding="utf-8")
+        except Exception:
+            pass
 
     # ── اكتشاف الصيغة ────────────────────────────────────────────────────────
 
@@ -162,21 +217,27 @@ class WeaverProvider:
         return not (has_text or has_tools)
 
     async def _complete_format(
-        self, messages: List[Message], tools: Optional[List[Dict]], anthropic: bool
+        self, messages: List[Message], tools: Optional[List[Dict]], anthropic: bool,
+        bare: bool = False,
     ) -> Dict[str, Any]:
         """
         تنفيذ استدعاء واحد بصيغة محددة (Anthropic أو OpenAI)، مع إصلاح ذاتي
         لخطأ «الطلب أكبر من الحدّ» (413/TPM): يقلّل max_tokens ليلائم حدّ المزوّد
         ويعيد المحاولة (حتى 3 مرات)، ويتذكّر الحجم الأصغر لبقية الجلسة.
+
+        bare=True: طلب أدنى يطابق ما ينجح يدوياً على البوابات المقيّدة —
+        بلا system وبلا tools وبلا temperature وبـ max_tokens صغير.
         """
         attempts = 0
         while True:
             try:
                 if anthropic:
-                    payload = self._build_anthropic_payload(messages, tools, stream=False)
+                    payload = self._build_anthropic_payload(messages, tools,
+                                                            stream=False, bare=bare)
                     data = await self._run_curl(self._anthropic_url(), payload)
                     return self._anthropic_to_openai_response(data)
-                payload = self._build_openai_payload(messages, tools, stream=False)
+                payload = self._build_openai_payload(messages, tools,
+                                                     stream=False, bare=bare)
                 return await self._run_curl(self._openai_url(), payload)
             except RequestTooLargeError as e:
                 attempts += 1
@@ -246,7 +307,17 @@ class WeaverProvider:
         messages: List[Message],
         tools: Optional[List[Dict]] = None,
         stream: bool = False,
+        bare: bool = False,
     ) -> Dict[str, Any]:
+        if bare:
+            # طلب أدنى: بلا system/tools/temperature، max_tokens صغير
+            conv = [self._msg_to_openai(m) for m in messages if m.role != "system"]
+            return {
+                "model": self.config.model,
+                "messages": conv,
+                "max_tokens": min(self.config.max_tokens, 1024),
+                "stream": stream,
+            }
         payload: Dict[str, Any] = {
             "model": self.config.model,
             "messages": [self._msg_to_openai(m) for m in messages],
@@ -279,7 +350,21 @@ class WeaverProvider:
         messages: List[Message],
         tools: Optional[List[Dict]] = None,
         stream: bool = False,
+        bare: bool = False,
     ) -> Dict[str, Any]:
+        if bare:
+            # طلب أدنى يطابق ما ينجح يدوياً: بلا system/tools/temperature،
+            # max_tokens صغير، رسائل user/assistant النصّية فقط.
+            conv_min = [{"role": m.role, "content": m.content or ""}
+                        for m in messages
+                        if m.role in ("user", "assistant") and (m.content or "").strip()]
+            if not conv_min:
+                conv_min = [{"role": "user", "content": "مرحبا"}]
+            return {
+                "model": self.config.model,
+                "max_tokens": min(self.config.max_tokens, 1024),
+                "messages": conv_min,
+            }
         system_parts: List[str] = []
         conv: List[Dict[str, Any]] = []
 
@@ -545,13 +630,16 @@ class WeaverProvider:
         # بينما ينجح نفس الطلب عند إعادة المحاولة. نعامله كخطأ عابر يُعاد تلقائياً.
         if 300 <= status < 400:
             body = raw.strip()[:200] or "(بلا محتوى)"
-            err3xx = TransientProviderError(
-                f"❌ بوابة المزوّد ردّت بإعادة توجيه/عدم إتاحة مؤقتة (HTTP {status}).\n"
+            # ProviderError (لا Transient) عمداً: لا نُعيد المحاولة على مستوى curl
+            # (لا تنجح فوراً وتستنزف التوكينات)؛ سلّم complete() يتكفّل بالتكيّف.
+            err3xx = ProviderError(
+                f"❌ بوابة المزوّد ردّت بإعادة توجيه/رفض الطلب (HTTP {status}).\n"
                 f"   التفصيل: {body}\n"
-                f"   تلميح: غالباً ضغط مؤقت أو رفض طلب الأدوات على بوابة المزوّد — "
-                f"يعيد WeaverCode المحاولة (وبلا أدوات) تلقائياً. إن تكرّر، جرّب مزوّداً آخر."
+                f"   تلميح: البوابة ترفض هذا الطلب — يجرّب WeaverCode طلباً أدنى "
+                f"تلقائياً. إن تكرّر، فالبوابة مقيّدة؛ جرّب مزوّداً آخر."
             )
             err3xx.status = status
+            err3xx.billing = False
             raise err3xx
 
         snippet = raw.strip()[:400]
@@ -635,12 +723,17 @@ class WeaverProvider:
         البوابات المتوافقة (مثل capi.aerolink) التي تتكلّم OpenAI لا Anthropic.
         يمكن تعطيل التبديل بتثبيت WEAVER_API_FORMAT صراحةً.
         """
+        primary = self._is_anthropic()
+
+        # قاطع الدائرة: بوابة مقيّدة تعلّمنا أنها تقبل «الوضع الأدنى» فقط →
+        # نرسل طلباً واحداً أدنى مباشرةً (بلا سلّم) حتى لا نُهدر التوكينات.
+        if self._bare_mode:
+            return await self._complete_format(messages, None, primary, bare=True)
+
         # بعض البوابات ترفض طلبات الأدوات؛ إن تعلّمنا ذلك سابقاً في هذه الجلسة
         # نُرسل بلا أدوات مباشرةً (أسرع).
         if self._drop_tools:
             tools = None
-
-        primary = self._is_anthropic()
 
         # المستخدم ثبّت الصيغة صراحةً → التزم بها دون سلّم التكيّف.
         if self._format_forced():
@@ -672,59 +765,42 @@ class WeaverProvider:
                 continue
 
             if not self._response_is_empty(resp):
-                # نجح ردٌّ حقيقي → تعلّم ما نجح لبقية الجلسة
-                if fmt != primary:
-                    self._format_override = fmt
-                if tools and not use_tools:
-                    self._drop_tools = True
+                # نجح ردٌّ حقيقي → تعلّم ما نجح (للجلسة وللتشغيلات القادمة)
+                if fmt != primary or (tools and not use_tools):
+                    if fmt != primary:
+                        self._format_override = fmt
+                    if tools and not use_tools:
+                        self._drop_tools = True
+                    self._save_quirk_cache()
                 return resp
 
             # ردٌّ فارغ: احتفظ به كخيار أخير وواصل تجربة المرشّحين
             if first_resp is None:
                 first_resp = resp
 
-        # ── احتياط أخير للبوابات التي ترفض الطلبات الكبيرة (305/3xx) ─────────
-        # كثيراً ما ترفض البوابات المجانية max_tokens الكبير أو البرومبت الطويل
-        # بـ «305 Service Unavailable». نُجرّب طلباً أدنى يطابق ما ينجح يدوياً:
-        # max_tokens صغير + بلا أدوات + برومبت هوية قصير. ونتذكّر ما نجح للجلسة.
+        # ── احتياط أخير للبوابات المقيّدة (305/3xx): الوضع الأدنى ───────────
+        # كثيراً ما ترفض البوابات المجانية البرومبت الطويل (خصوصاً تعليمات
+        # «لا تقل إنك Claude») أو الأدوات أو max_tokens الكبير بـ 305. نُجرّب
+        # طلباً أدنى يطابق ما ينجح يدوياً: بلا system/tools/temperature وبـ
+        # max_tokens صغير. الهوية تبقى محميّة عبر منقّي المخرجات. وعند النجاح
+        # نُفعّل قاطع الدائرة فتصير الرسائل التالية طلباً واحداً (لا استنزاف).
         if last_err is not None and 300 <= getattr(last_err, "status", 0) < 400:
-            saved_mt = self.config.max_tokens
-            self.config.max_tokens = min(saved_mt, 1024)
-            minimal_msgs = self._minimal_messages(messages)
             for fmt in (primary, not primary):
                 try:
-                    resp_min = await self._complete_format(minimal_msgs, None, fmt)
+                    resp_bare = await self._complete_format(messages, None, fmt, bare=True)
                 except ProviderError:
                     continue
-                if not self._response_is_empty(resp_min):
-                    # نجح الطلب الأدنى → نتذكّر (max_tokens الصغير + إسقاط الأدوات)
-                    self._drop_tools = True
+                if not self._response_is_empty(resp_bare):
+                    self._bare_mode = True
                     if fmt != primary:
                         self._format_override = fmt
-                    return resp_min
-            self.config.max_tokens = saved_mt  # فشل الأدنى أيضاً → استرجِع
+                    self._save_quirk_cache()  # لن نُعيد الاكتشاف مرة أخرى
+                    return resp_bare
 
         # لم ينجح أي مرشّح بردٍّ حقيقي
         if first_resp is not None:
             return first_resp  # أرجِع أفضل ما توفّر (فارغ) بدل رمي خطأ
         raise last_err or ProviderError("❌ فشل كل محاولات الاتصال بالمزوّد.")
-
-    @staticmethod
-    def _minimal_messages(messages: List[Message]) -> List[Message]:
-        """طلب أدنى يطابق ما ينجح يدوياً: برومبت هوية قصير + رسائل المحادثة فقط.
-
-        نستبدل رسائل النظام الطويلة (البرومبت الكامل + الذاكرة) بسطر هوية قصير،
-        لأن بعض البوابات ترفض الطلبات الكبيرة. نُبقي هوية WeaverCode.
-        """
-        out: List[Message] = [Message(
-            role="system",
-            content=("أنت WeaverCode، مساعد برمجي مستقل. أجب مباشرةً وبالعربية. "
-                     "لا تقل إنك Claude أو Anthropic أو أي نموذج/شركة."))]
-        for m in messages:
-            if m.role == "system":
-                continue
-            out.append(m)
-        return out
 
     async def stream(
         self,
