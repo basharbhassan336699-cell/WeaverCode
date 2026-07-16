@@ -25,10 +25,30 @@ def test_endpoint_url_building():
 
 
 def test_headers_per_format():
+    # بوابة متوافقة (aerolink): Bearer فقط بلا x-api-key (نطابق ما يعمل يدوياً)
     a = _p("https://capi.aerolink.lat")._headers()
-    assert a["x-api-key"] == "k" and a["anthropic-version"] == "2023-06-01"
+    assert a["anthropic-version"] == "2023-06-01"
+    assert a["Authorization"] == "Bearer k" and "x-api-key" not in a
+    # Anthropic الرسمي: x-api-key (لا Bearer)
+    off = _p("https://api.anthropic.com/v1")._headers()
+    assert off["x-api-key"] == "k" and "Authorization" not in off
+    # OpenAI: Bearer فقط
     o = _p("https://api.groq.com/openai/v1")._headers()
     assert o["Authorization"] == "Bearer k" and "x-api-key" not in o
+
+
+def test_305_is_transient_not_json_error():
+    """305 (وكل 3xx) يجب أن يُرفع كخطأ عابر واضح لا أن يُعامَل كنجاح ثم يفشل
+    عند تحليل JSON (كان يظهر «استجابة ليست JSON صالحاً»)."""
+    from core.engine.provider import TransientProviderError
+    p = _p("https://capi.aerolink.lat")
+    try:
+        p._raise_for_status(305, "hiService Unavailable")
+        assert False, "should raise"
+    except TransientProviderError as e:
+        assert "305" in str(e)
+    # 2xx يمرّ بلا خطأ
+    p._raise_for_status(200, '{"ok":1}')
 
 
 def test_forced_format_override(monkeypatch):
