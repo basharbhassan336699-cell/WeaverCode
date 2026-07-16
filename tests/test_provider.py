@@ -323,6 +323,26 @@ def test_complete_drops_tools_on_305(monkeypatch):
     assert p._drop_tools is True  # تذكّر إسقاط الأدوات لبقية الجلسة
 
 
+def test_complete_ladder_switch_and_drop_tools(monkeypatch):
+    """أعمق مرشّح: ينجح فقط بالصيغة الأخرى وبلا أدوات → يتعلّم الاثنين."""
+    from core.engine.provider import ProviderError
+    p = _make_provider_for_fallback(anthropic_primary=True)  # primary=Anthropic
+
+    async def fake_format(messages, tools, anthropic):
+        # ينجح فقط عندما (OpenAI) و(بلا أدوات)
+        if (not anthropic) and (not tools):
+            return _wrap_openai("نجح أخيراً")
+        err = ProviderError("fail"); err.status = 305
+        raise err
+
+    monkeypatch.setattr(p, "_complete_format", fake_format)
+    import asyncio
+    resp = asyncio.run(p.complete([Message(role="user", content="hi")],
+                                  tools=[{"type": "function", "function": {"name": "X"}}]))
+    assert resp["choices"][0]["message"]["content"] == "نجح أخيراً"
+    assert p._format_override is False and p._drop_tools is True
+
+
 def test_complete_forced_format_no_fallback(monkeypatch):
     """عند تثبيت WEAVER_API_FORMAT: لا تبديل تلقائي إطلاقاً."""
     monkeypatch.setenv("WEAVER_API_FORMAT", "openai")
