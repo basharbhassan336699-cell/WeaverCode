@@ -1,0 +1,16 @@
+{
+  "_comment": "قائمة النماذج التي تظهر في أمر /model التفاعلي. عدّلها كما تشاء — يمكنك دائماً كتابة اسم نموذج مخصّص لا يظهر هنا.",
+  "models": [
+    {"name": "claude-fable-5", "desc": "Custom / aerolink"},
+    {"name": "claude-sonnet-5", "desc": "Sonnet 5 · الأحدث"},
+    {"name": "claude-sonnet-4-6", "desc": "Sonnet 4.6 · مهام يومية"},
+    {"name": "claude-opus-4-1", "desc": "Opus 4.1 · الأقوى"},
+    {"name": "claude-haiku-4-5-20251001", "desc": "Haiku · سريع ورخيص"},
+    {"name": "gpt-4o", "desc": "OpenAI GPT-4o"},
+    {"name": "gpt-4o-mini", "desc": "GPT-4o mini · أسرع وأرخص"},
+    {"name": "llama-3.3-70b-versatile", "desc": "Groq · Llama 3.3 70B"},
+    {"name": "deepseek-chat", "desc": "DeepSeek"},
+    {"name": "anthropic/claude-sonnet-4-6", "desc": "OpenRouter · Sonnet"},
+    {"name": "meta-llama/llama-3.1-8b-instruct", "desc": "OpenRouter · Llama صغير"}
+  ]
+}
