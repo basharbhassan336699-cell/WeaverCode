@@ -304,6 +304,25 @@ def test_complete_shrinks_max_tokens_on_413(monkeypatch):
     assert INPUT + p.config.max_tokens <= LIMIT  # يلائم الحدّ فعلاً
 
 
+def test_complete_drops_tools_on_305(monkeypatch):
+    """بوابة ترفض طلبات الأدوات بـ 305 → يُعاد الطلب بلا أدوات ويُتذكَّر ذلك."""
+    from core.engine.provider import TransientProviderError
+    p = _make_provider_for_fallback(anthropic_primary=True)
+
+    async def fake_format(messages, tools, anthropic):
+        if tools:
+            err = TransientProviderError("HTTP 305"); err.status = 305
+            raise err
+        return _wrap_openai("مرحبا بلا أدوات")
+
+    monkeypatch.setattr(p, "_complete_format", fake_format)
+    import asyncio
+    resp = asyncio.run(p.complete([Message(role="user", content="hi")],
+                                  tools=[{"type": "function", "function": {"name": "Read"}}]))
+    assert resp["choices"][0]["message"]["content"] == "مرحبا بلا أدوات"
+    assert p._drop_tools is True  # تذكّر إسقاط الأدوات لبقية الجلسة
+
+
 def test_complete_forced_format_no_fallback(monkeypatch):
     """عند تثبيت WEAVER_API_FORMAT: لا تبديل تلقائي إطلاقاً."""
     monkeypatch.setenv("WEAVER_API_FORMAT", "openai")

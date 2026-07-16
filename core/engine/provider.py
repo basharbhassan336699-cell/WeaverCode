@@ -118,6 +118,8 @@ class WeaverProvider:
         # تجاوز الصيغة المكتشَف تلقائياً بعد نجاح الصيغة الأخرى (تعلّم ذاتي للجلسة)
         # None = استخدم الاكتشاف العادي؛ True = Anthropic؛ False = OpenAI
         self._format_override: Optional[bool] = None
+        # بعد نجاح إرسال بلا أدوات على بوابة ترفض الأدوات (305)، نتذكّره للجلسة
+        self._drop_tools: bool = False
         if not shutil.which("curl"):
             raise ProviderError(
                 "❌ الأداة curl غير مثبّتة على النظام. "
@@ -543,12 +545,14 @@ class WeaverProvider:
         # بينما ينجح نفس الطلب عند إعادة المحاولة. نعامله كخطأ عابر يُعاد تلقائياً.
         if 300 <= status < 400:
             body = raw.strip()[:200] or "(بلا محتوى)"
-            raise TransientProviderError(
+            err3xx = TransientProviderError(
                 f"❌ بوابة المزوّد ردّت بإعادة توجيه/عدم إتاحة مؤقتة (HTTP {status}).\n"
                 f"   التفصيل: {body}\n"
-                f"   تلميح: غالباً ضغط مؤقت على بوابة المزوّد — يعيد WeaverCode "
-                f"المحاولة تلقائياً. إن تكرّر، جرّب بعد قليل أو مزوّداً آخر."
+                f"   تلميح: غالباً ضغط مؤقت أو رفض طلب الأدوات على بوابة المزوّد — "
+                f"يعيد WeaverCode المحاولة (وبلا أدوات) تلقائياً. إن تكرّر، جرّب مزوّداً آخر."
             )
+            err3xx.status = status
+            raise err3xx
 
         snippet = raw.strip()[:400]
         # نحاول استخراج رسالة الخطأ من جسم JSON إن وُجدت
@@ -633,6 +637,11 @@ class WeaverProvider:
         """
         primary = self._is_anthropic()
 
+        # بعض البوابات (aerolink) ترفض طلبات الأدوات بـ 305؛ إن تعلّمنا ذلك
+        # سابقاً في هذه الجلسة نُرسل بلا أدوات مباشرةً (أسرع).
+        if self._drop_tools:
+            tools = None
+
         # المستخدم ثبّت الصيغة → لا تبديل، سلوك مباشر
         if self._format_forced():
             return await self._complete_format(messages, tools, primary)
@@ -646,6 +655,15 @@ class WeaverProvider:
                     or getattr(e, "billing", False)
                     or getattr(e, "status", 0) in (401, 403)):
                 raise
+            # بوابة ردّت 3xx (305…) وكانت هناك أدوات → قد تكون الأدوات هي المُحفّز.
+            # جرّب نفس الصيغة بلا أدوات (تعمل الدردشة على الأقل) وتذكّر ذلك للجلسة.
+            if 300 <= getattr(e, "status", 0) < 400 and tools:
+                try:
+                    resp_nt = await self._complete_format(messages, None, primary)
+                    self._drop_tools = True
+                    return resp_nt
+                except ProviderError:
+                    pass
             # خطأ دائم آخر (404 نقطة غير موجودة مثلاً) → جرّب الصيغة الأخرى
             resp_alt = await self._complete_format(messages, tools, not primary)
             self._format_override = not primary  # تعلّم الصيغة الناجحة
