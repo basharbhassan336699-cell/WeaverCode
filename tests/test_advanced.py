@@ -86,7 +86,9 @@ def test_hooks_matcher_and_deny(tmp_path):
 
 
 def test_hooks_none_when_empty():
-    hm = HookManager(config_path=Path("/nonexistent/hooks.json"))
+    # load_plugins=False لعزل الاختبار عن hooks الإضافات (plugins)
+    hm = HookManager(config_path=Path("/nonexistent/hooks.json"),
+                     load_plugins=False)
     assert hm.has_any() is False
     assert hm.run("PreToolUse", "Bash", {}) is True
 

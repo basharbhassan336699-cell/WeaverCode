@@ -1,5 +1,31 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## v3.0.0 — تكامل الميزات الناقصة (Sessions + Hooks موسّع + Skills + Plugins + MCP + FTS5)
+
+نُفّذت المهام الثمانية من مواصفة weaver-integrate-missing بالترتيب دون كسر
+أي كود قائم (إضافات فقط)، و63 اختباراً كلها ناجحة:
+
+1. **Hooks موسّع (9 أحداث)** في `core/hooks.py`: أُضيفت
+   SessionStart / SessionEnd / PreCompact / PostCompact / InstructionsLoaded
+   مع دوالّها، ودُمجت في `query_engine.py` (حقن سياق البدء، منع/إثراء التلخيص)
+   و`weaver.py` (InstructionsLoaded عند تحميل CLAUDE.md).
+2. **FTS5 حقيقي** في `core/memory/store.py`: `get_relevant()` تستخدم
+   `MATCH` مع triggers مزامنة تلقائية وفهرسة الصفوف القديمة، واحتياطي LIKE.
+3. **الجلسات (Sessions)**: دوال save/list/load/rename في المتجر،
+   و`--resume` / `--sessions` / `--rename` في `weaver.py`، وحفظ تلقائي
+   للمحادثة التفاعلية للاستئناف لاحقاً.
+4. **نظام Skills** في `core/skills/`: `SkillLoader` + أداة `Skill` +
+   4 مهارات في `.claude/skills/`.
+5. **نظام Plugins** في `core/plugins/`: `PluginLoader` يكتشف
+   `.claude-plugin/plugin.json`، يدمج hooks (مع دعم صيغة Claude Code
+   المتداخلة و`${CLAUDE_PLUGIN_ROOT}`)، ومثال hookify كامل في `plugins/`.
+   يمكن تعطيل تحميل الإضافات بـ `WEAVER_LOAD_PLUGINS=0`.
+6. **MCP موسّع**: صنفا `MCPServerSSE` و`MCPServerHTTP` ودعم
+   `"transport": "sse"|"http"|"stdio"` في `config/mcp.json`.
+7. **أوامر سلاش**: weaver-sessions / weaver-resume / weaver-compact /
+   weaver-plugins / weaver-skills في `.claude/commands/`.
+8. **CLAUDE.md**: قسم «الميزات المضافة (v3.0)».
+
 ## v2.1.7 — تقلّص تلقائي عند «الطلب أكبر من الحدّ» (تشغيل Groq المجاني)
 
 ### الحالة

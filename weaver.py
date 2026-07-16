@@ -12,6 +12,8 @@ import asyncio
 import argparse
 import os
 import sys
+import json
+import uuid
 from pathlib import Path
 
 # إضافة المشروع للمسار
@@ -128,6 +130,14 @@ async def build_engine(mode: str = "main", plan_mode: bool = False):
     tools = ToolRegistry()
     hooks = HookManager()
 
+    # hook: InstructionsLoaded — عند تحميل CLAUDE.md في بداية الجلسة
+    claude_md = Path(__file__).parent / "CLAUDE.md"
+    if claude_md.exists():
+        try:
+            hooks.run_instructions_loaded(str(claude_md))
+        except Exception:
+            pass
+
     # تشغيل خوادم MCP (إن وُجد config/mcp.json) وتسجيل أدواتها
     mcp = MCPManager()
     try:
@@ -212,8 +222,13 @@ def _show_empty_diagnostic(provider) -> None:
               f"bash scripts/weaver-doctor.sh{RESET}")
 
 
-async def interactive_mode():
-    """وضع المحادثة التفاعلية"""
+async def interactive_mode(initial_history=None, session_id=None,
+                           session_name=None):
+    """وضع المحادثة التفاعلية.
+
+    يدعم استئناف جلسة سابقة (initial_history) ويحفظ الجلسة تلقائياً بعد كل رد
+    حتى يمكن استئنافها لاحقاً عبر --resume.
+    """
     load_env()
 
     engine, provider, mcp = await build_engine("main")
@@ -224,7 +239,20 @@ async def interactive_mode():
           f"'/plan' وضع التخطيط | '/commands' لعرض الأوامر{RESET}")
     draw_separator()
 
-    history = []
+    from core.engine.provider import Message
+    history = list(initial_history) if initial_history else []
+    session_id = session_id or uuid.uuid4().hex[:8]
+
+    def _save_session(last_prompt: str):
+        """حفظ الجلسة الحالية في الذاكرة (تلقائياً بعد كل رد)."""
+        try:
+            msgs = [{"role": m.role, "content": m.content} for m in history
+                    if m.role in ("user", "assistant")]
+            name = session_name or last_prompt[:40] or session_id
+            engine.memory.save_session(session_id, name, last_prompt,
+                                       json.dumps(msgs, ensure_ascii=False))
+        except Exception:
+            pass
 
     while True:
         try:
@@ -308,9 +336,77 @@ async def interactive_mode():
             draw_response(result.text)
             if result.tool_calls_made:
                 draw_stats(result.turns, result.tool_calls_made)
+            # تراكم السجل + حفظ الجلسة تلقائياً للاستئناف لاحقاً
+            history.append(Message(role="user", content=prompt))
+            history.append(Message(role="assistant", content=result.text))
+            _save_session(prompt)
 
     await mcp.stop_all()
     await provider.close()
+
+
+async def _show_sessions():
+    """عرض الجلسات المحفوظة (لأمر --sessions)."""
+    import datetime
+    from core.memory.store import MemoryStore
+    sessions = MemoryStore().list_sessions()
+    if not sessions:
+        draw_info("لا توجد جلسات محفوظة بعد.")
+        return
+    print(f"\n{ORANGE}الجلسات المحفوظة:{RESET}")
+    for i, s in enumerate(sessions, 1):
+        dt = datetime.datetime.fromtimestamp(
+            s["updated_at"]).strftime("%Y-%m-%d %H:%M")
+        name = s["name"] or s["id"][:8]
+        prompt = (s["last_prompt"] or "")[:60]
+        print(f"  {ORANGE}{i}.{RESET} [{name}] {GRAY}{dt}{RESET} — {prompt}")
+    print(f"\n{GRAY}للاستئناف: python weaver.py --resume <الاسم أو ID>{RESET}")
+
+
+async def resume_session(session_ref=None):
+    """اختيار جلسة سابقة أو استئنافها مباشرة."""
+    load_env()
+    from core.memory.store import MemoryStore
+    from core.engine.provider import Message
+    memory = MemoryStore()
+
+    if session_ref is None or session_ref == "__picker__":
+        sessions = memory.list_sessions()
+        if not sessions:
+            draw_error("لا توجد جلسات محفوظة.")
+            return
+        import datetime
+        print(f"\n{ORANGE}الجلسات المحفوظة:{RESET}")
+        for i, s in enumerate(sessions, 1):
+            dt = datetime.datetime.fromtimestamp(
+                s["updated_at"]).strftime("%Y-%m-%d %H:%M")
+            name = s["name"] or s["id"][:8]
+            prompt = (s["last_prompt"] or "")[:60]
+            print(f"  {ORANGE}{i}.{RESET} [{name}] {GRAY}{dt}{RESET} — {prompt}")
+        print()
+        try:
+            choice = input(f"  {ORANGE}اختر رقماً أو اكتب ID/اسم الجلسة:{RESET} ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+        if choice.isdigit() and 1 <= int(choice) <= len(sessions):
+            session_ref = sessions[int(choice) - 1]["id"]
+        else:
+            session_ref = choice
+
+    data = memory.load_session(session_ref)
+    if not data:
+        draw_error(f"لم يُعثر على جلسة: {session_ref}")
+        return
+
+    draw_success(f"استئناف الجلسة: {data.get('name') or data['id'][:8]}")
+    history = []
+    for m in data.get("messages", []):
+        if m.get("role") in ("user", "assistant") and m.get("content"):
+            history.append(Message(role=m["role"], content=m["content"]))
+
+    await interactive_mode(initial_history=history,
+                           session_id=data["id"],
+                           session_name=data.get("name"))
 
 
 def main():
@@ -349,6 +445,13 @@ def main():
                         help="عرض إصدار WeaverCode والخروج")
     parser.add_argument("--print-system", action="store_true",
                         help="طباعة البروموه النظامي الفعلي المُرسَل للنموذج (تشخيص الهوية)")
+    parser.add_argument("--resume", "-r", nargs="?", const="__picker__",
+                        metavar="SESSION",
+                        help="استئناف جلسة سابقة (بدون قيمة = اختيار تفاعلي)")
+    parser.add_argument("--rename", metavar="NAME",
+                        help="تسمية الجلسة الحالية عند بدء وضع تفاعلي جديد")
+    parser.add_argument("--sessions", action="store_true",
+                        help="عرض قائمة الجلسات المحفوظة")
 
     args = parser.parse_args()
 
@@ -406,8 +509,17 @@ def main():
         asyncio.run(daemon_main())
         return
 
+    # ── الجلسات: العرض والاستئناف ───────────────────────────────────────────
+    if args.sessions:
+        asyncio.run(_show_sessions())
+        return
+    if args.resume is not None:
+        asyncio.run(resume_session(
+            None if args.resume == "__picker__" else args.resume))
+        return
+
     if args.interactive:
-        asyncio.run(interactive_mode())
+        asyncio.run(interactive_mode(session_name=args.rename))
     elif args.prompt:
         asyncio.run(run_once(args.prompt, mode=args.mode, stream=args.stream,
                              plan_mode=args.plan))
