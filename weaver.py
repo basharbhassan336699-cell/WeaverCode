@@ -222,6 +222,40 @@ def _show_empty_diagnostic(provider) -> None:
               f"bash scripts/weaver-doctor.sh{RESET}")
 
 
+def _make_slash_prompt(commands):
+    """بناء جلسة إدخال مع إكمال تلقائي لأوامر السلاش (يظهر عند كتابة '/').
+
+    يستخدم prompt_toolkit إن كان مثبّتاً؛ وإلا يُرجع None فنسقط لـ input() العادي.
+    للتفعيل على Termux:  pip install prompt_toolkit --break-system-packages
+    """
+    try:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.completion import Completer, Completion
+    except Exception:
+        return None
+
+    metas = commands.list_meta()
+
+    class _SlashCompleter(Completer):
+        def get_completions(self, document, complete_event):
+            text = document.text_before_cursor
+            if not text.startswith("/") or " " in text:
+                return
+            q = text[1:].lower()
+            for m in metas:
+                if q in m["name"].lower():
+                    yield Completion(
+                        "/" + m["name"], start_position=-len(text),
+                        display="/" + m["name"],
+                        display_meta=(m.get("description") or "")[:60],
+                    )
+
+    try:
+        return PromptSession(completer=_SlashCompleter(), complete_while_typing=True)
+    except Exception:
+        return None
+
+
 async def interactive_mode(initial_history=None, session_id=None,
                            session_name=None):
     """وضع المحادثة التفاعلية.
@@ -254,9 +288,17 @@ async def interactive_mode(initial_history=None, session_id=None,
         except Exception:
             pass
 
+    # جلسة إدخال مع إكمال أوامر السلاش (إن توفّر prompt_toolkit)
+    slash_session = _make_slash_prompt(commands)
+    if slash_session is not None:
+        draw_info("الإكمال التلقائي للأوامر مُفعّل — اكتب '/' لعرض القائمة.")
+
     while True:
         try:
-            prompt = draw_prompt()
+            if slash_session is not None:
+                prompt = (await slash_session.prompt_async("❯ أنت: ")).strip()
+            else:
+                prompt = draw_prompt()
         except (EOFError, KeyboardInterrupt):
             print(f"\n\n{ORANGE}🕸️  إلى اللقاء!{RESET}")
             break

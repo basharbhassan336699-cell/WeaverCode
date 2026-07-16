@@ -48,6 +48,39 @@ class SlashCommands:
     def names(self) -> List[str]:
         return sorted(self._commands.keys())
 
+    def _description_of(self, path: Path) -> str:
+        """قراءة وصف الأمر من frontmatter (يدعم الوصف متعدّد الأسطر '|')."""
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except Exception:
+            return ""
+        _body, meta = self._strip_frontmatter(raw)
+        desc = meta.get("description", "").strip()
+        if desc in ("|", ">", "|-", ">-", ""):
+            # وصف متعدّد الأسطر: خذ أول سطر غير فارغ بعد ---
+            m = re.match(r"^---\s*\n(.*?)\n---", raw, re.DOTALL)
+            if m:
+                after = False
+                for line in m.group(1).splitlines():
+                    s = line.strip()
+                    if s.startswith("description:"):
+                        after = True
+                        continue
+                    if after and s and not s.endswith(":"):
+                        return s.lstrip("-").strip()
+        return desc
+
+    def list_meta(self) -> List[Dict[str, str]]:
+        """قائمة الأوامر الفريدة مع أوصافها (للإكمال التلقائي في الواجهات)."""
+        best: Dict[str, tuple] = {}   # str(path) -> (name, desc)
+        for name, path in self._commands.items():
+            key = str(path)
+            if key in best and len(best[key][0]) <= len(name):
+                continue
+            best[key] = (name, self._description_of(path))
+        items = [{"name": n, "description": d} for (n, d) in best.values()]
+        return sorted(items, key=lambda x: x["name"])
+
     def has(self, name: str) -> bool:
         return name in self._commands
 

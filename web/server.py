@@ -133,6 +133,15 @@ def _stats() -> dict:
     return out
 
 
+def _api_commands() -> dict:
+    """قائمة أوامر السلاش مع أوصافها (للإكمال التلقائي في الواجهة)."""
+    try:
+        from core.commands import SlashCommands
+        return {"commands": SlashCommands().list_meta()}
+    except Exception:
+        return {"commands": []}
+
+
 def _api_status() -> dict:
     env = _read_env()
     key = env.get("WEAVER_API_KEY", "").strip()
@@ -423,6 +432,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 WEAVER_VERSION = "?"
             return self._json({"version": WEAVER_VERSION})
+        if path == "/api/commands":
+            return self._json(_api_commands())
         if path == "/api/status":
             return self._json(_api_status())
         if path == "/api/files":
