@@ -37,16 +37,17 @@ def test_headers_per_format():
     assert o["Authorization"] == "Bearer k" and "x-api-key" not in o
 
 
-def test_305_is_transient_not_json_error():
-    """305 (وكل 3xx) يجب أن يُرفع كخطأ عابر واضح لا أن يُعامَل كنجاح ثم يفشل
-    عند تحليل JSON (كان يظهر «استجابة ليست JSON صالحاً»)."""
-    from core.engine.provider import TransientProviderError
+def test_305_raises_clear_error_with_status():
+    """305 (وكل 3xx) يُرفع كخطأ واضح يحمل .status (لا يُعامَل كنجاح ثم يفشل
+    عند تحليل JSON). وليس Transient حتى لا يُعاد على مستوى curl (توفير توكينات)."""
+    from core.engine.provider import ProviderError, TransientProviderError
     p = _p("https://capi.aerolink.lat")
     try:
         p._raise_for_status(305, "hiService Unavailable")
         assert False, "should raise"
-    except TransientProviderError as e:
-        assert "305" in str(e)
+    except ProviderError as e:
+        assert "305" in str(e) and getattr(e, "status", 0) == 305
+        assert not isinstance(e, TransientProviderError)  # لا يُعاد على مستوى curl
     # 2xx يمرّ بلا خطأ
     p._raise_for_status(200, '{"ok":1}')
 
