@@ -211,11 +211,14 @@ class WeaverProvider:
         if self._is_anthropic():
             headers = {
                 "Content-Type": "application/json",
-                "x-api-key": self.config.api_key,
                 "anthropic-version": "2023-06-01",
-                # نُرسل Bearer أيضاً لأن بعض الوسطاء المتوافقين مع Anthropic يقبلونه
-                "Authorization": f"Bearer {self.config.api_key}",
             }
+            # Anthropic الرسمي يتطلب x-api-key؛ أما البوابات المتوافقة (aerolink…)
+            # فتستخدم Bearer فقط. نطابق تماماً ما يعمل يدوياً حتى لا نُحفّز 305.
+            if "api.anthropic.com" in self.config.base_url.lower():
+                headers["x-api-key"] = self.config.api_key
+            else:
+                headers["Authorization"] = f"Bearer {self.config.api_key}"
         else:
             headers = {
                 "Content-Type": "application/json",
@@ -531,8 +534,21 @@ class WeaverProvider:
 
     def _raise_for_status(self, status: int, raw: str) -> None:
         """يرفع خطأً عربياً واضحاً بحسب رمز حالة HTTP"""
-        if status and status < 400:
+        # 2xx فقط نجاح. (0 = curl لم يُبلّغ حالة → نتركه للتحليل اللاحق)
+        if status == 0 or 200 <= status < 300:
             return
+
+        # ── 3xx: إعادة توجيه وصلتنا رغم -L (غالباً 305 Use Proxy / بوابة مضغوطة) ──
+        # كثيراً ما تردّ بوابة aerolink بـ 305 و«Service Unavailable» تحت الضغط،
+        # بينما ينجح نفس الطلب عند إعادة المحاولة. نعامله كخطأ عابر يُعاد تلقائياً.
+        if 300 <= status < 400:
+            body = raw.strip()[:200] or "(بلا محتوى)"
+            raise TransientProviderError(
+                f"❌ بوابة المزوّد ردّت بإعادة توجيه/عدم إتاحة مؤقتة (HTTP {status}).\n"
+                f"   التفصيل: {body}\n"
+                f"   تلميح: غالباً ضغط مؤقت على بوابة المزوّد — يعيد WeaverCode "
+                f"المحاولة تلقائياً. إن تكرّر، جرّب بعد قليل أو مزوّداً آخر."
+            )
 
         snippet = raw.strip()[:400]
         # نحاول استخراج رسالة الخطأ من جسم JSON إن وُجدت
