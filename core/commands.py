@@ -28,12 +28,22 @@ class SlashCommands:
         self.reload()
 
     def reload(self) -> None:
-        """إعادة مسح مجلد الأوامر"""
+        """إعادة مسح مجلد الأوامر + أوامر الإضافات (plugins)."""
         self._commands.clear()
-        if not self.commands_dir.exists():
-            return
-        for md in sorted(self.commands_dir.glob("*.md")):
-            self._commands[md.stem] = md
+        # (1) أوامر .claude/commands لها الأولوية
+        if self.commands_dir.exists():
+            for md in sorted(self.commands_dir.glob("*.md")):
+                self._commands[md.stem] = md
+        # (2) أوامر الإضافات: تُتاح بالاسم الكامل «plugin/command» ودائماً،
+        #     وبالاسم المختصر «command» إن لم يكن محجوزاً (الأولوية لما سبق).
+        try:
+            from core.plugins import PluginLoader
+            for full_name, path in PluginLoader().get_all_commands().items():
+                self._commands[full_name] = path
+                stem = full_name.split("/", 1)[-1]
+                self._commands.setdefault(stem, path)
+        except Exception:
+            pass  # الإضافات اختيارية — لا تُسقط أوامر السلاش الأساسية
 
     def names(self) -> List[str]:
         return sorted(self._commands.keys())
