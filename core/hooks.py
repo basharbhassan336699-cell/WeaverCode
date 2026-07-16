@@ -34,10 +34,19 @@ from typing import Dict, List, Optional, Any
 class HookManager:
     """محمّل ومشغّل hooks دورة الحياة"""
 
-    EVENTS = ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop")
+    EVENTS = (
+        "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop",
+        "SessionStart", "SessionEnd", "PreCompact", "PostCompact",
+        "InstructionsLoaded",
+    )
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Optional[Path] = None,
+                 load_plugins: bool = True):
         self._hooks: Dict[str, List[Dict[str, str]]] = {}
+        # دمج hooks الإضافات (plugins) تلقائياً؛ يمكن تعطيله عبر
+        # WEAVER_LOAD_PLUGINS=0 أو تمرير load_plugins=False (للاختبارات/الأداء).
+        self._load_plugins = load_plugins and os.environ.get(
+            "WEAVER_LOAD_PLUGINS", "1").strip().lower() not in ("0", "false", "off", "no")
         self.config_path = self._resolve_config(config_path)
         self.load()
 
@@ -53,16 +62,19 @@ class HookManager:
 
     def load(self) -> None:
         self._hooks.clear()
-        if not self.config_path or not self.config_path.exists():
-            return
-        try:
-            data = json.loads(self.config_path.read_text(encoding="utf-8"))
-        except Exception:
-            return
-        for event in self.EVENTS:
-            entries = data.get(event, [])
-            if isinstance(entries, list):
-                self._hooks[event] = [e for e in entries if isinstance(e, dict) and e.get("command")]
+        # (1) hooks المستخدم من hooks.json (إن وُجد)
+        if self.config_path and self.config_path.exists():
+            try:
+                data = json.loads(self.config_path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+            for event in self.EVENTS:
+                entries = data.get(event, [])
+                if isinstance(entries, list):
+                    self._hooks[event] = [e for e in entries
+                                          if isinstance(e, dict) and e.get("command")]
+        # (2) دمج hooks الإضافات (plugins) — يعمل حتى بلا hooks.json للمستخدم
+        self.merge_plugin_hooks()
 
     def has_any(self) -> bool:
         return any(self._hooks.values())
@@ -102,7 +114,9 @@ class HookManager:
         for entry in entries:
             if not self._matches(entry.get("matcher"), tool_name):
                 continue
-            command = entry["command"]
+            command = entry.get("command")
+            if not command:
+                continue
             timeout = int(entry.get("timeout", 30))
             try:
                 proc = subprocess.run(
@@ -116,3 +130,116 @@ class HookManager:
                 # فشل hook لا يُسقط النظام؛ يُتجاهَل بأمان
                 continue
         return allowed
+
+    # ── أحداث الجلسة والتلخيص (SessionStart / PreCompact / ...) ───────────────
+
+    def run_session_start(self) -> str:
+        """
+        تشغيل SessionStart hooks وجمع additionalContext منها.
+        يُرجع نصاً يُضاف إلى system prompt في بداية الجلسة.
+        """
+        entries = self._hooks.get("SessionStart", [])
+        context_parts: List[str] = []
+        env = dict(os.environ)
+        env["WEAVER_EVENT"] = "SessionStart"
+        for entry in entries:
+            command = entry.get("command", "")
+            timeout = int(entry.get("timeout", 30))
+            if not command:
+                continue
+            try:
+                proc = subprocess.run(
+                    command, shell=True, capture_output=True,
+                    text=True, timeout=timeout, env=env,
+                )
+                if proc.stdout.strip():
+                    # محاولة استخراج additionalContext من JSON
+                    try:
+                        data = json.loads(proc.stdout)
+                        ctx = (data.get("hookSpecificOutput", {})
+                                   .get("additionalContext", ""))
+                        if ctx:
+                            context_parts.append(ctx)
+                    except (json.JSONDecodeError, AttributeError):
+                        # مخرج نصي عادي
+                        context_parts.append(proc.stdout.strip())
+            except Exception:
+                continue
+        return "\n\n".join(context_parts)
+
+    def run_pre_compact(self, summary_so_far: str = "") -> tuple:
+        """
+        تشغيل PreCompact hooks.
+        يُرجع (True, extra_context) إذا سُمح بالتلخيص،
+        و(False, "") إذا مُنع بـ exit 2.
+        """
+        entries = self._hooks.get("PreCompact", [])
+        if not entries:
+            return True, ""
+        env = dict(os.environ)
+        env["WEAVER_EVENT"] = "PreCompact"
+        env["WEAVER_COMPACT_SUMMARY"] = summary_so_far
+        context_parts: List[str] = []
+        for entry in entries:
+            command = entry.get("command", "")
+            timeout = int(entry.get("timeout", 30))
+            if not command:
+                continue
+            try:
+                proc = subprocess.run(
+                    command, shell=True, capture_output=True,
+                    text=True, timeout=timeout, env=env,
+                )
+                if proc.returncode == 2:
+                    return False, ""
+                if proc.stdout.strip():
+                    context_parts.append(proc.stdout.strip())
+            except Exception:
+                continue
+        return True, "\n".join(context_parts)
+
+    def run_session_end(self) -> None:
+        self.run("SessionEnd")
+
+    def run_post_compact(self, summary: str = "") -> None:
+        self._run_with_env("PostCompact", {"WEAVER_COMPACT_SUMMARY": summary})
+
+    def run_instructions_loaded(self, claude_md_path: str = "") -> None:
+        self._run_with_env("InstructionsLoaded",
+                           {"WEAVER_INSTRUCTIONS_PATH": claude_md_path})
+
+    def _run_with_env(self, event: str, extra_env: dict) -> None:
+        entries = self._hooks.get(event, [])
+        if not entries:
+            return
+        env = dict(os.environ)
+        env["WEAVER_EVENT"] = event
+        env.update(extra_env)
+        for entry in entries:
+            command = entry.get("command", "")
+            timeout = int(entry.get("timeout", 30))
+            if not command:
+                continue
+            try:
+                subprocess.run(
+                    command, shell=True, capture_output=True,
+                    text=True, timeout=timeout, env=env,
+                )
+            except Exception:
+                continue
+
+    # ── دمج hooks الإضافات (plugins) مع hooks المستخدم ────────────────────────
+
+    def merge_plugin_hooks(self) -> None:
+        """دمج hooks الموجودة في plugins مع hooks المستخدم (إضافةً لا استبدالاً)."""
+        if not self._load_plugins:
+            return
+        try:
+            from core.plugins import PluginLoader
+            pl = PluginLoader()
+            plugin_hooks = pl.get_all_hooks()
+            for event, entries in plugin_hooks.items():
+                if event in self.EVENTS and entries:
+                    self._hooks.setdefault(event, []).extend(entries)
+        except Exception:
+            pass

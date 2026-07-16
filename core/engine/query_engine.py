@@ -212,6 +212,17 @@ class QueryEngine:
         digest = "\n".join(
             f"{m.role}: {(m.content or '')[:400]}" for m in older if (m.content or "").strip()
         )
+
+        # hook: PreCompact — يمكنه منع التلخيص (exit 2) أو إثراءه بسياق يُحفظ
+        pre_extra = ""
+        if self.hooks:
+            try:
+                allowed, pre_extra = self.hooks.run_pre_compact(digest)
+                if not allowed:
+                    return messages  # مُنع التلخيص بواسطة hook
+            except Exception:
+                pre_extra = ""
+
         try:
             resp = await self.provider.complete([
                 Message(role="system", content=(
@@ -225,7 +236,15 @@ class QueryEngine:
 
         if not summary.strip():
             return messages
+        if pre_extra:
+            summary = f"{pre_extra}\n\n{summary}"
         summary_msg = Message(role="system", content=f"## ملخص ما سبق:\n{summary}")
+        # hook: PostCompact — بعد اكتمال التلخيص
+        if self.hooks:
+            try:
+                self.hooks.run_post_compact(summary)
+            except Exception:
+                pass
         return system_msgs + [summary_msg] + recent
 
     def _tool_pre_approved(self, name: str) -> bool:
@@ -295,6 +314,15 @@ class QueryEngine:
         system = self.system_prompt
         if memory_context:
             system += f"\n\n## ذاكرة ذات صلة:\n{memory_context}"
+
+        # hook: SessionStart — يحقن سياقاً إضافياً في بداية الجلسة (للوكيل الرئيسي)
+        if self.hooks and self.depth == 0:
+            try:
+                extra_ctx = self.hooks.run_session_start()
+                if extra_ctx:
+                    system += f"\n\n## سياق بدء الجلسة:\n{extra_ctx}"
+            except Exception:
+                pass
 
         messages.append(Message(role="system", content=system))
 

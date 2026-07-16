@@ -631,6 +631,24 @@ class ToolRegistry:
             fn=self._gh_status,
         ))
 
+        # ── مهارات (Skills) ─────────────────────────────────────────────
+
+        self._add(Tool(
+            name="Skill",
+            description="تحميل مهارة (skill) وإضافة محتواها كسياق للمحادثة الحالية",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string",
+                             "description": "اسم الـ skill (مثل: frontend-design)"},
+                    "list": {"type": "boolean", "default": False,
+                             "description": "عرض قائمة بكل الـ skills المتاحة"},
+                },
+                "required": [],
+            },
+            fn=self._skill_load,
+        ))
+
     # ── تنفيذ الأدوات ────────────────────────────────────────────────────────
 
     def _add(self, tool: Tool):
@@ -1170,3 +1188,17 @@ class ToolRegistry:
         if "https://github.com" in result:
             return f"✅ تم إنشاء Issue\n{result.strip()}"
         return f"❌ فشل\n{result}"
+
+    # ── تحميل المهارات (Skills) ─────────────────────────────────────────
+
+    def _skill_load(self, name: str = "", list: bool = False) -> str:
+        try:
+            from core.skills import SkillLoader
+            loader = SkillLoader()
+            if list or not name:
+                names = loader.names()
+                return ("Skills المتاحة:\n" + "\n".join(f"• {n}" for n in names)
+                        if names else "لا توجد skills مثبتة.")
+            return loader.get_context(name)
+        except Exception as e:
+            return f"خطأ في تحميل الـ skill: {e}"

@@ -132,6 +132,168 @@ class MCPServer:
                     pass
 
 
+class MCPServerSSE:
+    """
+    اتصال بخادم MCP عبر Server-Sent Events (SSE).
+    يدعم خوادم MCP البعيدة التي تعمل على HTTP.
+    """
+
+    def __init__(self, name: str, url: str,
+                 headers: Optional[Dict[str, str]] = None):
+        self.name = name
+        self.url = url.rstrip("/")
+        self.headers = headers or {}
+        self.tools: List[Dict[str, Any]] = []
+        self._session_url: Optional[str] = None
+
+    async def start(self) -> None:
+        """الاتصال بخادم SSE وتهيئة الجلسة."""
+        init_payload = json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "WeaverCode", "version": "2.0.0"},
+            }
+        })
+        result = await self._post("/", init_payload)
+        if result:
+            tools_payload = json.dumps({
+                "jsonrpc": "2.0", "id": 2,
+                "method": "tools/list", "params": {}
+            })
+            tools_result = await self._post("/", tools_payload)
+            if tools_result:
+                self.tools = (tools_result.get("result", {})
+                                          .get("tools", []))
+
+    async def _post(self, path: str, body: str) -> Optional[Dict]:
+        """إرسال طلب POST عبر curl."""
+        url = self.url + path
+        headers_args = []
+        for k, v in {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            **self.headers
+        }.items():
+            headers_args += ["-H", f"{k}: {v}"]
+
+        args = ["curl", "-sS", "-X", "POST", url] + headers_args + \
+               ["--data-binary", "@-", "--max-time", "30"]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await proc.communicate(input=body.encode("utf-8"))
+            raw = out.decode("utf-8", "replace").strip()
+            # SSE قد يُرجع "data: {...}\n\n"
+            if raw.startswith("data:"):
+                raw = raw.split("data:", 1)[1].strip()
+            return json.loads(raw)
+        except Exception:
+            return None
+
+    async def call_tool(self, tool_name: str,
+                        arguments: Dict[str, Any]) -> str:
+        payload = json.dumps({
+            "jsonrpc": "2.0", "id": 3,
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": arguments}
+        })
+        result = await self._post("/", payload)
+        if not result:
+            return f"خطأ: لم يُستقبل رد من خادم SSE '{self.name}'"
+        parts = []
+        for block in (result.get("result", {}).get("content", [])):
+            if block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return "\n".join(parts) if parts else json.dumps(result)
+
+    async def stop(self) -> None:
+        pass  # SSE لا يحتاج إغلاق
+
+
+class MCPServerHTTP:
+    """
+    اتصال بخادم MCP عبر HTTP streamable (بروتوكول 2025-03-26).
+    يرسل طلبات POST لنقطة نهاية واحدة ويستقبل ردوداً JSON.
+    """
+
+    def __init__(self, name: str, url: str,
+                 headers: Optional[Dict[str, str]] = None,
+                 api_key: Optional[str] = None):
+        self.name = name
+        self.url = url.rstrip("/")
+        self.tools: List[Dict[str, Any]] = []
+        self.headers = headers or {}
+        if api_key:
+            self.headers["Authorization"] = f"Bearer {api_key}"
+
+    async def start(self) -> None:
+        await self._initialize()
+        await self._load_tools()
+
+    async def _rpc(self, method: str,
+                   params: Optional[Dict] = None,
+                   req_id: int = 1) -> Optional[Dict]:
+        payload = json.dumps({
+            "jsonrpc": "2.0", "id": req_id,
+            "method": method, "params": params or {}
+        })
+        headers_args = []
+        for k, v in {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            **self.headers
+        }.items():
+            headers_args += ["-H", f"{k}: {v}"]
+        args = (["curl", "-sS", "-X", "POST", self.url + "/mcp"] +
+                headers_args +
+                ["--data-binary", "@-", "--max-time", "30"])
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await proc.communicate(input=payload.encode("utf-8"))
+            data = json.loads(out.decode("utf-8", "replace"))
+            if "error" in data:
+                raise RuntimeError(data["error"].get("message", "خطأ HTTP MCP"))
+            return data.get("result")
+        except Exception:
+            return None
+
+    async def _initialize(self) -> None:
+        await self._rpc("initialize", {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {"name": "WeaverCode", "version": "2.0.0"},
+        })
+
+    async def _load_tools(self) -> None:
+        result = await self._rpc("tools/list", {}, req_id=2)
+        self.tools = (result or {}).get("tools", [])
+
+    async def call_tool(self, tool_name: str,
+                        arguments: Dict[str, Any]) -> str:
+        result = await self._rpc("tools/call",
+                                  {"name": tool_name, "arguments": arguments},
+                                  req_id=3)
+        parts = []
+        for block in (result or {}).get("content", []):
+            if block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return "\n".join(parts) if parts else json.dumps(result)
+
+    async def stop(self) -> None:
+        pass
+
+
 class MCPManager:
     """يدير كل خوادم MCP ويربط أدواتها بسجل WeaverCode"""
 
@@ -161,16 +323,39 @@ class MCPManager:
         for name, spec in servers.items():
             if spec.get("disabled"):
                 continue
-            command = spec.get("command")
-            if not command:
-                continue
-            server = MCPServer(
-                name=name,
-                command=command,
-                args=spec.get("args", []),
-                env=spec.get("env", {}),
-                cwd=spec.get("cwd"),
-            )
+
+            transport = spec.get("transport", "stdio").lower()
+            server = None
+
+            if transport == "sse":
+                url = spec.get("url")
+                if not url:
+                    continue
+                server = MCPServerSSE(
+                    name=name, url=url,
+                    headers=spec.get("headers", {}),
+                )
+            elif transport == "http":
+                url = spec.get("url")
+                if not url:
+                    continue
+                server = MCPServerHTTP(
+                    name=name, url=url,
+                    headers=spec.get("headers", {}),
+                    api_key=spec.get("api_key"),
+                )
+            else:  # stdio (الافتراضي)
+                command = spec.get("command")
+                if not command:
+                    continue
+                server = MCPServer(
+                    name=name,
+                    command=command,
+                    args=spec.get("args", []),
+                    env=spec.get("env", {}),
+                    cwd=spec.get("cwd"),
+                )
+
             try:
                 await server.start()
             except Exception:

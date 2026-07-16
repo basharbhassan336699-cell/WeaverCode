@@ -106,3 +106,37 @@ WEAVER_DB_PATH=~/.weaver/memory.db
 ## GitHub
 مرتبط عبر GitHub CLI (gh). الأدوات: GitHubStatus, GitHubCreateRepo, GitHubListRepos, GitHubCreateIssue.
 للتحقق: `gh auth status`
+
+---
+
+## الميزات المضافة (v3.0)
+
+### نظام Sessions (الجلسات)
+- `python weaver.py --resume` — استئناف جلسة سابقة
+- `python weaver.py --sessions` — عرض الجلسات
+- `/weaver-resume` — استئناف من داخل Claude Code
+- الجلسات تُحفظ في SQLite: `~/.weaver/memory.db` جدول `sessions`
+
+### Hooks الموسّع (9 أحداث)
+- `SessionStart` — يحمّل السياق + additionalContext
+- `SessionEnd` — تنظيف وتسجيل
+- `PreCompact` — منع أو إثراء التلخيص (exit 2 = منع)
+- `PostCompact` — بعد التلخيص
+- `InstructionsLoaded` — عند تحميل CLAUDE.md
+
+### نظام Skills
+- مجلد: `.claude/skills/<name>/SKILL.md`
+- أداة `Skill` مدمجة في الوكيل
+- `/weaver-skills` لعرض المتاح
+
+### نظام Plugins
+- مجلد: `plugins/<name>/.claude-plugin/plugin.json`
+- يدمج hooks + commands تلقائياً
+- `/weaver-plugins` لعرض المثبت
+
+### MCP الموسّع
+- يدعم الآن: stdio + SSE + HTTP
+- صيغة config/mcp.json: أضف `"transport": "sse"` أو `"transport": "http"`
+
+### FTS5 الحقيقي
+- `get_relevant()` تستخدم FTS5 الحقيقي مع triggers تلقائية
