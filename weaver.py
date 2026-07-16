@@ -222,6 +222,85 @@ def _show_empty_diagnostic(provider) -> None:
               f"bash scripts/weaver-doctor.sh{RESET}")
 
 
+def _load_models(current: str = "") -> list:
+    """تحميل قائمة النماذج من config/models.json + ضمان وجود النموذج الحالي."""
+    models = []
+    path = Path(__file__).parent / "config" / "models.json"
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            models = [m for m in data.get("models", []) if m.get("name")]
+        except Exception:
+            models = []
+    if current and not any(m["name"] == current for m in models):
+        models.insert(0, {"name": current, "desc": "النموذج الحالي"})
+    return models
+
+
+def _pick_model_numbered(current: str, models: list):
+    """اختيار نموذج بقائمة مرقّمة (يعمل في أي طرفية)."""
+    print(f"\n{ORANGE}اختر النموذج:{RESET}")
+    for i, m in enumerate(models, 1):
+        mark = f" {ORANGE}✓{RESET}" if m["name"] == current else ""
+        print(f"  {ORANGE}{i:>2}.{RESET} {m['name']}{mark}   {GRAY}{m.get('desc','')}{RESET}")
+    print(f"  {GRAY}(اكتب رقماً أو اسم نموذج مخصّص · Enter للإبقاء){RESET}")
+    try:
+        c = input(f"  {ORANGE}اختيارك:{RESET} ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    if not c:
+        return None
+    if c.isdigit() and 1 <= int(c) <= len(models):
+        return models[int(c) - 1]["name"]
+    return c  # اسم مخصّص
+
+
+async def _pick_model(current: str):
+    """قائمة نماذج تفاعلية (أسهم + Enter) عبر prompt_toolkit، وإلا قائمة مرقّمة."""
+    models = _load_models(current)
+    if not models:
+        return None
+    try:
+        from prompt_toolkit.shortcuts import radiolist_dialog
+    except Exception:
+        return _pick_model_numbered(current, models)
+    values = [(m["name"], f"{m['name']}   —   {m.get('desc','')}") for m in models]
+    try:
+        return await radiolist_dialog(
+            title="اختر النموذج",
+            text="النماذج المتاحة (↑↓ للتنقّل · Enter للتأكيد · Esc للإلغاء):",
+            values=values, default=current,
+        ).run_async()
+    except Exception:
+        return _pick_model_numbered(current, models)
+
+
+def _show_mcp_status(mcp):
+    """عرض حالة خوادم MCP (مثل /mcp في الأدوات المشابهة)."""
+    servers = getattr(mcp, "servers", {}) or {}
+    cfg = Path(__file__).parent / "config" / "mcp.json"
+    if servers:
+        draw_info(f"خوادم MCP النشطة ({len(servers)}):")
+        for name, srv in servers.items():
+            tools = len(getattr(srv, "tools", []) or [])
+            print(f"  {ORANGE}•{RESET} {name}  {GRAY}({tools} أداة){RESET}")
+    else:
+        draw_info("لا توجد خوادم MCP مُهيّأة.")
+        print(f"  {GRAY}أضف خوادم في config/mcp.json (يدعم stdio/sse/http). "
+              f"مثال في التوثيق. مسار الإعداد: {cfg}{RESET}")
+
+
+# ── أوامر مدمجة تفاعلية تظهر في الإكمال التلقائي ──
+_BUILTIN_CMDS = [
+    {"name": "model", "description": "اختيار النموذج من قائمة تفاعلية"},
+    {"name": "mcp", "description": "عرض حالة خوادم MCP"},
+    {"name": "mode", "description": "تبديل وضع الوكيل (coding/project/...)"},
+    {"name": "plan", "description": "تفعيل/إيقاف وضع التخطيط"},
+    {"name": "stats", "description": "إحصاءات الذاكرة"},
+    {"name": "commands", "description": "عرض كل أوامر السلاش"},
+]
+
+
 def _make_slash_prompt(commands):
     """بناء جلسة إدخال مع إكمال تلقائي لأوامر السلاش (يظهر عند كتابة '/').
 
@@ -235,7 +314,7 @@ def _make_slash_prompt(commands):
     except Exception:
         return None
 
-    metas = commands.list_meta()
+    metas = _BUILTIN_CMDS + commands.list_meta()
 
     class _SlashCompleter(Completer):
         def get_completions(self, document, complete_event):
@@ -283,8 +362,8 @@ async def interactive_mode(initial_history=None, session_id=None,
     commands = SlashCommands()
 
     draw_welcome(provider.config.model, provider.config.base_url)
-    print(f"{GRAY}اكتب 'خروج' للإنهاء | '/mode <mode>' | '/model <name>' | "
-          f"'/plan' وضع التخطيط | '/commands' لعرض الأوامر{RESET}")
+    print(f"{GRAY}اكتب 'خروج' للإنهاء | '/model' اختيار النموذج | '/mcp' حالة MCP | "
+          f"'/mode <mode>' | '/plan' التخطيط | '/' لكل الأوامر{RESET}")
     draw_separator()
 
     from core.engine.provider import Message
@@ -333,7 +412,22 @@ async def interactive_mode(initial_history=None, session_id=None,
         if prompt.startswith("/model "):
             model = prompt[7:].strip()
             provider.config.model = model
+            os.environ["WEAVER_MODEL"] = model
             draw_success(f"النموذج: {model}")
+            continue
+
+        if prompt.strip() == "/model":
+            chosen = await _pick_model(provider.config.model)
+            if chosen and chosen != provider.config.model:
+                provider.config.model = chosen
+                os.environ["WEAVER_MODEL"] = chosen
+                draw_success(f"النموذج: {chosen}")
+            else:
+                draw_info(f"أُبقي النموذج: {provider.config.model}")
+            continue
+
+        if prompt.strip() == "/mcp":
+            _show_mcp_status(mcp)
             continue
 
         if prompt.startswith("/stats"):
