@@ -202,3 +202,14 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
   font-weight: 600; margin-bottom: 14px; color: var(--orange-2); }
 
 .muted { color: var(--muted); } .small { font-size: 12px; } .hidden { display: none !important; }
+
+/* قائمة إكمال أوامر السلاش (تظهر فوق حقل الإدخال) */
+.cmd-menu { position: absolute; inset-inline: 14px; bottom: calc(100% + 4px); z-index: 30;
+  max-height: 46vh; overflow-y: auto; background: var(--card-2); border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.5); padding: 6px; }
+.cmd-item { display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 9px;
+  cursor: pointer; white-space: nowrap; overflow: hidden; }
+.cmd-item.on { background: var(--orange); }
+.cmd-item.on .cmd-n, .cmd-item.on .cmd-d { color: #fff; }
+.cmd-n { color: var(--orange-2); font-weight: 600; font-family: ui-monospace, monospace; flex: none; }
+.cmd-d { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }

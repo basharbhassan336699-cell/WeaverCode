@@ -219,6 +219,54 @@
   }
   function scrollChat() { const m = $("#chatMsgs"); m.scrollTop = m.scrollHeight; window.scrollTo(0, document.body.scrollHeight); }
 
+  // ── إكمال تلقائي لأوامر السلاش (يظهر عند كتابة "/") ──
+  let _cmds = null;
+  function loadCommands() {
+    if (_cmds) return Promise.resolve(_cmds);
+    return api("/api/commands").then((d) => { _cmds = (d && d.commands) || []; return _cmds; }).catch(() => (_cmds = []));
+  }
+  function attachSlashAutocomplete(input) {
+    if (!input) return;
+    const box = document.createElement("div");
+    box.className = "cmd-menu"; box.style.display = "none";
+    input.parentElement.appendChild(box);
+    let items = [], sel = 0, open = false;
+    function close() { open = false; box.style.display = "none"; }
+    function pick(i) {
+      const c = items[i]; if (!c) return;
+      input.value = "/" + c.name + " ";
+      close(); input.focus();
+    }
+    function render() {
+      if (!items.length) { close(); return; }
+      box.innerHTML = items.map((c, i) =>
+        '<div class="cmd-item' + (i === sel ? " on" : "") + '" data-i="' + i + '">' +
+        '<span class="cmd-n">/' + c.name + '</span><span class="cmd-d">' + escapeHtml(c.description || "") + "</span></div>").join("");
+      box.style.display = "block"; open = true;
+      Array.from(box.querySelectorAll(".cmd-item")).forEach((el) => {
+        el.onmousedown = (e) => { e.preventDefault(); pick(+el.dataset.i); };
+      });
+    }
+    input.addEventListener("input", async () => {
+      const v = input.value;
+      if (v[0] !== "/" || /\s/.test(v)) { close(); return; }  // فقط أثناء كتابة اسم الأمر
+      const q = v.slice(1).toLowerCase();
+      const all = await loadCommands();
+      items = all.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40);
+      sel = 0; render();
+    });
+    input.addEventListener("keydown", (e) => {
+      if (!open) return;
+      if (e.key === "ArrowDown") { e.preventDefault(); sel = (sel + 1) % items.length; render(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); sel = (sel - 1 + items.length) % items.length; render(); }
+      else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); pick(sel); }
+      else if (e.key === "Escape") { close(); }
+    }, true);  // capture: نعترض Enter قبل معالج الإرسال
+    input.addEventListener("blur", () => setTimeout(close, 150));
+  }
+  attachSlashAutocomplete($("#chatInput"));
+  attachSlashAutocomplete($("#buildInput"));
+
   // ── البثّ الحيّ (SSE) → يظهر داخل شاشة المحادثة ──
   const EV_ICON = { thinking: "⟳", tool_start: "🔧", file_view: "📄", file_edit: "✏️", file_create: "📄", bash_run: "💻", error: "❌", done: "✅" };
   function connectSSE() {
