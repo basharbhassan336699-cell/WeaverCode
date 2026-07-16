@@ -635,50 +635,58 @@ class WeaverProvider:
         البوابات المتوافقة (مثل capi.aerolink) التي تتكلّم OpenAI لا Anthropic.
         يمكن تعطيل التبديل بتثبيت WEAVER_API_FORMAT صراحةً.
         """
-        primary = self._is_anthropic()
-
-        # بعض البوابات (aerolink) ترفض طلبات الأدوات بـ 305؛ إن تعلّمنا ذلك
-        # سابقاً في هذه الجلسة نُرسل بلا أدوات مباشرةً (أسرع).
+        # بعض البوابات ترفض طلبات الأدوات؛ إن تعلّمنا ذلك سابقاً في هذه الجلسة
+        # نُرسل بلا أدوات مباشرةً (أسرع).
         if self._drop_tools:
             tools = None
 
-        # المستخدم ثبّت الصيغة → لا تبديل، سلوك مباشر
+        primary = self._is_anthropic()
+
+        # المستخدم ثبّت الصيغة صراحةً → التزم بها دون سلّم التكيّف.
         if self._format_forced():
             return await self._complete_format(messages, tools, primary)
 
-        try:
-            resp = await self._complete_format(messages, tools, primary)
-        except ProviderError as e:
-            # أخطاء لا يصلحها تبديل الصيغة → ارفعها كما هي:
-            # الرصيد/المصادقة (تفشل بالصيغتين) و«الطلب أكبر من الحدّ» (حجم لا صيغة)
-            if (isinstance(e, RequestTooLargeError)
-                    or getattr(e, "billing", False)
-                    or getattr(e, "status", 0) in (401, 403)):
-                raise
-            # بوابة ردّت 3xx (305…) وكانت هناك أدوات → قد تكون الأدوات هي المُحفّز.
-            # جرّب نفس الصيغة بلا أدوات (تعمل الدردشة على الأقل) وتذكّر ذلك للجلسة.
-            if 300 <= getattr(e, "status", 0) < 400 and tools:
-                try:
-                    resp_nt = await self._complete_format(messages, None, primary)
-                    self._drop_tools = True
-                    return resp_nt
-                except ProviderError:
-                    pass
-            # خطأ دائم آخر (404 نقطة غير موجودة مثلاً) → جرّب الصيغة الأخرى
-            resp_alt = await self._complete_format(messages, tools, not primary)
-            self._format_override = not primary  # تعلّم الصيغة الناجحة
-            return resp_alt
+        # ── سلّم الصمود: جرّب مرشّحين بالترتيب حتى نجاحٍ غير فارغ ────────────
+        # كل مرشّح = (الصيغة، هل نرسل الأدوات؟). نغطّي كل ما اكتشفناه من أعطال
+        # المزوّدين: صيغة خاطئة (Anthropic↔OpenAI)، بوابة ترفض الأدوات، ردّ فارغ.
+        # نتوقّف عند أول ردٍّ حقيقي ونتذكّر ما نجح (صيغة/إسقاط أدوات) لبقية الجلسة.
+        candidates = [(primary, True)]
+        if tools:
+            candidates.append((primary, False))       # أسقط الأدوات (نفس الصيغة)
+        candidates.append((not primary, True))         # بدّل الصيغة
+        if tools:
+            candidates.append((not primary, False))    # بدّل الصيغة + أسقط الأدوات
 
-        # نجح الطلب لكن الرد فارغ تماماً → قد تكون الصيغة خاطئة، جرّب الأخرى
-        if self._response_is_empty(resp):
+        last_err: Optional[ProviderError] = None
+        first_resp: Optional[Dict[str, Any]] = None
+
+        for fmt, use_tools in candidates:
+            t = tools if use_tools else None
             try:
-                alt = await self._complete_format(messages, tools, not primary)
-            except ProviderError:
-                return resp  # فشلت الأخرى → احتفظ بالأصلي
-            if not self._response_is_empty(alt):
-                self._format_override = not primary  # تعلّم الصيغة الناجحة
-                return alt
-        return resp
+                resp = await self._complete_format(messages, t, fmt)
+            except ProviderError as e:
+                # الرصيد/المصادقة تفشل بكل المرشّحين → أوقف فوراً (لا تُهدر طلبات)
+                if getattr(e, "billing", False) or getattr(e, "status", 0) in (401, 403):
+                    raise
+                last_err = e
+                continue
+
+            if not self._response_is_empty(resp):
+                # نجح ردٌّ حقيقي → تعلّم ما نجح لبقية الجلسة
+                if fmt != primary:
+                    self._format_override = fmt
+                if tools and not use_tools:
+                    self._drop_tools = True
+                return resp
+
+            # ردٌّ فارغ: احتفظ به كخيار أخير وواصل تجربة المرشّحين
+            if first_resp is None:
+                first_resp = resp
+
+        # لم ينجح أي مرشّح بردٍّ حقيقي
+        if first_resp is not None:
+            return first_resp  # أرجِع أفضل ما توفّر (فارغ) بدل رمي خطأ
+        raise last_err or ProviderError("❌ فشل كل محاولات الاتصال بالمزوّد.")
 
     async def stream(
         self,
