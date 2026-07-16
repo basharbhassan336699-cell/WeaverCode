@@ -231,6 +231,7 @@ def _make_slash_prompt(commands):
     try:
         from prompt_toolkit import PromptSession
         from prompt_toolkit.completion import Completer, Completion
+        from prompt_toolkit.shortcuts import CompleteStyle
     except Exception:
         return None
 
@@ -239,6 +240,7 @@ def _make_slash_prompt(commands):
     class _SlashCompleter(Completer):
         def get_completions(self, document, complete_event):
             text = document.text_before_cursor
+            # نُظهر القائمة فقط أثناء كتابة اسم الأمر (يبدأ بـ / وبلا مسافة)
             if not text.startswith("/") or " " in text:
                 return
             q = text[1:].lower()
@@ -251,9 +253,21 @@ def _make_slash_prompt(commands):
                     )
 
     try:
-        return PromptSession(completer=_SlashCompleter(), complete_while_typing=True)
+        return PromptSession(
+            completer=_SlashCompleter(),
+            complete_while_typing=True,       # تظهر أثناء الكتابة
+            reserve_space_for_menu=8,         # يحجز مساحة للقائمة (مهم لظهورها)
+            complete_style=CompleteStyle.COLUMN,  # سطر لكل أمر + وصفه
+            mouse_support=True,               # اللمس لاختيار أمر (Termux)
+        )
     except Exception:
-        return None
+        # نسخ قديمة قد لا تدعم بعض الوسائط → أنشئ جلسة أبسط
+        try:
+            return PromptSession(completer=_SlashCompleter(),
+                                 complete_while_typing=True,
+                                 reserve_space_for_menu=8)
+        except Exception:
+            return None
 
 
 async def interactive_mode(initial_history=None, session_id=None,
