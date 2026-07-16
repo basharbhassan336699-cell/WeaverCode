@@ -1,5 +1,5 @@
 {
   "name": "learning-output-style",
   "version": "0.1.0",
-  "description": "نمط مخرجات learning عبر SessionStart hook (معطّل افتراضياً)", "disabled": true
+  "description": "نمط مخرجات learning عبر SessionStart hook"
 }
