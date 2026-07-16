@@ -222,16 +222,66 @@ def _show_empty_diagnostic(provider) -> None:
               f"bash scripts/weaver-doctor.sh{RESET}")
 
 
-def _load_models(current: str = "") -> list:
-    """تحميل قائمة النماذج من config/models.json + ضمان وجود النموذج الحالي."""
-    models = []
-    path = Path(__file__).parent / "config" / "models.json"
-    if path.exists():
+def _fetch_provider_models() -> list:
+    """جلب النماذج الفعلية المتاحة للمفتاح من المزوّد عبر نقطة /models.
+
+    يعمل مع أي مزوّد متوافق (يُرجع {"data":[{"id":...}]}) — OpenAI/Anthropic/
+    aerolink/OpenRouter/Groq… يُرجع [] إن تعذّر (فنسقط لقائمة config/models.json).
+    """
+    import subprocess
+    base = os.environ.get("WEAVER_BASE_URL", "").strip().rstrip("/")
+    key = os.environ.get("WEAVER_API_KEY", "").strip()
+    if not base or not key:
+        return []
+    low = base.lower()
+    # ترويسات: Anthropic الرسمي يحتاج x-api-key؛ غيره Bearer (كما ينجح يدوياً)
+    headers = ["-H", "anthropic-version: 2023-06-01"]
+    if "api.anthropic.com" in low:
+        headers += ["-H", f"x-api-key: {key}"]
+    else:
+        headers += ["-H", f"Authorization: Bearer {key}"]
+    # نقاط النهاية الشائعة للنماذج
+    if base.endswith("/v1") or base.endswith("/messages"):
+        urls = [base.rsplit("/v1", 1)[0] + "/v1/models", base + "/models"]
+    else:
+        urls = [base + "/v1/models", base + "/models"]
+    seen = set()
+    for url in [u for u in urls if not (u in seen or seen.add(u))]:
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            models = [m for m in data.get("models", []) if m.get("name")]
+            r = subprocess.run(
+                ["curl", "-sS", "-L", "--max-time", "15", *headers, url],
+                capture_output=True, timeout=20)
+            data = json.loads(r.stdout.decode("utf-8", "replace"))
         except Exception:
-            models = []
+            continue
+        items = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            items = data.get("models") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            continue
+        out = []
+        for m in items:
+            mid = (m.get("id") or m.get("name")) if isinstance(m, dict) else (m if isinstance(m, str) else None)
+            if mid:
+                out.append({"name": mid, "desc": "متاح على مفتاحك"})
+        if out:
+            return out
+    return []
+
+
+def _load_models(current: str = "", live: bool = True) -> list:
+    """قائمة النماذج: يجلبها من المزوّد بمفتاحك أولاً (live)، وإلا config/models.json."""
+    models = []
+    if live:
+        models = _fetch_provider_models()
+    if not models:
+        path = Path(__file__).parent / "config" / "models.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                models = [m for m in data.get("models", []) if m.get("name")]
+            except Exception:
+                models = []
     if current and not any(m["name"] == current for m in models):
         models.insert(0, {"name": current, "desc": "النموذج الحالي"})
     return models
@@ -255,22 +305,55 @@ def _pick_model_numbered(current: str, models: list):
     return c  # اسم مخصّص
 
 
+async def _pick_model_arrows(current: str, models: list):
+    """قائمة داخلية بالأسهم بثيم WeaverCode (بديل أنيق عن الصندوق الأبيض)."""
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout import Layout, HSplit, Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
+    from prompt_toolkit.styles import Style
+
+    idx = [next((i for i, m in enumerate(models) if m["name"] == current), 0)]
+
+    def get_text():
+        rows = [("class:title", "  🕸️  اختر النموذج   "),
+                ("class:hint", "(↑↓ تنقّل · Enter تأكيد · Esc إلغاء)\n\n")]
+        for i, m in enumerate(models):
+            on = (i == idx[0])
+            mark = "  ✓" if m["name"] == current else ""
+            rows.append(("class:cur" if on else "class:pointer", "  ❯ " if on else "    "))
+            rows.append(("class:nameon" if on else "class:name", m["name"] + mark))
+            rows.append(("class:desc", "   " + (m.get("desc", "") or "") + "\n"))
+        return rows
+
+    kb = KeyBindings()
+    kb.add("up")(lambda e: idx.__setitem__(0, (idx[0] - 1) % len(models)))
+    kb.add("down")(lambda e: idx.__setitem__(0, (idx[0] + 1) % len(models)))
+    kb.add("enter")(lambda e: e.app.exit(result=models[idx[0]]["name"]))
+    kb.add("escape")(lambda e: e.app.exit(result=None))
+    kb.add("c-c")(lambda e: e.app.exit(result=None))
+
+    style = Style.from_dict({
+        "title": "#C67121 bold", "hint": "#888888",
+        "pointer": "", "cur": "#C67121 bold",
+        "name": "#e8e8e8", "nameon": "#C67121 bold", "desc": "#888888",
+    })
+    app = Application(
+        layout=Layout(HSplit([Window(FormattedTextControl(get_text), wrap_lines=True)])),
+        key_bindings=kb, style=style, full_screen=False, mouse_support=True,
+    )
+    return await app.run_async()
+
+
 async def _pick_model(current: str):
-    """قائمة نماذج تفاعلية (أسهم + Enter) عبر prompt_toolkit، وإلا قائمة مرقّمة."""
-    models = _load_models(current)
+    """قائمة نماذج تفاعلية بثيم WeaverCode (أسهم)، وإلا قائمة مرقّمة."""
+    draw_info("جاري جلب النماذج المتاحة على مفتاحك…")
+    models = _load_models(current, live=True)
     if not models:
+        draw_error("تعذّر جلب النماذج. اكتب اسم النموذج مباشرةً: /model <name>")
         return None
     try:
-        from prompt_toolkit.shortcuts import radiolist_dialog
-    except Exception:
-        return _pick_model_numbered(current, models)
-    values = [(m["name"], f"{m['name']}   —   {m.get('desc','')}") for m in models]
-    try:
-        return await radiolist_dialog(
-            title="اختر النموذج",
-            text="النماذج المتاحة (↑↓ للتنقّل · Enter للتأكيد · Esc للإلغاء):",
-            values=values, default=current,
-        ).run_async()
+        return await _pick_model_arrows(current, models)
     except Exception:
         return _pick_model_numbered(current, models)
 
