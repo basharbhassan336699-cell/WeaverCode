@@ -1,5 +1,44 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## دمج بنيوي — أدوات وإضافات Claude Code الثلاث (بلا تغيير منطق)
+
+دُمجت محتويات ثلاث حزم (claude-code-tools، slash-commands،
+memory-context-system) في بنية WeaverCode المنطقية، إضافات ملفات فقط دون
+مسّ أي كود قائم (ولا provider.py ولا منطق المفاتيح). التفاصيل:
+
+- **أوامر سلاش مستقلة** → `.claude/commands/`: commit-push-pr، dedupe،
+  triage-issue (تعمل فوراً عبر SlashCommands، بلا تعارض أسماء).
+- **plugins الأوامر** → `plugins/`: agent-sdk-dev، code-review،
+  commit-commands، feature-dev، plugin-dev، pr-review-toolkit، ralph-wiggum؛
+  وأوامر hookify دُمجت في الإضافة الموجودة. أُنشئ لكلٍّ `.claude-plugin/
+  plugin.json` أدنى (ربط بنيوي للاكتشاف فقط).
+- **plugins أنماط المخرجات** (learning/explanatory-output-style) → `plugins/`
+  موصولة بصيغة hooks الصحيحة لكن **`disabled: true` افتراضياً** (لأنها تغيّر
+  سلوك النموذج في كل جلسة — تُفعَّل يدوياً بإزالة disabled).
+- **حالة الجلسة وتحميل السياق** → `core/session/` (session_state.py،
+  load-context.sh).
+- **skills** → `.claude/skills/`: hook-development، memory-context-system.
+- **قوالب إعدادات** → `config/settings-templates/` (صيغة settings.json
+  الخاصة بـ Claude Code — مراجع فقط؛ نظام صلاحيات WeaverCode مستقل ولم يُمَسّ).
+- **الوثائق** → `docs/claude-code-tools/` و`docs/memory-context-system/`.
+
+### قرارات التعارض (بأقل تدخّل)
+- سكربتات hooks في claude-code-tools (pretooluse/posttooluse/rule_engine/
+  config_loader) **مطابقة تماماً** للموجود في `plugins/hookify/hooks/` →
+  لم تُكرَّر.
+- ralph-wiggum: ملفات الأوامر متطابقة بين الحزمتين → دُمجت في plugin واحد.
+- conversation-analyzer.md مطابق للموجود → لم يُكرَّر.
+- advanced.md/patterns.md متطابقان بين الحزمتين → حُفظت نسخة لكل حزمة في
+  مجلدها لتفادي تعارض الاسم.
+
+### ملاحظتان (خارج نطاق التعديل عمداً)
+- `core/session/session_state.py` يستورد `from _base import debug_log`،
+  و`_base.py` غير مضمَّن في أي من الملفات الثلاثة (نقص أصلي لا علاقة له
+  بالنقل) — تُرك كما هو.
+- أوامر الـ plugins لا تُستدعى حالياً كأوامر سلاش لأن `SlashCommands` يقرأ
+  `.claude/commands/` فقط؛ ربطها يتطلب تعديل منطق (تشغيل
+  `PluginLoader.get_all_commands`) — لم يُنفَّذ التزاماً بعدم تغيير المنطق.
+
 ## v3.2.0 — الوضع الأدنى + قاطع الدائرة + ذاكرة تكيّف (وقف استنزاف التوكينات)
 
 ### السبب الأرجح (بعد استبعاد الترويسات وmax_tokens والأدوات وترميز chunked)

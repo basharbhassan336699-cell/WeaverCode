@@ -1,0 +1,5 @@
+{
+  "name": "explanatory-output-style",
+  "version": "0.1.0",
+  "description": "نمط مخرجات explanatory عبر SessionStart hook (معطّل افتراضياً)", "disabled": true
+}
