@@ -79,6 +79,19 @@ def test_anthropic_payload_build_with_tools_and_system():
     assert payload["tools"][0]["input_schema"]["properties"]["path"]["type"] == "string"
 
 
+def test_model_switch_reaches_request_payload():
+    """اختيار نموذج جديد (تغيير config.model) يصل فعلاً لطلب الـ API — لا كلمات."""
+    msgs = [Message(role="user", content="hi")]
+    for anthropic in (True, False):
+        p = _p("https://capi.aerolink.lat" if anthropic else "https://api.groq.com/openai/v1",
+                "claude-fable-5")
+        build = p._build_anthropic_payload if anthropic else p._build_openai_payload
+        assert build(msgs)["model"] == "claude-fable-5"
+        # نحاكي ما يفعله معالج /model عند الاختيار
+        p.config.model = "claude-opus-4-8"
+        assert build(msgs)["model"] == "claude-opus-4-8"  # النموذج الجديد في الطلب
+
+
 def test_anthropic_text_response_to_openai():
     data = {"id": "m", "content": [{"type": "text", "text": "مرحبا"}],
             "stop_reason": "end_turn"}
