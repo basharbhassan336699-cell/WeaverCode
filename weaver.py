@@ -341,6 +341,7 @@ async def _pick_model_arrows(current: str, models: list):
     app = Application(
         layout=Layout(HSplit([Window(FormattedTextControl(get_text), wrap_lines=True)])),
         key_bindings=kb, style=style, full_screen=False, mouse_support=True,
+        erase_when_done=True,   # تختفي القائمة بعد الاختيار
     )
     return await app.run_async()
 
@@ -504,7 +505,10 @@ async def interactive_mode(initial_history=None, session_id=None,
             if chosen and chosen != provider.config.model:
                 provider.config.model = chosen
                 os.environ["WEAVER_MODEL"] = chosen
-                draw_success(f"النموذج: {chosen}")
+                # امسح الشاشة المرئية (والقائمة معها) وأعِد رسم الشعار بالنموذج الجديد فوق
+                print("\033[2J\033[H", end="")
+                draw_welcome(provider.config.model, provider.config.base_url)
+                draw_success(f"النموذج الآن: {chosen}")
             else:
                 draw_info(f"أُبقي النموذج: {provider.config.model}")
             continue
