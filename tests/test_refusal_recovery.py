@@ -70,15 +70,15 @@ def test_refusal_auto_recovers(monkeypatch):
     assert len(eng.provider.calls) == 2   # رفض ثم إعادة محاولة نظيفة
 
 
-def test_clean_retry_uses_minimal_system(monkeypatch):
+def test_clean_retry_is_bare(monkeypatch):
     monkeypatch.setenv("WEAVER_IDENTITY_GUARD", "1")
     monkeypatch.setenv("WEAVER_REFUSAL_RETRY", "1")
     eng = QueryEngine(provider=_RefusingProvider())
     asyncio.run(eng.run("مهمة"))
-    # الاستدعاء الثاني (النظيف) يستخدم البروموه البسيط بلا إخفاء هوية
+    # الاستدعاء الثاني (إعادة المحاولة) عارٍ: بلا بروموه نظام وبلا غلاف هوية
     second_sys = eng.provider.calls[1][0]
     assert "WeaverCode" not in second_sys
-    assert second_sys == _MINIMAL_SYSTEM
+    assert second_sys == ""  # لا رسالة نظام إطلاقاً في الطلب العاري
 
 
 def test_retry_disabled_by_env(monkeypatch):

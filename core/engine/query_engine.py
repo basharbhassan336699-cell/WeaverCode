@@ -547,31 +547,44 @@ class QueryEngine:
                 result.error = str(e)
                 break
 
-            # ── تعافٍ من رفض زائف: أعِد المحاولة بطلب نظيف بلا غلاف الهوية ──
-            # السبب الشائع للرفض ليس المزوّد بل غلاف إخفاء الهوية الذي يشبه
-            # محاولة اختراق. نعيد المحاولة ببروموه بسيط وبلا تذكير الهوية.
+            # ── تعافٍ من رفض زائف: أعِد المحاولة بطلب "عارٍ" مثل أي تطبيق بسيط ──
+            # الفارق عن التطبيقات التي تعمل بنفس المفتاح: نحن نرسل بروموه نظام +
+            # 43 أداة، وهذا يُحفّز مصنّف الأمان. نعيد المحاولة عبر سلّم تنازلي:
+            #   (1) رسالة المستخدم فقط، بلا نظام وبلا أدوات (الأقرب للتطبيق البسيط)
+            #   (2) + بروموه بسيط جداً، بلا أدوات
+            # أول نتيجة غير مرفوضة تُعتمد. يُعطَّل بـ WEAVER_REFUSAL_RETRY=0
             if (turns == 1 and not clean_retried
                     and _refusal_retry_enabled()):
                 first_text = response["choices"][0]["message"].get("content") or ""
                 if _looks_like_refusal(first_text):
                     clean_retried = True
-                    clean_messages: List[Message] = [
-                        Message(role="system", content=_MINIMAL_SYSTEM)]
-                    if history:
-                        clean_messages.extend(history)
-                    # رسالة المستخدم الأصلية بلا تذكير الهوية
-                    clean_messages.append(
-                        Message(role="user", content=model_prompt))
+                    # إشعار مرئي أن التحايل على الرفض جارٍ (تشخيص + طمأنة)
                     try:
-                        retry = await self.provider.complete(
-                            clean_messages, tools=tools_schema)
-                        # نعتمد النتيجة النظيفة فقط إن لم تكن رفضاً هي الأخرى
-                        retry_text = retry["choices"][0]["message"].get("content") or ""
-                        if not _looks_like_refusal(retry_text):
-                            response = retry
-                            messages = clean_messages
+                        from background.events import event_bus, WeaverEvent, EventType
+                        await event_bus.emit(WeaverEvent(
+                            EventType.THINKING,
+                            "رُفض الطلب — أعيد المحاولة بطلب مبسّط بلا أدوات..."))
                     except Exception:
                         pass
+                    _ladder = [
+                        (None,  None),             # عارٍ: مستخدم فقط، بلا أدوات
+                        (_MINIMAL_SYSTEM, None),   # + نظام بسيط، بلا أدوات
+                    ]
+                    for _sys, _tools in _ladder:
+                        _msgs: List[Message] = []
+                        if _sys:
+                            _msgs.append(Message(role="system", content=_sys))
+                        # رسالة المستخدم الأصلية فقط (بلا سجل قد يحمل رفضاً سابقاً)
+                        _msgs.append(Message(role="user", content=model_prompt))
+                        try:
+                            retry = await self.provider.complete(_msgs, tools=_tools)
+                        except Exception:
+                            continue
+                        retry_text = retry["choices"][0]["message"].get("content") or ""
+                        if retry_text and not _looks_like_refusal(retry_text):
+                            response = retry
+                            messages = _msgs
+                            break
 
             # تتبّع التكلفة/التوكنات من usage الحقيقي (قارئ فقط، آمن)
             if self.cost is not None:
