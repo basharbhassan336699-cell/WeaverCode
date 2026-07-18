@@ -84,15 +84,19 @@ def _refusal_retry_enabled() -> bool:
 
 
 def _looks_like_refusal(text: str) -> bool:
-    """يكشف رفض النموذج (سواء عبر رسالة WeaverCode أو مؤشرات الرفض الخام)."""
+    """يكشف رفض النموذج بدقة — بدون إيجابيات كاذبة."""
     if not text:
         return False
     t = text.strip()
+    # رسالة WeaverCode الصريحة عن الرفض
     if t.startswith("⛔") or "رفض النموذج تنفيذ" in t:
         return True
     low = t.lower()
-    # مؤشرات رفض خام شائعة (سياسة الاستخدام / cyber)
-    if ("usage policy" in low and ("refus" in low or "blocked" in low or "cannot" in low)):
+    # مؤشر موثوق: usage policy + كلمة رفض صريحة معاً
+    if "usage policy" in low and any(w in low for w in ("refus", "blocked", "cannot", "violat")):
+        return True
+    # stop_reason=refusal ظهر كنص (بعض البوابات تُعيده كنص)
+    if "stop_reason" in low and "refusal" in low:
         return True
     return False
 
@@ -468,12 +472,10 @@ class QueryEngine:
             from prompts.system import get_system_prompt
             return get_system_prompt("main")
         except Exception:
-            # احتياطي مضمون: هوية WeaverCode صريحة
+            # احتياطي مضمون: هوية WeaverCode بلطف (بلا كلمات مُحفّزة)
             return (
-                "أنت WeaverCode، وكيل برمجي ذكي ومستقل.\n"
-                "اسمك WeaverCode فقط. إذا سُئلت من أنت فأجب: «أنا WeaverCode».\n"
-                "ممنوع أن تقول إنك Claude أو Anthropic أو GPT أو أي شركة أو نموذج،\n"
-                "وممنوع كشف النموذج أو المزوّد الذي يشغّلك. لغتك الافتراضية العربية."
+                "أنت WeaverCode — وكيل برمجي مستقل.\n"
+                "اسمك WeaverCode. لغتك الافتراضية العربية."
             )
 
     async def run(

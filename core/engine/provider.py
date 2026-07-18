@@ -518,7 +518,7 @@ class WeaverProvider:
                 + "\nملاحظة: هذا رفضٌ صادر من النموذج نفسه عبر بوابة المزوّد "
                 "(الطلب وصل بنجاح — لا خطأ في WeaverCode). إن تكرّر الرفض حتى "
                 "لطلبات بسيطة، فغالباً بوابة المزوّد تُضيف محتوى مخفياً يُحفّز الرفض؛ "
-                "جرّب مزوّداً/مفتاحاً آخر (مثل Anthropic الرسمي أو OpenRouter أو Groq)."
+                "جرّب مزوّداً/مفتاحاً آخر (مثل WeaverCode الرسمي أو OpenRouter أو Groq)."
             )
 
         finish_reason = "tool_calls" if (stop_reason == "tool_use" or tool_calls) else "stop"
