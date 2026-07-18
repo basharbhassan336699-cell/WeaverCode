@@ -31,6 +31,8 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 .ic:active { background: var(--card); }
 .ic-spacer { width: 38px; }
 .top-center { display: flex; align-items: center; gap: 8px; }
+.brand-logo { width: 26px; height: 26px; object-fit: contain; }
+.brand-name { color: var(--orange); font-weight: 700; font-size: 15px; letter-spacing: .3px; }
 .ver-badge { color: var(--muted-2); font-size: 11px; font-family: monospace; }
 .state-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted-2); }
 .state-dot.working { background: var(--orange); box-shadow: 0 0 8px var(--orange); }

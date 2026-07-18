@@ -291,7 +291,7 @@ Built entirely through natural language with Claude.
 ---
 
 <div align="center">
-<img src="assets/icon_internal_64.png" width="36"/>
+<img src="assets/icon_store_dark.png" width="40"/>
 <br/>
 <sub>🕸️ WeaverCode — Weaves code like a spider weaves its web</sub>
 </div>
