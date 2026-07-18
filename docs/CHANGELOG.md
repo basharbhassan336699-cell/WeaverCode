@@ -1,5 +1,36 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## الميزات الست متوسطة الأولوية (بصيغة Claude Code) — إضافات فقط، بلا مسّ provider/المفاتيح
+
+ست ميزات إضافية تقرّب WeaverCode من Claude Code، كلها إضافية ومعزولة ولا تمسّ
+طبقة المصادقة/المفاتيح في `provider.py` إطلاقاً. 108 اختباراً ناجحة (88 + 20 جديدة):
+
+1. **موارد وبرومبتات MCP** (`core/mcp.py`): دعم `resources/list` + `resources/read`
+   و`prompts/list` + `prompts/get` (فشل صامت للخوادم غير الداعمة). تسجيل تلقائي
+   لأداتَي `mcp__<server>__read_resource` و`mcp__<server>__get_prompt`، وتجميع
+   على مستوى `MCPManager` (`list_resources`/`read_resource`/`list_prompts`/`get_prompt`).
+   `/mcp` يعرض الآن عدد الموارد/البرومبتات وتفاصيلها.
+2. **مجلدات عمل متعددة** (`--add-dir` / `/add-dir`): `ToolRegistry.add_dir()` +
+   `workspace_dirs()`؛ Glob و Grep يبحثان الآن عبر كل مساحات العمل. يُحمّل
+   CLAUDE.md المتداخل للمجلد الجديد فوراً.
+3. **نقاط الاستعادة والتراجع** (`core/checkpoint.py`): لقطة قبل كل عملية كتابة
+   (Write/Edit/MultiEdit/NotebookEdit) في `QueryEngine`، مع `/rewind`،
+   `/rewind <رقم>`، `/rewind list` (إنشاء ملف جديد → يُحذف عند التراجع).
+4. **أوامر bash في الخلفية** (`core/tools/registry.py`): `Bash(run_in_background=true)`
+   يُرجع `shell_id`؛ أداتا `BashOutput` (قراءة الإخراج المتراكم + الحالة)
+   و`KillShell` (إنهاء)، مع `list_background_shells()`.
+5. **أمر /init** (`/init` + `--init`): يحلّل المشروع ويولّد `CLAUDE.md` عبر الوكيل
+   (بروموه موجَّه يفحص البنية والأوامر والأنماط).
+6. **CLAUDE.md المتداخل** (`core/claude_md.py`): يكتشف ملفات CLAUDE.md في الجذر
+   والمجلدات الأب والفرعية (مع تخطّي node_modules/.git...) ويدمجها في البروموه
+   النظامي في `build_engine`.
+
+- **`core/engine/query_engine.py`**: `CheckpointManager` + لقطة قبل الكتابة (محاطة
+  بـ try/except آمن).
+- **`weaver.py`**: `--add-dir`/`--init`، معالجات `/add-dir`/`/rewind`/`/init`،
+  `/mcp` موسّع، تحميل CLAUDE.md المتداخل.
+- **`tests/test_medium_priority.py`**: 20 اختباراً للميزات الست.
+
 ## الميزات الخمس (بصيغة Claude Code) — إضافات فقط، بلا مسّ provider/المفاتيح
 
 خمس ميزات إضافية مطابقة لسلوك Claude Code، كلها إضافية ومعزولة ولا تمسّ طبقة

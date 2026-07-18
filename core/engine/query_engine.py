@@ -19,6 +19,10 @@ try:
     from ..permissions import PermissionManager
 except Exception:  # النظام يعمل حتى لو غاب ملف الأذونات
     PermissionManager = None
+try:
+    from ..checkpoint import CheckpointManager
+except Exception:  # النظام يعمل حتى لو غاب ملف النقاط
+    CheckpointManager = None
 
 
 # ── حارس الهوية على مستوى رسالة المستخدم ─────────────────────────────────────
@@ -159,6 +163,8 @@ class QueryEngine:
         # Action Blocks: تتبّع عمليات الأدوات وعرض ملخص كل جولة
         self._tracker = ActionBlockTracker()
         self._completed_blocks: List[ActionBlock] = []
+        # نقاط الاستعادة (Checkpoint/Rewind) — لقطة قبل كل عملية كتابة
+        self.checkpoints = CheckpointManager() if CheckpointManager else None
         # وضع التخطيط: لا تُنفَّذ أدوات التعديل حتى تُعتمد الخطة
         self.plan_mode = plan_mode or os.environ.get(
             "WEAVER_PLAN_MODE", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -555,6 +561,16 @@ class QueryEngine:
                         )
                     )
                     continue
+
+                # ── نقطة استعادة قبل أي عملية كتابة (Checkpoint/Rewind) ──────
+                if (self.checkpoints is not None
+                        and CheckpointManager is not None
+                        and CheckpointManager.is_write_tool(tool_name)
+                        and isinstance(args, dict) and args.get("path")):
+                    try:
+                        self.checkpoints.snapshot(tool_name, str(args.get("path")))
+                    except Exception:
+                        pass
 
                 # ── معاينة الفروق قبل الكتابة (Write/Edit/MultiEdit) ─────────
                 self._emit_diff_preview(tool_name, args)

@@ -54,6 +54,11 @@ class ToolRegistry:
         self.agent_runner: Optional[Callable] = None
         # قائمة المهام الحيّة (TodoWrite) — تُحفظ لكل جلسة على مستوى السجل
         self._todos: List[Dict[str, Any]] = []
+        # أوامر bash العاملة في الخلفية: shell_id → معلومات العملية
+        self._bg_shells: Dict[str, Dict[str, Any]] = {}
+        self._bg_counter = 0
+        # مجلدات عمل إضافية (multi-workspace / --add-dir)
+        self.extra_dirs: List[str] = []
         self._register_all()
 
     def _register_all(self):
@@ -158,10 +163,45 @@ class ToolRegistry:
                     "command": {"type": "string", "description": "الأمر المراد تنفيذه"},
                     "timeout": {"type": "integer", "description": "المهلة بالثواني", "default": 120},
                     "work_dir": {"type": "string", "description": "مجلد التنفيذ"},
+                    "run_in_background": {
+                        "type": "boolean", "default": False,
+                        "description": ("تشغيل الأمر في الخلفية وإرجاع shell_id "
+                                        "لمتابعته عبر BashOutput/KillShell"),
+                    },
                 },
                 "required": ["command"],
             },
             fn=self._bash,
+            requires_permission=True,
+        ))
+
+        self._add(Tool(
+            name="BashOutput",
+            description=("قراءة الإخراج المتراكم من أمر bash يعمل في الخلفية "
+                         "(بواسطة shell_id). يُرجع الجديد منذ آخر قراءة وحالة العملية."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "shell_id": {"type": "string",
+                                 "description": "معرّف الـ shell الخلفي"},
+                },
+                "required": ["shell_id"],
+            },
+            fn=self._bash_output,
+        ))
+
+        self._add(Tool(
+            name="KillShell",
+            description="إنهاء أمر bash يعمل في الخلفية (بواسطة shell_id).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "shell_id": {"type": "string",
+                                 "description": "معرّف الـ shell الخلفي"},
+                },
+                "required": ["shell_id"],
+            },
+            fn=self._kill_shell,
             requires_permission=True,
         ))
 
@@ -1054,10 +1094,39 @@ class ToolRegistry:
         except Exception as e:
             return f"خطأ في الوكيل الفرعي: {e}"
 
+    def add_dir(self, path: str) -> str:
+        """يضيف مجلد عمل إضافياً (multi-workspace). يُرجع رسالة حالة."""
+        try:
+            p = Path(path).expanduser().resolve()
+        except Exception as e:
+            return f"مسار غير صالح: {e}"
+        if not p.exists() or not p.is_dir():
+            return f"المجلد غير موجود: {path}"
+        sp = str(p)
+        if sp == str(Path(self.work_dir).resolve()) or sp in self.extra_dirs:
+            return f"المجلد مُضاف مسبقاً: {sp}"
+        self.extra_dirs.append(sp)
+        return f"✅ أُضيف مجلد العمل: {sp}"
+
+    def workspace_dirs(self) -> List[str]:
+        """كل مجلدات العمل: الأساسي ثم الإضافية."""
+        return [str(Path(self.work_dir).resolve())] + list(self.extra_dirs)
+
+    def _search_roots(self, base_dir: Optional[str] = None) -> List[str]:
+        """المجلدات التي يُجرى البحث فيها: base_dir المحدّد وإلا كل مساحات العمل."""
+        if base_dir:
+            return [base_dir]
+        return self.workspace_dirs()
+
     def _glob(self, pattern: str, base_dir: Optional[str] = None) -> str:
         try:
-            base = base_dir or self.work_dir
-            files = list(_glob.glob(os.path.join(base, pattern), recursive=True))
+            roots = self._search_roots(base_dir)
+            files: List[str] = []
+            for base in roots:
+                files.extend(_glob.glob(os.path.join(base, pattern),
+                                        recursive=True))
+            # إزالة التكرار مع الحفاظ على الأحدث أولاً
+            files = list(dict.fromkeys(files))
             files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
             if not files:
                 return "لا توجد ملفات تطابق النمط"
@@ -1068,15 +1137,18 @@ class ToolRegistry:
     def _grep(self, pattern: str, path: Optional[str] = None, file_glob: Optional[str] = None,
                output_mode: str = "content", ignore_case: bool = False) -> str:
         try:
-            search_path = path or self.work_dir
             flags = re.IGNORECASE if ignore_case else 0
             results = []
-            if os.path.isfile(search_path):
-                files = [search_path]
+            if path and os.path.isfile(path):
+                files = [path]
             else:
-                file_pattern = os.path.join(search_path, f"**/{file_glob or '*'}")
-                files = _glob.glob(file_pattern, recursive=True)
-                files = [f for f in files if os.path.isfile(f)]
+                # ابحث في المسار المحدّد وإلا في كل مساحات العمل (multi-workspace)
+                search_paths = [path] if path else self.workspace_dirs()
+                files = []
+                for sp in search_paths:
+                    file_pattern = os.path.join(sp, f"**/{file_glob or '*'}")
+                    files.extend(_glob.glob(file_pattern, recursive=True))
+                files = [f for f in dict.fromkeys(files) if os.path.isfile(f)]
 
             for fp in files:
                 try:
@@ -1117,7 +1189,9 @@ class ToolRegistry:
                 return pat
         return None
 
-    def _bash(self, command: str, timeout: int = 120, work_dir: Optional[str] = None) -> str:
+    def _bash(self, command: str, timeout: int = 120,
+              work_dir: Optional[str] = None,
+              run_in_background: bool = False) -> str:
         # ── حماية (sandbox خفيف): رفض الأوامر الكارثية دائماً ────────────────
         danger = self._is_dangerous_command(command)
         if danger:
@@ -1128,6 +1202,11 @@ class ToolRegistry:
         if os.environ.get("WEAVER_BASH_SANDBOX", "0").strip().lower() in ("1", "true", "yes", "on"):
             if re.search(r"\bsudo\b", command):
                 return "🛑 وضع sandbox: أوامر sudo ممنوعة."
+
+        # ── تشغيل في الخلفية: يُرجع shell_id فوراً ─────────────────────────────
+        if run_in_background:
+            return self._bash_background(command, work_dir or self.work_dir)
+
         try:
             result = subprocess.run(
                 command, shell=True, capture_output=True, text=True,
@@ -1143,6 +1222,106 @@ class ToolRegistry:
             return f"انتهت المهلة ({timeout}ث)"
         except Exception as e:
             return f"خطأ: {e}"
+
+    # ── تشغيل أوامر bash في الخلفية + متابعتها ────────────────────────────────
+
+    def _bash_background(self, command: str, cwd: str) -> str:
+        """يُطلق أمراً في الخلفية ويُرجع shell_id لمتابعته."""
+        import tempfile
+        self._bg_counter += 1
+        shell_id = f"bash_{self._bg_counter}"
+        try:
+            out_f = tempfile.NamedTemporaryFile(
+                mode="w+", suffix=".out", prefix=f"weaver_{shell_id}_",
+                delete=False)
+            out_path = out_f.name
+            out_f.close()
+            fh = open(out_path, "wb")
+            proc = subprocess.Popen(
+                command, shell=True, stdout=fh, stderr=subprocess.STDOUT,
+                cwd=cwd,
+            )
+        except Exception as e:
+            return f"خطأ في تشغيل الخلفية: {e}"
+        self._bg_shells[shell_id] = {
+            "proc": proc,
+            "command": command,
+            "out_path": out_path,
+            "fh": fh,
+            "read_pos": 0,
+        }
+        return (f"🚀 يعمل في الخلفية: {shell_id}\n"
+                f"الأمر: {command[:120]}\n"
+                f"استخدم BashOutput(shell_id='{shell_id}') لقراءة الإخراج، "
+                f"و KillShell لإنهائه.")
+
+    def _bash_output(self, shell_id: str) -> str:
+        """يقرأ الإخراج الجديد من shell خلفي منذ آخر قراءة + حالته."""
+        info = self._bg_shells.get(shell_id)
+        if not info:
+            return f"لا يوجد shell خلفي بالمعرّف '{shell_id}'."
+        proc = info["proc"]
+        # اقرأ الجديد من ملف الإخراج
+        new_output = ""
+        try:
+            with open(info["out_path"], "r", encoding="utf-8",
+                      errors="replace") as rf:
+                rf.seek(info["read_pos"])
+                new_output = rf.read()
+                info["read_pos"] = rf.tell()
+        except Exception as e:
+            new_output = f"(تعذّر قراءة الإخراج: {e})"
+        rc = proc.poll()
+        if rc is None:
+            status = "▶ لا يزال يعمل"
+        else:
+            status = f"✅ انتهى (رمز الخروج: {rc})"
+            # تنظيف مقبض الملف عند الانتهاء
+            try:
+                info["fh"].close()
+            except Exception:
+                pass
+        body = new_output.strip() or "(لا إخراج جديد)"
+        return f"[{shell_id}] {status}\n{body[:30000]}"
+
+    def _kill_shell(self, shell_id: str) -> str:
+        """ينهي shell خلفياً ويحرّر موارده."""
+        info = self._bg_shells.get(shell_id)
+        if not info:
+            return f"لا يوجد shell خلفي بالمعرّف '{shell_id}'."
+        proc = info["proc"]
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            except Exception as e:
+                return f"تعذّر إنهاء {shell_id}: {e}"
+        try:
+            info["fh"].close()
+        except Exception:
+            pass
+        try:
+            os.unlink(info["out_path"])
+        except Exception:
+            pass
+        del self._bg_shells[shell_id]
+        return f"🛑 أُنهي الـ shell الخلفي '{shell_id}'."
+
+    def list_background_shells(self) -> List[Dict[str, Any]]:
+        """قائمة الـ shells الخلفية النشطة (للواجهات)."""
+        out = []
+        for sid, info in self._bg_shells.items():
+            rc = info["proc"].poll()
+            out.append({
+                "shell_id": sid,
+                "command": info["command"],
+                "running": rc is None,
+                "exit_code": rc,
+            })
+        return out
 
     def _memory_save(self, key: str, value: str, tags: Optional[List[str]] = None) -> str:
         # يستخدم MemoryStore عبر QueryEngine — هنا نحفظ في ملف
