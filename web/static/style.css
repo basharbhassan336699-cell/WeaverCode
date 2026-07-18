@@ -201,15 +201,37 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 /* الارتباطات */
 .intg-list { display: flex; flex-direction: column; gap: 10px; }
 .intg-card { display: flex; align-items: center; gap: 12px; background: var(--card);
-  border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
-.intg-card.off { opacity: .5; }
-.intg-ic { font-size: 26px; width: 40px; text-align: center; }
+  border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; transition: opacity .2s; }
+.intg-card.off { opacity: .55; }
+/* بلاطة الأيقونة الحديثة (زوايا دائرية + خلفية خفيفة) */
+.intg-ic { width: 42px; height: 42px; flex: none; border-radius: 12px; background: var(--card-2);
+  border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; }
+.intg-ic .ic-svg { width: 22px; height: 22px; color: var(--text); display: flex; }
+.intg-ic .ic-svg svg { width: 22px; height: 22px; }
+.intg-ic .ic-emoji { font-size: 22px; line-height: 1; }
+.intg-ic.i-github .ic-svg { color: var(--text); }
+.intg-ic.i-vercel .ic-svg { color: var(--text); }
 .intg-main { flex: 1; min-width: 0; }
-.intg-name { font-size: 16px; font-weight: 500; }
+.intg-name { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .intg-name .tok { font-size: 12px; }
-.intg-url { color: var(--muted); font-size: 12px; direction: ltr; text-align: start; }
-.intg-actions { display: flex; align-items: center; gap: 6px; }
-.intg-actions .ic { width: 34px; height: 34px; font-size: 16px; }
+.intg-url { color: var(--muted); font-size: 12px; direction: ltr; text-align: start; margin-top: 2px; }
+.intg-actions { display: flex; align-items: center; gap: 8px; }
+.intg-actions .ic { width: 32px; height: 32px; font-size: 15px; }
+/* مفتاح تبديل حديث (بدل النقطة الخضراء) */
+.switch { position: relative; display: inline-block; width: 40px; height: 23px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; cursor: pointer; background: var(--muted-2);
+  border-radius: 23px; transition: .25s; }
+.slider::before { content: ""; position: absolute; height: 17px; width: 17px; inset-inline-start: 3px; top: 3px;
+  background: #fff; border-radius: 50%; transition: .25s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.switch input:checked + .slider { background: #22c55e; }
+.switch input:checked + .slider::before { transform: translateX(17px); }
+[dir="rtl"] .switch input:checked + .slider::before { transform: translateX(-17px); }
+/* زر الاتصال */
+.conn-btn { background: var(--orange); border: none; color: #fff; border-radius: 11px;
+  padding: 8px 16px; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.conn-btn:active { filter: brightness(.92); }
+.conn-btn.on { background: var(--card-2); color: var(--green, #22c55e); border: 1px solid #22c55e33; }
 
 /* نافذة منبثقة (Modal) */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 40; display: none;

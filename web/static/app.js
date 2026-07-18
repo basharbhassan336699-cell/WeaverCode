@@ -396,6 +396,17 @@
     intg = r.integrations || [];
     renderIntegrations();
   }
+  // أيقونات حديثة (SVG أحادي اللون) للخدمات المعروفة، وإلا حرف/إيموجي في بلاطة
+  const INTG_SVG = {
+    github: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>',
+    vercel: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3L22 20H2L12 3z"/></svg>',
+    huggingface: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="10.5" r="1.1"/><circle cx="15" cy="10.5" r="1.1"/><path d="M8 14c1 1.4 2.4 2.1 4 2.1s3-.7 4-2.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  };
+  function intgIcon(it) {
+    const svg = INTG_SVG[it.id];
+    if (svg) return '<span class="ic-svg">' + svg + "</span>";
+    return '<span class="ic-emoji">' + escapeHtml(it.icon || "🔗") + "</span>";
+  }
   function renderIntegrations() {
     const box = $("#intgList");
     box.innerHTML = "";
@@ -404,19 +415,30 @@
       card.className = "intg-card" + (it.enabled ? "" : " off");
       const url = it.url || "";
       card.innerHTML =
-        '<div class="intg-ic">' + escapeHtml(it.icon || "🔗") + "</div>" +
+        '<div class="intg-ic i-' + escapeHtml(it.id || "x") + '">' + intgIcon(it) + "</div>" +
         '<div class="intg-main"><div class="intg-name">' + escapeHtml(it.name) +
-        (it.token ? ' <span class="tok">🔑</span>' : "") + "</div>" +
+        (it.token ? ' <span class="tok" title="مفتاح محفوظ">🔑</span>' : "") + "</div>" +
         '<div class="intg-url ellip">' + escapeHtml(url || "—") + "</div></div>" +
         '<div class="intg-actions">' +
-        (url ? '<a class="chip-btn" href="' + encodeURI(url) + '" target="_blank" rel="noopener">افتح</a>' : "") +
+        '<label class="switch" title="' + (it.enabled ? "متصل" : "غير متصل") + '">' +
+        '<input type="checkbox" ' + (it.enabled ? "checked" : "") + ' data-tog="' + idx + '">' +
+        '<span class="slider"></span></label>' +
         '<button class="ic" data-edit="' + idx + '" title="تعديل">✎</button>' +
-        '<button class="ic" data-tog="' + idx + '" title="تفعيل">' + (it.enabled ? "🟢" : "⚪") + "</button>" +
+        (url ? '<button class="conn-btn' + (it.enabled ? " on" : "") + '" data-conn="' + idx + '">' +
+               (it.enabled ? "متصل" : "اتصال") + "</button>" : "") +
         "</div>";
       box.appendChild(card);
     });
-    $$("#intgList [data-tog]").forEach((b) => b.onclick = () => { const i = +b.dataset.tog; intg[i].enabled = !intg[i].enabled; saveIntg(); });
+    $$("#intgList [data-tog]").forEach((b) => b.onclick = () => { const i = +b.dataset.tog; intg[i].enabled = b.checked; saveIntg(); });
     $$("#intgList [data-edit]").forEach((b) => b.onclick = () => editIntg(+b.dataset.edit));
+    $$("#intgList [data-conn]").forEach((b) => b.onclick = () => connectIntg(+b.dataset.conn));
+  }
+  // اتصال: يفعّل الخدمة (إن لم تكن مفعّلة) ثم ينتقل إلى الموقع
+  function connectIntg(i) {
+    const it = intg[i];
+    if (!it || !it.url) return;
+    window.open(it.url, "_blank", "noopener");
+    if (!it.enabled) { it.enabled = true; saveIntg(); }
   }
   async function saveIntg() { await post("/api/integrations", { integrations: intg }); loadIntegrations(); }
 
