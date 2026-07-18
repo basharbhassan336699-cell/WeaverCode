@@ -213,3 +213,12 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .cmd-item.on .cmd-n, .cmd-item.on .cmd-d { color: #fff; }
 .cmd-n { color: var(--orange-2); font-weight: 600; font-family: ui-monospace, monospace; flex: none; }
 .cmd-d { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Action Blocks — ملخص جولة الأدوات */
+.action-block { font-family: ui-monospace, monospace; font-size: 13px; color: var(--muted);
+  padding: 4px 10px; margin: 3px 0; display: flex; align-items: center; gap: 4px;
+  border-inline-start: 2px solid var(--orange); background: rgba(198,113,33,.06); border-radius: 6px; }
+.ab-arrow { color: var(--orange); font-weight: bold; }
+.ab-removed { color: #e05555; }
+.ab-added { color: #4ec94e; }
+.ab-desc { color: var(--muted); }

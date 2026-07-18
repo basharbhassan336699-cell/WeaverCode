@@ -201,7 +201,7 @@ async def run_once(prompt: str, mode: str = "main", stream: bool = False,
         else:
             draw_response(result.text)
             if result.tool_calls_made:
-                draw_stats(result.turns, result.tool_calls_made)
+                draw_stats(result.turns, result.tool_calls_made, getattr(result, "blocks", None))
 
         await mcp.stop_all()
 
@@ -572,7 +572,7 @@ async def interactive_mode(initial_history=None, session_id=None,
         else:
             draw_response(result.text)
             if result.tool_calls_made:
-                draw_stats(result.turns, result.tool_calls_made)
+                draw_stats(result.turns, result.tool_calls_made, getattr(result, "blocks", None))
             # تراكم السجل + حفظ الجلسة تلقائياً للاستئناف لاحقاً
             history.append(Message(role="user", content=prompt))
             history.append(Message(role="assistant", content=result.text))

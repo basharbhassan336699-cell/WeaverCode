@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from .provider import WeaverProvider, Message, get_provider
 from ..tools.registry import ToolRegistry
 from ..memory.store import MemoryStore
+from ..action_blocks import ActionBlockTracker, ActionBlock
 try:
     from ..permissions import PermissionManager
 except Exception:  # النظام يعمل حتى لو غاب ملف الأذونات
@@ -123,6 +124,7 @@ class QueryResult:
     turns: int = 0
     session_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     error: Optional[str] = None
+    blocks: List[Any] = field(default_factory=list)   # Action Blocks للجولات
 
 
 class QueryEngine:
@@ -154,6 +156,9 @@ class QueryEngine:
         self.session_allow: set = set()
         # طبقة قواعد أذونات اختيارية (settings.json) — الافتراضي "ask" فلا تغيّر شيئاً
         self.permissions = PermissionManager() if PermissionManager else None
+        # Action Blocks: تتبّع عمليات الأدوات وعرض ملخص كل جولة
+        self._tracker = ActionBlockTracker()
+        self._completed_blocks: List[ActionBlock] = []
         # وضع التخطيط: لا تُنفَّذ أدوات التعديل حتى تُعتمد الخطة
         self.plan_mode = plan_mode or os.environ.get(
             "WEAVER_PLAN_MODE", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -169,6 +174,31 @@ class QueryEngine:
         self.keep_recent = int(os.environ.get("WEAVER_KEEP_RECENT", "8"))
         # تمكين أداة Agent من تشغيل وكيل فرعي
         self.tools.agent_runner = self._run_subagent
+
+    def _emit_action_block(self, block) -> None:
+        """عرض Action Block في الطرفية ونشره للوحة الويب (كلاهما آمن/اختياري)."""
+        # (1) طرفية CLI
+        try:
+            from core.ui import draw_action_block, clear_tool_line
+            clear_tool_line()
+            draw_action_block(block)
+        except Exception:
+            pass
+        # (2) لوحة الويب عبر EventBus (إن كانت متاحة) — لا يكسر إن غابت
+        try:
+            from background.events import event_bus, WeaverEvent, EventType
+            import asyncio as _asyncio
+            ev = WeaverEvent(
+                EventType.ACTION_BLOCK,
+                block.summary_line(),
+                block._build_description(),
+                diff_added=block.lines_added,
+                diff_removed=block.lines_removed,
+            )
+            # نشر غير متزامن دون إيقاف الحلقة
+            _asyncio.create_task(event_bus.emit(ev))
+        except Exception:
+            pass
 
     async def _run_subagent(self, prompt: str, mode: str = "main") -> str:
         """تشغيل وكيل فرعي معزول لمهمة فرعية، وإرجاع خلاصته النصية."""
@@ -314,6 +344,7 @@ class QueryEngine:
             QueryResult مع النتيجة النهائية
         """
         messages: List[Message] = []
+        self._completed_blocks = []   # Action Blocks لهذه المهمة
 
         # إضافة السياق من الذاكرة
         memory_context = await self.memory.get_relevant(prompt)
@@ -472,10 +503,14 @@ class QueryEngine:
                     )
                     continue
 
+                # ── Action Blocks: بدء تتبّع الأداة ──────────────────────────
+                self._tracker.begin_tool(tool_name, args)
                 try:
                     tool_output = await self.tools.execute(tool_name, args)
                 except Exception as e:
                     tool_output = f"خطأ في تنفيذ {tool_name}: {e}"
+                # ── Action Blocks: نهاية الأداة (حساب الـ diff) ──────────────
+                self._tracker.end_tool(tool_name, args, str(tool_output))
 
                 # ── hook: PostToolUse ────────────────────────────────────────
                 if self.hooks:
@@ -492,6 +527,12 @@ class QueryEngine:
 
             messages.extend(tool_results)
 
+            # ── Action Blocks: عرض ملخص الجولة + نشره للوحة الويب ────────────
+            block = self._tracker.finalize()
+            if block.ops:
+                self._completed_blocks.append(block)
+                self._emit_action_block(block)
+
             # asyncRewake: إن أرجع hook (مثل security-guidance) رسالة إعادة تنبيه،
             # نحقنها كرسالة مستخدم في الجولة التالية ليعالجها الوكيل.
             if self.hooks:
@@ -500,6 +541,7 @@ class QueryEngine:
                     messages.append(Message(role="user", content=rewake))
 
         result.turns = turns
+        result.blocks = list(self._completed_blocks)
 
         # شبكة الأمان الأخيرة: تنقية أي تسريب لهوية أخرى من الرد
         result.text = _sanitize_identity(result.text)

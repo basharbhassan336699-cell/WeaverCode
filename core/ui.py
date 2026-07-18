@@ -334,10 +334,84 @@ def draw_thinking(msg: str = "يعالج..."):
     sys.stdout.flush()
 
 
-def draw_tool_call(name: str, arg: str = ""):
-    """عرض استدعاء الأداة"""
-    arg_str = f"({str(arg)[:50]})" if arg else ""
-    print(f"  {OR}🔧 {name}{RST}{GRY}{arg_str}{RST}")
+def draw_tool_call(name: str, arg: str = "", in_progress: bool = True):
+    """
+    عرض حالة الأداة أثناء التنفيذ (بصيغة Action Blocks).
+    يُستبدَل بـ draw_action_block بعد انتهاء الجولة.
+
+    مثال:  ‹ Creating build.js ...
+    """
+    _PROGRESSIVE = {
+        "Write": "Creating", "Edit": "Editing", "MultiEdit": "Editing",
+        "Read": "Reading", "Bash": "Running", "PythonRun": "Running",
+        "Glob": "Searching", "Grep": "Searching", "WebFetch": "Fetching",
+        "WebSearch": "Searching", "GitClone": "Cloning",
+        "GitCommit": "Committing", "GitPush": "Pushing",
+        "PipInstall": "Installing", "Agent": "Running sub-agent",
+        "MemorySave": "Saving", "TaskCreate": "Creating task",
+        "DirectoryList": "Listing", "LSP": "Checking",
+    }
+    verb = _PROGRESSIVE.get(name, "Running")
+    arg = str(arg or "")
+    fname = Path(arg).name if arg and "/" in arg else arg
+    label = f"{verb} {fname[:50]}" if fname else verb
+    dots = " ..." if in_progress else ""
+    if _is_tty():
+        sys.stdout.write("\r\033[K")
+    print(f"  {GRY}‹{RST} {GRY}{label}{dots}{RST}")
+
+
+def clear_tool_line() -> None:
+    """مسح سطر حالة الأداة الجارية من الطرفية (في TTY فقط)."""
+    if _is_tty():
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+
+def draw_action_block(block, clear_previous: bool = True) -> None:
+    """
+    عرض Action Block المكتمل بعد انتهاء جولة الأدوات.
+        ‹ 1- +11  Edited a file, read a file
+    """
+    from core.action_blocks import ActionBlock  # تأجيل الاستيراد لتفادي الدوران
+    if not isinstance(block, ActionBlock):
+        return
+    if clear_previous and _is_tty():
+        sys.stdout.write("\r\033[K")
+
+    if block.in_progress:
+        line = block.in_progress_line()
+        sys.stdout.write(f"  {OR}‹{RST} {GRY}{line}{RST}")
+        sys.stdout.flush()
+        return
+
+    if not block.ops:
+        return
+
+    removed = block.lines_removed
+    added = block.lines_added
+    desc = block._build_description()
+    parts = [f"  {OR}‹{RST} "]
+    if block.has_diff:
+        parts.append(f"{RED}{removed}-{RST} ")
+        parts.append(f"{GRN}+{added}{RST}  ")
+    else:
+        parts.append(f"{GRY}     {RST}")
+    parts.append(f"{GRY}{desc}{RST}")
+    print("".join(parts))
+
+
+def draw_action_block_inline(block) -> str:
+    """إرجاع Action Block كنص عادي (لـ SSE أو logging) بلا ألوان."""
+    from core.action_blocks import ActionBlock
+    if not isinstance(block, ActionBlock) or not block.ops:
+        return ""
+    removed = block.lines_removed
+    added = block.lines_added
+    desc = block._build_description()
+    if block.has_diff:
+        return f"  ‹ {removed}- +{added}  {desc}"
+    return f"  ‹ {desc}"
 
 
 def draw_response(text: str):
@@ -357,8 +431,18 @@ def draw_info(text: str):
     print(f"{GRY}ℹ️  {text}{RST}")
 
 
-def draw_stats(turns: int, tools: list):
-    """إحصاءات بعد الرد"""
+def draw_stats(turns: int, tools: list, blocks: list = None):
+    """إحصاءات بعد الرد مع ملخص Action Blocks (blocks اختياري)."""
+    if not tools and not blocks:
+        return
+    if blocks:
+        total_r = sum(getattr(b, "lines_removed", 0) for b in blocks)
+        total_a = sum(getattr(b, "lines_added", 0) for b in blocks)
+        if total_r or total_a:
+            print(f"\n{GRY}📊 {turns} دورة │ {RED}{total_r}-{RST}{GRY} "
+                  f"{GRN}+{total_a}{RST}{GRY} │ "
+                  f"{', '.join(dict.fromkeys(tools))}{RST}")
+            return
     if tools:
         print(f"\n{GRY}📊 {turns} دورة │ {', '.join(dict.fromkeys(tools))}{RST}")
 

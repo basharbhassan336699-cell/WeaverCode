@@ -22,6 +22,7 @@ class EventType(Enum):
     ERROR = "error"              # خطأ
     DONE = "done"                # انتهى
     STATUS = "status"            # تغيّر حالة الـ daemon
+    ACTION_BLOCK = "action_block"  # ملخص جولة أدوات (diff + وصف)
 
 
 @dataclass
