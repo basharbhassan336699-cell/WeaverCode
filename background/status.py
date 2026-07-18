@@ -32,11 +32,13 @@ def read_status() -> dict:
     return {"state": "offline", "task": "", "pid": None, "timestamp": 0}
 
 
-def queue_task(prompt: str, mode: str = "main", history=None) -> int:
+def queue_task(prompt: str, mode: str = "main", history=None,
+               session_id: str = "") -> int:
     QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
     tasks = read_queue()
     tasks.append({"prompt": prompt, "mode": mode,
-                  "history": history or [], "timestamp": time.time()})
+                  "history": history or [], "session_id": session_id,
+                  "timestamp": time.time()})
     QUEUE_FILE.write_text(json.dumps(tasks, ensure_ascii=False))
     return len(tasks)
 

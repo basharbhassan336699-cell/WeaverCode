@@ -1411,34 +1411,74 @@ class ToolRegistry:
                 return f"✅ تم تحديث المهمة #{task_id}"
         return f"المهمة #{task_id} غير موجودة"
 
-    async def _web_fetch(self, url: str, extract_prompt: str = "") -> str:
+    def _http_get(self, url: str, timeout: int = 30,
+                  user_agent: str = "WeaverCode/1.0") -> str:
+        """
+        جلب صفحة عبر HTTP. يجرّب httpx إن توفّر، وإلا يسقط إلى curl
+        (متوفّر دائماً على Termux) — فيعمل الاتصال بالمواقع بلا اعتمادية إضافية.
+        يُرجع نص الرد الخام (HTML) أو رسالة خطأ تبدأ بـ 'خطأ'.
+        """
+        # (1) httpx إن كان مثبّتاً
         try:
-            import httpx
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-                resp = await client.get(url, headers={"User-Agent": "WeaverCode/1.0"})
-                text = resp.text[:50000]
-                # إزالة HTML بسيطة
-                text = re.sub(r"<[^>]+>", " ", text)
-                text = re.sub(r"\s+", " ", text)
-                return text[:10000]
+            import httpx  # noqa
+            import asyncio as _asyncio
+
+            async def _fetch():
+                async with httpx.AsyncClient(follow_redirects=True,
+                                             timeout=timeout) as client:
+                    r = await client.get(url, headers={"User-Agent": user_agent})
+                    return r.text
+
+            try:
+                loop = _asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is None:
+                return _asyncio.run(_fetch())
+            # داخل حلقة قائمة: نفّذ في خيط منفصل
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as ex:
+                return ex.submit(lambda: _asyncio.run(_fetch())).result()
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        # (2) fallback: curl (نفس نهج المزوّد على Termux)
+        try:
+            proc = subprocess.run(
+                ["curl", "-sSL", "--max-time", str(timeout),
+                 "-A", user_agent, url],
+                capture_output=True, text=True, timeout=timeout + 5)
+            if proc.returncode != 0:
+                return f"خطأ في جلب {url}: {proc.stderr.strip()[:200]}"
+            return proc.stdout
+        except FileNotFoundError:
+            return f"خطأ: لا httpx ولا curl متوفّر لجلب {url}"
         except Exception as e:
             return f"خطأ في جلب {url}: {e}"
 
+    async def _web_fetch(self, url: str, extract_prompt: str = "") -> str:
+        raw = self._http_get(url, timeout=30)
+        if raw.startswith("خطأ"):
+            return raw
+        # إزالة HTML بسيطة → نص قابل للقراءة
+        text = re.sub(r"<script[\s\S]*?</script>", " ", raw, flags=re.I)
+        text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:10000] if text else "(الصفحة فارغة أو تعذّرت قراءتها)"
+
     async def _web_search(self, query: str, max_results: int = 5) -> str:
-        try:
-            import httpx
-            url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
-            async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
-                resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                text = resp.text
-            results = re.findall(r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', text, re.S)
-            output = []
-            for link, title in results[:max_results]:
-                title_clean = re.sub(r"<[^>]+>", "", title).strip()
-                output.append(f"• {title_clean}\n  {link}")
-            return "\n".join(output) if output else "لا توجد نتائج"
-        except Exception as e:
-            return f"خطأ في البحث: {e}"
+        url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
+        text = self._http_get(url, timeout=15, user_agent="Mozilla/5.0")
+        if text.startswith("خطأ"):
+            return text
+        results = re.findall(r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', text, re.S)
+        output = []
+        for link, title in results[:max_results]:
+            title_clean = re.sub(r"<[^>]+>", "", title).strip()
+            output.append(f"• {title_clean}\n  {link}")
+        return "\n".join(output) if output else "لا توجد نتائج"
 
     def _git_status(self, repo_path: Optional[str] = None) -> str:
         return self._bash("git status", work_dir=repo_path)

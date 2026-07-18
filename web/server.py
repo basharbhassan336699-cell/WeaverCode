@@ -189,6 +189,47 @@ def _api_conversations(limit=20, search="") -> dict:
         return {"conversations": [], "error": str(e)}
 
 
+def _api_sessions(limit=100, search="") -> dict:
+    """قائمة المحادثات كجلسات (محادثة واحدة = عنصر واحد، لا رسالة منفصلة)."""
+    try:
+        from core.memory.store import MemoryStore
+        sessions = MemoryStore().list_sessions(limit=limit)
+    except Exception as e:
+        return {"sessions": [], "error": str(e)}
+    if search:
+        s = search.lower()
+        sessions = [x for x in sessions
+                    if s in (x.get("name", "") or "").lower()
+                    or s in (x.get("last_prompt", "") or "").lower()]
+    return {"sessions": [
+        {"id": x["id"], "prompt": x.get("name") or x.get("last_prompt") or "محادثة",
+         "last_prompt": x.get("last_prompt", ""),
+         "timestamp": x.get("updated_at", 0)} for x in sessions]}
+
+
+def _api_session(session_id: str) -> dict:
+    """تحميل محادثة كاملة برسائلها (لفتحها)."""
+    try:
+        from core.memory.store import MemoryStore
+        data = MemoryStore().load_session(session_id)
+        if not data:
+            return {"error": "لم تُوجد المحادثة", "messages": []}
+        return {"id": data["id"], "name": data.get("name", ""),
+                "messages": data.get("messages", [])}
+    except Exception as e:
+        return {"error": str(e), "messages": []}
+
+
+def _api_session_delete(session_id: str) -> dict:
+    """حذف محادثة."""
+    try:
+        from core.memory.store import MemoryStore
+        ok = MemoryStore().delete_session(session_id)
+        return {"deleted": ok}
+    except Exception as e:
+        return {"deleted": False, "error": str(e)}
+
+
 def _safe_json(s):
     try:
         return json.loads(s or "[]")
@@ -442,6 +483,12 @@ class Handler(BaseHTTPRequestHandler):
             limit = int(qs.get("limit", ["20"])[0])
             search = qs.get("search", [""])[0]
             return self._json(_api_conversations(limit, search))
+        if path == "/api/sessions":
+            limit = int(qs.get("limit", ["100"])[0])
+            search = qs.get("search", [""])[0]
+            return self._json(_api_sessions(limit, search))
+        if path == "/api/session":
+            return self._json(_api_session(qs.get("id", [""])[0]))
         if path == "/api/settings":
             s = {}
             for k, v in _read_env().items():
@@ -474,7 +521,9 @@ class Handler(BaseHTTPRequestHandler):
             history = body.get("history")
             if not isinstance(history, list):
                 history = []
-            pos = st.queue_task(prompt, body.get("mode", "main"), history[-20:])
+            session_id = (body.get("session_id") or "").strip()
+            pos = st.queue_task(prompt, body.get("mode", "main"), history[-20:],
+                                session_id)
             return self._json({"queued": True, "position": pos})
         if path == "/api/command":
             return self._json(_run_command(body.get("command", "")))
@@ -493,6 +542,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "صيغة غير صالحة"}, 400)
         if path == "/api/upload":
             return self._json(_save_upload(body))
+        if path == "/api/session/delete":
+            return self._json(_api_session_delete((body.get("id") or "").strip()))
         return self._json({"error": "not found"}, 404)
 
     # -- SSE (البثّ الحيّ) --

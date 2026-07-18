@@ -279,6 +279,16 @@ class MemoryStore:
                 pass
         return None
 
+    def delete_session(self, session_id: str) -> bool:
+        """حذف جلسة بالـ ID."""
+        with self._conn() as conn:
+            self._ensure_sessions_table(conn)
+            try:
+                conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+                return True
+            except Exception:
+                return False
+
     def rename_session(self, session_id: str, new_name: str) -> bool:
         """إعادة تسمية جلسة."""
         with self._conn() as conn:

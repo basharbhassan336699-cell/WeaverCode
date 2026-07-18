@@ -139,6 +139,23 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
   overflow-x: auto; font-family: monospace; font-size: 12.5px; direction: ltr; text-align: left; margin: 8px 0; white-space: pre; }
 .bubble a { color: var(--orange-2); }
 
+/* كتلة كود بصيغة Claude Code: شريط علوي + أزرار نسخ/تكبير */
+.codewrap { margin: 8px 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--card-2); }
+.codebar { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px;
+  background: var(--bg); border-bottom: 1px solid var(--line); direction: ltr; }
+.codelang { color: var(--muted); font-size: 12px; font-family: monospace; }
+.codebtns { display: flex; gap: 6px; }
+.cbtn { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer;
+  width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.cbtn:active { background: var(--card); color: var(--orange); }
+.codewrap pre.code { border: none; border-radius: 0; margin: 0; max-height: 220px; }
+.codewrap.expanded pre.code { max-height: none; }
+
+/* زر حذف المحادثة على البطاقة */
+.sess-del { background: none; border: none; color: var(--muted-2); font-size: 17px; cursor: pointer;
+  width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+.sess-del:active { background: var(--card-2); }
+
 /* زر محادثة جديدة */
 .new-pill { position: fixed; inset-inline-start: 18px; bottom: calc(20px + env(safe-area-inset-bottom));
   background: var(--orange); color: #fff; border: none; border-radius: 26px; padding: 15px 26px;

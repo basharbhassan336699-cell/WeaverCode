@@ -82,8 +82,8 @@
     return "أقدم";
   }
   async function loadSessions() {
-    const r = await api("/api/conversations?limit=100");
-    const convs = r.conversations || [];
+    const r = await api("/api/sessions?limit=100");
+    const convs = r.sessions || [];
     const box = $("#sessions");
     if (!convs.length) {
       box.innerHTML = '<div class="empty-note">لا محادثات بعد.<br>اضغط «محادثة جديدة» للبدء.</div>';
@@ -102,9 +102,15 @@
         '<div class="sess-time">' + rel(c.timestamp) + "</div>" +
         '<div class="sess-main"><div class="sess-title">' + escapeHtml((c.prompt || "محادثة").slice(0, 60)) + "</div>" +
         '<div class="sess-sub"><span class="ellip">' + escapeHtml(repo) + '</span> ☁</div></div>' +
-        '<div class="sess-badge' + (isToday ? " dot" : "") + '">◌</div>';
-      card.onclick = () => openSession(c);
+        '<button class="sess-del" title="حذف المحادثة" data-del="' + escapeHtml(c.id) + '">🗑️</button>';
+      card.onclick = (e) => { if (e.target.closest("[data-del]")) return; openSession(c); };
       box.appendChild(card);
+    });
+    $$("#sessions [data-del]").forEach((b) => b.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm("حذف هذه المحادثة نهائياً؟")) return;
+      await post("/api/session/delete", { id: b.dataset.del });
+      loadSessions();
     });
   }
 
@@ -114,13 +120,27 @@
     return '<div class="bubble ' + role + '"><div class="who">' + who + "</div>" + html + "</div>";
   }
   let chatHistory = []; // سياق المحادثة الحالية (يُرسَل مع كل متابعة)
-  function openSession(c) {
-    $("#chatTitle").textContent = (c.prompt || "محادثة").slice(0, 30);
-    $("#chatMsgs").innerHTML = bubble("user", escapeHtml(c.prompt || "")) +
-      bubble("agent", md(c.response || "(لا رد محفوظ)"));
-    chatHistory = [{ role: "user", content: c.prompt || "" }, { role: "assistant", content: c.response || "" }];
-    $("#chatAttachList").innerHTML = ""; chatAttached = [];
+  let currentSessionId = ""; // معرّف المحادثة الحالية (يبقى ثابتاً طوال الدردشة)
+  function uuid() {
+    return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+  }
+  async function openSession(meta) {
+    currentSessionId = meta.id || "";
+    $("#chatTitle").textContent = (meta.prompt || "محادثة").slice(0, 30);
+    $("#chatMsgs").innerHTML = '<div class="bubble event">⟳ تحميل المحادثة…</div>';
     go("v-chat");
+    // حمّل كل رسائل المحادثة (لا رسالة واحدة)
+    let msgs = [];
+    try {
+      const r = await api("/api/session?id=" + encodeURIComponent(meta.id));
+      msgs = r.messages || [];
+    } catch (e) {}
+    chatHistory = msgs.map((m) => ({ role: m.role, content: m.content || "" }));
+    $("#chatMsgs").innerHTML = msgs.map((m) =>
+      bubble(m.role === "user" ? "user" : "agent",
+             m.role === "user" ? escapeHtml(m.content || "") : md(m.content || ""))
+    ).join("") || bubble("agent", "(محادثة فارغة)");
+    $("#chatAttachList").innerHTML = ""; chatAttached = [];
     scrollChat();
   }
 
@@ -188,7 +208,8 @@
     let prompt = v;
     if (files.length) prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" + files.map((a) => "- " + a.path).join("\n");
     chatHistory = []; // محادثة جديدة
-    await post("/api/task", { prompt: prompt, mode: $("#buildMode").value, history: [] });
+    currentSessionId = uuid(); // معرّف جديد ثابت لهذه المحادثة
+    await post("/api/task", { prompt: prompt, mode: $("#buildMode").value, history: [], session_id: currentSessionId });
     chatHistory.push({ role: "user", content: prompt });
     $("#chatTitle").textContent = (v || "ملفات مرفقة").slice(0, 30);
     $("#chatMsgs").innerHTML = bubble("user", escapeHtml(v) +
@@ -211,13 +232,30 @@
     $("#chatMsgs").insertAdjacentHTML("beforeend", bubble("user", escapeHtml(v) +
       (files.length ? '<div class="who">📎 ' + files.length + " ملف</div>" : "")));
     $("#chatInput").value = "";
-    // أرسل سياق المحادثة السابق ليفهم المتابعة
-    await post("/api/task", { prompt: prompt, mode: "main", history: chatHistory.slice() });
+    if (!currentSessionId) currentSessionId = uuid();
+    // أرسل سياق المحادثة السابق ليفهم المتابعة (بنفس معرّف المحادثة)
+    await post("/api/task", { prompt: prompt, mode: "main", history: chatHistory.slice(), session_id: currentSessionId });
     chatHistory.push({ role: "user", content: prompt });
     chatAttached = []; $("#chatAttachList").innerHTML = "";
     scrollChat();
   }
   function scrollChat() { const m = $("#chatMsgs"); m.scrollTop = m.scrollHeight; window.scrollTo(0, document.body.scrollHeight); }
+
+  // ── أزرار كتل الكود: نسخ + تكبير (تفويض الأحداث) ──
+  $("#chatMsgs").addEventListener("click", (e) => {
+    const copyBtn = e.target.closest("[data-copy]");
+    const expBtn = e.target.closest("[data-expand]");
+    if (copyBtn) {
+      const pre = copyBtn.closest(".codewrap").querySelector("pre.code");
+      const text = pre ? pre.textContent : "";
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.textContent = "✓"; setTimeout(() => copyBtn.textContent = "⧉", 1200);
+      }).catch(() => {});
+    } else if (expBtn) {
+      expBtn.closest(".codewrap").classList.toggle("expanded");
+      expBtn.textContent = expBtn.closest(".codewrap").classList.contains("expanded") ? "⤡" : "⤢";
+    }
+  });
 
   // ── إكمال تلقائي لأوامر السلاش (يظهر عند كتابة "/") ──
   let _cmds = null;
@@ -420,7 +458,22 @@
   function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
   function md(s) {
     let t = escapeHtml(String(s == null ? "" : s));
-    t = t.replace(/```([\s\S]*?)```/g, (m, c) => '<pre class="code">' + c.replace(/^\n/, "") + "</pre>");
+    t = t.replace(/```([\s\S]*?)```/g, (m, c) => {
+      let body = c.replace(/^\n/, "");
+      // سطر اللغة الأول (مثل ```bash)
+      let lang = "code";
+      const nl = body.indexOf("\n");
+      const firstLine = nl >= 0 ? body.slice(0, nl).trim() : "";
+      if (firstLine && /^[a-zA-Z0-9_+-]{1,20}$/.test(firstLine)) {
+        lang = firstLine; body = body.slice(nl + 1);
+      }
+      const label = { bash: "Bash", sh: "Shell", py: "Python", python: "Python", js: "JavaScript", json: "JSON", ts: "TypeScript" }[lang.toLowerCase()] || lang;
+      return '<div class="codewrap"><div class="codebar">' +
+        '<span class="codebtns"><button class="cbtn" data-expand title="تكبير">⤢</button>' +
+        '<button class="cbtn" data-copy title="نسخ">⧉</button></span>' +
+        '<span class="codelang">' + escapeHtml(label) + '</span></div>' +
+        '<pre class="code">' + body + "</pre></div>";
+    });
     t = t.replace(/`([^`\n]+)`/g, "<code>$1</code>");
     t = t.replace(/^#{1,6}\s?(.*)$/gm, "<b>$1</b>");
     t = t.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
