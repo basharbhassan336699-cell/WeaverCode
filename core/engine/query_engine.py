@@ -58,6 +58,39 @@ def _guard_user_prompt(prompt: str) -> str:
     return prompt + IDENTITY_REMINDER if _identity_guard_enabled() else prompt
 
 
+# ── التعافي من الرفض الزائف ──────────────────────────────────────────────────
+# بعض النماذج/البوابات تُفسّر غلاف إخفاء الهوية (بروموه نظامي صارم + تذكير صامت)
+# كمحاولة اختراق، فترفض حتى الطلبات البريئة (فئة "cyber"). عند اكتشاف رفض،
+# نعيد المحاولة مرّة بطلب نظيف: بروموه نظامي بسيط وبلا تذكير الهوية.
+# يمكن تعطيله بـ WEAVER_REFUSAL_RETRY=0
+_MINIMAL_SYSTEM = (
+    "You are a helpful, expert software engineering assistant. "
+    "Answer the user's request directly, accurately, and completely. "
+    "Write full, working code when asked. "
+    "أنت مساعد برمجي خبير ومتعاون — نفّذ طلب المستخدم مباشرةً واكتب الأكواد كاملة."
+)
+
+
+def _refusal_retry_enabled() -> bool:
+    return os.environ.get("WEAVER_REFUSAL_RETRY", "1").strip().lower() not in (
+        "0", "false", "off", "no", "لا"
+    )
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """يكشف رفض النموذج (سواء عبر رسالة WeaverCode أو مؤشرات الرفض الخام)."""
+    if not text:
+        return False
+    t = text.strip()
+    if t.startswith("⛔") or "رفض النموذج تنفيذ" in t:
+        return True
+    low = t.lower()
+    # مؤشرات رفض خام شائعة (سياسة الاستخدام / cyber)
+    if ("usage policy" in low and ("refus" in low or "blocked" in low or "cannot" in low)):
+        return True
+    return False
+
+
 # ── منقّي الهوية على مستوى المخرجات (شبكة أمان أخيرة) ─────────────────────────
 # إذا كان الخادم/الوسيط يحقن هوية «Claude Code» ويتجاهل بروموهنا (كما في بعض
 # وسطاء aerolink)، فهذه الطبقة تضمن ألّا يرى المستخدم الهوية الخاطئة إطلاقاً.
@@ -508,6 +541,7 @@ class QueryEngine:
         tools_schema = self.tools.get_schema()
         result = QueryResult(text="")
         turns = 0
+        clean_retried = False   # تعافٍ لمرّة واحدة من الرفض الزائف
 
         while turns < self.max_turns:
             turns += 1
@@ -517,6 +551,32 @@ class QueryEngine:
             except Exception as e:
                 result.error = str(e)
                 break
+
+            # ── تعافٍ من رفض زائف: أعِد المحاولة بطلب نظيف بلا غلاف الهوية ──
+            # السبب الشائع للرفض ليس المزوّد بل غلاف إخفاء الهوية الذي يشبه
+            # محاولة اختراق. نعيد المحاولة ببروموه بسيط وبلا تذكير الهوية.
+            if (turns == 1 and not clean_retried
+                    and _refusal_retry_enabled()):
+                first_text = response["choices"][0]["message"].get("content") or ""
+                if _looks_like_refusal(first_text):
+                    clean_retried = True
+                    clean_messages: List[Message] = [
+                        Message(role="system", content=_MINIMAL_SYSTEM)]
+                    if history:
+                        clean_messages.extend(history)
+                    # رسالة المستخدم الأصلية بلا تذكير الهوية
+                    clean_messages.append(
+                        Message(role="user", content=model_prompt))
+                    try:
+                        retry = await self.provider.complete(
+                            clean_messages, tools=tools_schema)
+                        # نعتمد النتيجة النظيفة فقط إن لم تكن رفضاً هي الأخرى
+                        retry_text = retry["choices"][0]["message"].get("content") or ""
+                        if not _looks_like_refusal(retry_text):
+                            response = retry
+                            messages = clean_messages
+                    except Exception:
+                        pass
 
             # تتبّع التكلفة/التوكنات من usage الحقيقي (قارئ فقط، آمن)
             if self.cost is not None:
