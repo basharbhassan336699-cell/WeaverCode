@@ -19,6 +19,10 @@ try:
     from ..permissions import PermissionManager
 except Exception:  # النظام يعمل حتى لو غاب ملف الأذونات
     PermissionManager = None
+try:
+    from ..checkpoint import CheckpointManager
+except Exception:  # النظام يعمل حتى لو غاب ملف النقاط
+    CheckpointManager = None
 
 
 # ── حارس الهوية على مستوى رسالة المستخدم ─────────────────────────────────────
@@ -159,6 +163,8 @@ class QueryEngine:
         # Action Blocks: تتبّع عمليات الأدوات وعرض ملخص كل جولة
         self._tracker = ActionBlockTracker()
         self._completed_blocks: List[ActionBlock] = []
+        # نقاط الاستعادة (Checkpoint/Rewind) — لقطة قبل كل عملية كتابة
+        self.checkpoints = CheckpointManager() if CheckpointManager else None
         # وضع التخطيط: لا تُنفَّذ أدوات التعديل حتى تُعتمد الخطة
         self.plan_mode = plan_mode or os.environ.get(
             "WEAVER_PLAN_MODE", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -196,6 +202,46 @@ class QueryEngine:
                 diff_removed=block.lines_removed,
             )
             # نشر غير متزامن دون إيقاف الحلقة
+            _asyncio.create_task(event_bus.emit(ev))
+        except Exception:
+            pass
+
+    def _emit_diff_preview(self, tool_name: str, args: dict) -> None:
+        """معاينة فرق قبل تنفيذ Write/Edit/MultiEdit (طرفية + لوحة ويب)."""
+        try:
+            from core.diff_preview import preview_change, is_previewable
+        except Exception:
+            return
+        if not is_previewable(tool_name) or not isinstance(args, dict):
+            return
+        try:
+            preview = preview_change(tool_name, args)
+        except Exception:
+            return
+        if getattr(preview, "error", "") or not preview.has_changes:
+            return
+        # (1) طرفية CLI
+        try:
+            from core.ui import GRY, RST
+            print(f"\n{GRY}{preview.stat_line()}{RST}")
+            print(preview.colored())
+        except Exception:
+            try:
+                print(preview.stat_line())
+                print(preview.plain())
+            except Exception:
+                pass
+        # (2) لوحة الويب عبر EventBus (اختياري/آمن)
+        try:
+            from background.events import event_bus, WeaverEvent, EventType
+            import asyncio as _asyncio
+            ev = WeaverEvent(
+                EventType.FILE_EDIT,
+                preview.stat_line(),
+                preview.plain(),
+                diff_added=preview.added,
+                diff_removed=preview.removed,
+            )
             _asyncio.create_task(event_bus.emit(ev))
         except Exception:
             pass
@@ -346,6 +392,19 @@ class QueryEngine:
         messages: List[Message] = []
         self._completed_blocks = []   # Action Blocks لهذه المهمة
 
+        # ── توسيع إشارات الملفات @file في رسالة المستخدم (اختياري/آمن) ──────
+        # يبقى prompt الأصلي كما هو للذاكرة والـ hooks؛ المحتوى المحقون يذهب
+        # فقط إلى رسالة النموذج (model_prompt).
+        model_prompt = prompt
+        try:
+            from pathlib import Path as _Path
+            from core.mentions import expand_mentions
+            expanded, injected = expand_mentions(prompt, _Path(self.tools.work_dir))
+            if injected:
+                model_prompt = expanded
+        except Exception:
+            pass
+
         # إضافة السياق من الذاكرة
         memory_context = await self.memory.get_relevant(prompt)
         system = self.system_prompt
@@ -367,7 +426,7 @@ class QueryEngine:
         if history:
             messages.extend(history)
 
-        messages.append(Message(role="user", content=_guard_user_prompt(prompt)))
+        messages.append(Message(role="user", content=_guard_user_prompt(model_prompt)))
 
         # hook: تسليم رسالة المستخدم
         if self.hooks:
@@ -502,6 +561,19 @@ class QueryEngine:
                         )
                     )
                     continue
+
+                # ── نقطة استعادة قبل أي عملية كتابة (Checkpoint/Rewind) ──────
+                if (self.checkpoints is not None
+                        and CheckpointManager is not None
+                        and CheckpointManager.is_write_tool(tool_name)
+                        and isinstance(args, dict) and args.get("path")):
+                    try:
+                        self.checkpoints.snapshot(tool_name, str(args.get("path")))
+                    except Exception:
+                        pass
+
+                # ── معاينة الفروق قبل الكتابة (Write/Edit/MultiEdit) ─────────
+                self._emit_diff_preview(tool_name, args)
 
                 # ── Action Blocks: بدء تتبّع الأداة ──────────────────────────
                 self._tracker.begin_tool(tool_name, args)

@@ -129,3 +129,24 @@ class PluginLoader:
 
     def get_plugin(self, name: str) -> Optional[Dict[str, Any]]:
         return self._plugins.get(name)
+
+    def get_settings(self, name: str,
+                     project_root: Optional[Path] = None) -> Dict[str, Any]:
+        """
+        يحمّل إعدادات plugin المحلّية من `.claude/<name>.local.md`.
+        يُرجع قاموس القيم (فارغ إن لم يوجد ملف). لا يعدّل حالة المحمّل.
+        """
+        try:
+            from core.plugins.settings import load_plugin_settings
+        except Exception:
+            try:
+                from .settings import load_plugin_settings
+            except Exception:
+                return {}
+        return load_plugin_settings(name, project_root)
+
+    def get_all_settings(self,
+                         project_root: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
+        """يجمع إعدادات كل الـ plugins المكتشفة (المفتاح: اسم الـ plugin)."""
+        return {name: self.get_settings(name, project_root)
+                for name in self._plugins}

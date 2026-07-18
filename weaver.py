@@ -130,6 +130,13 @@ async def build_engine(mode: str = "main", plan_mode: bool = False):
     tools = ToolRegistry()
     hooks = HookManager()
 
+    # مجلدات عمل إضافية (--add-dir / multi-workspace)
+    add_dirs = os.environ.get("WEAVER_ADD_DIRS", "").strip()
+    if add_dirs:
+        for d in add_dirs.split(os.pathsep):
+            if d.strip():
+                tools.add_dir(d.strip())
+
     # hook: InstructionsLoaded — عند تحميل CLAUDE.md في بداية الجلسة
     claude_md = Path(__file__).parent / "CLAUDE.md"
     if claude_md.exists():
@@ -147,11 +154,22 @@ async def build_engine(mode: str = "main", plan_mode: bool = False):
     except Exception:
         pass
 
+    # تعليمات المشروع المتداخلة (CLAUDE.md في الجذر والمجلدات الفرعية)
+    system_prompt = get_system_prompt(mode)
+    try:
+        from core.claude_md import load_nested_context
+        nested = load_nested_context(tools.work_dir, tools.extra_dirs,
+                                     root_md=str(claude_md))
+        if nested:
+            system_prompt += f"\n\n{nested}"
+    except Exception:
+        pass
+
     engine = QueryEngine(
         provider=provider,
         tool_registry=tools,
         memory=memory,
-        system_prompt=get_system_prompt(mode),
+        system_prompt=system_prompt,
         hooks=hooks if hooks.has_any() else None,
         plan_mode=plan_mode,
     )
@@ -367,21 +385,64 @@ def _show_mcp_status(mcp):
         draw_info(f"خوادم MCP النشطة ({len(servers)}):")
         for name, srv in servers.items():
             tools = len(getattr(srv, "tools", []) or [])
-            print(f"  {ORANGE}•{RESET} {name}  {GRAY}({tools} أداة){RESET}")
+            resources = len(getattr(srv, "resources", []) or [])
+            prompts = len(getattr(srv, "prompts", []) or [])
+            extra = ""
+            if resources:
+                extra += f"، {resources} مورد"
+            if prompts:
+                extra += f"، {prompts} برومبت"
+            print(f"  {ORANGE}•{RESET} {name}  {GRAY}({tools} أداة{extra}){RESET}")
+        # تفصيل الموارد والبرومبتات إن وُجدت
+        try:
+            all_res = mcp.list_resources()
+            all_prompts = mcp.list_prompts()
+            if all_res:
+                print(f"  {GRAY}الموارد:{RESET}")
+                for r in all_res[:15]:
+                    uri = r.get("uri", "")
+                    title = r.get("name") or r.get("title") or ""
+                    print(f"    {GRAY}◦ {uri}  {title}{RESET}")
+            if all_prompts:
+                print(f"  {GRAY}البرومبتات:{RESET}")
+                for p in all_prompts[:15]:
+                    print(f"    {GRAY}◦ {p.get('name','')}  "
+                          f"{p.get('description','')}{RESET}")
+        except Exception:
+            pass
     else:
         draw_info("لا توجد خوادم MCP مُهيّأة.")
         print(f"  {GRAY}أضف خوادم في config/mcp.json (يدعم stdio/sse/http). "
               f"مثال في التوثيق. مسار الإعداد: {cfg}{RESET}")
 
 
+# بروموه /init — يُوجّه الوكيل لتحليل المشروع وكتابة CLAUDE.md
+_INIT_PROMPT = (
+    "حلّل هذا المشروع في مجلد العمل الحالي وأنشئ ملف `CLAUDE.md` شاملاً "
+    "في جذر المشروع يوثّق المشروع لأي وكيل برمجي مستقبلي.\n\n"
+    "الخطوات:\n"
+    "1. افحص بنية المشروع (استخدم Glob و DirectoryList) وحدّد اللغة/الإطار.\n"
+    "2. اقرأ ملفات المفتاح (README, package.json, pyproject.toml, "
+    "requirements.txt, Makefile...) لفهم أوامر البناء/الاختبار/التشغيل.\n"
+    "3. استنتج المعمارية العامة وأنماط الكود المتبعة.\n"
+    "4. اكتب CLAUDE.md (استخدم أداة Write) يحوي: نظرة عامة، بنية الملفات، "
+    "أوامر التطوير الشائعة (build/test/lint/run)، قواعد وأنماط الكود، وأي "
+    "تحذيرات مهمة. إن كان CLAUDE.md موجوداً فحدّثه دون حذف المحتوى المفيد.\n"
+    "اجعل الملف موجزاً وعملياً — تعليمات يحتاجها وكيل فعلاً، لا حشو."
+)
+
+
 # ── أوامر مدمجة تفاعلية تظهر في الإكمال التلقائي ──
 _BUILTIN_CMDS = [
     {"name": "model", "description": "اختيار النموذج من قائمة تفاعلية"},
-    {"name": "mcp", "description": "عرض حالة خوادم MCP"},
+    {"name": "mcp", "description": "عرض حالة خوادم MCP (أدوات/موارد/برومبتات)"},
     {"name": "mode", "description": "تبديل وضع الوكيل (coding/project/...)"},
     {"name": "plan", "description": "تفعيل/إيقاف وضع التخطيط"},
     {"name": "stats", "description": "إحصاءات الذاكرة"},
     {"name": "commands", "description": "عرض كل أوامر السلاش"},
+    {"name": "add-dir", "description": "إضافة مجلد عمل إضافي (multi-workspace)"},
+    {"name": "rewind", "description": "التراجع عن آخر تعديل (أو /rewind <رقم>)"},
+    {"name": "init", "description": "توليد ملف CLAUDE.md بتحليل المشروع"},
 ]
 
 
@@ -516,6 +577,66 @@ async def interactive_mode(initial_history=None, session_id=None,
         if prompt.strip() == "/mcp":
             _show_mcp_status(mcp)
             continue
+
+        # ── multi-workspace: إضافة مجلد عمل ─────────────────────────────────
+        if prompt.startswith("/add-dir"):
+            arg = prompt[len("/add-dir"):].strip()
+            if not arg:
+                dirs = engine.tools.workspace_dirs()
+                draw_info("مجلدات العمل الحالية:")
+                for d in dirs:
+                    print(f"  {ORANGE}•{RESET} {d}")
+                print(f"  {GRAY}الاستخدام: /add-dir <المسار>{RESET}")
+            else:
+                msg = engine.tools.add_dir(arg)
+                # أعِد تحميل تعليمات CLAUDE.md المتداخلة للمجلد الجديد
+                try:
+                    from core.claude_md import load_nested_context
+                    claude_md = Path(__file__).parent / "CLAUDE.md"
+                    nested = load_nested_context(
+                        engine.tools.work_dir, engine.tools.extra_dirs,
+                        root_md=str(claude_md))
+                    if nested and nested not in engine.system_prompt:
+                        engine.system_prompt += f"\n\n{nested}"
+                except Exception:
+                    pass
+                draw_success(msg) if msg.startswith("✅") else draw_info(msg)
+            continue
+
+        # ── Checkpoint/Rewind: التراجع عن التعديلات ─────────────────────────
+        if prompt.startswith("/rewind"):
+            if engine.checkpoints is None:
+                draw_error("نظام النقاط غير متاح.")
+                continue
+            arg = prompt[len("/rewind"):].strip()
+            if arg in ("list", "قائمة"):
+                cps = engine.checkpoints.list()
+                if not cps:
+                    draw_info("لا توجد نقاط استعادة بعد.")
+                else:
+                    draw_info(f"نقاط الاستعادة ({len(cps)}):")
+                    for cp in cps:
+                        print(f"  {ORANGE}•{RESET} {cp.describe()}")
+                continue
+            if arg.isdigit():
+                restored = engine.checkpoints.rewind_to(int(arg))
+                if restored:
+                    draw_success(f"استُعيدت {len(restored)} نقطة حتى #{arg}.")
+                else:
+                    draw_error(f"لا توجد نقطة بالرقم {arg}.")
+                continue
+            cp = engine.checkpoints.rewind()
+            if cp:
+                draw_success(f"تراجع: استُعيد {Path(cp.path).name} ({cp.describe()}).")
+            else:
+                draw_info("لا شيء للتراجع عنه.")
+            continue
+
+        # ── /init: توليد CLAUDE.md بتحليل المشروع ────────────────────────────
+        if prompt.strip() == "/init":
+            prompt = _INIT_PROMPT
+            draw_info("جارٍ تحليل المشروع لتوليد CLAUDE.md ...")
+            # يمرّ عبر الوكيل كبروموه عادي أدناه
 
         if prompt.startswith("/stats"):
             stats = engine.memory.get_stats()
@@ -689,6 +810,10 @@ def main():
                         help="تسمية الجلسة الحالية عند بدء وضع تفاعلي جديد")
     parser.add_argument("--sessions", action="store_true",
                         help="عرض قائمة الجلسات المحفوظة")
+    parser.add_argument("--add-dir", action="append", metavar="DIR", default=[],
+                        help="إضافة مجلد عمل إضافي (يمكن تكراره) — multi-workspace")
+    parser.add_argument("--init", action="store_true",
+                        help="تحليل المشروع وتوليد ملف CLAUDE.md")
 
     args = parser.parse_args()
 
@@ -704,6 +829,8 @@ def main():
         os.environ["WEAVER_BASE_URL"] = args.url
     if args.yes:
         os.environ["WEAVER_AUTO_APPROVE"] = "1"
+    if args.add_dir:
+        os.environ["WEAVER_ADD_DIRS"] = os.pathsep.join(args.add_dir)
 
     # ── تشخيص: عرض الإصدار ──────────────────────────────────────────────────
     if args.version:
@@ -755,7 +882,9 @@ def main():
             None if args.resume == "__picker__" else args.resume))
         return
 
-    if args.interactive:
+    if args.init:
+        asyncio.run(run_once(_INIT_PROMPT, mode=args.mode))
+    elif args.interactive:
         asyncio.run(interactive_mode(session_name=args.rename))
     elif args.prompt:
         asyncio.run(run_once(args.prompt, mode=args.mode, stream=args.stream,

@@ -27,6 +27,40 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 
+def _extract_resource_text(result: Optional[Dict]) -> str:
+    """يستخرج نص مورد من رد resources/read (contents=[{text|blob,...}])."""
+    if not result:
+        return ""
+    parts: List[str] = []
+    for item in result.get("contents", []):
+        if "text" in item and item["text"] is not None:
+            parts.append(item["text"])
+        elif "blob" in item:
+            mime = item.get("mimeType", "application/octet-stream")
+            parts.append(f"[بيانات ثنائية {mime}: {len(item.get('blob',''))} حرف base64]")
+    return "\n".join(parts) if parts else json.dumps(result, ensure_ascii=False)
+
+
+def _extract_prompt_text(result: Optional[Dict]) -> str:
+    """يستخرج نص برومبت من رد prompts/get (messages=[{role,content}])."""
+    if not result:
+        return ""
+    parts: List[str] = []
+    for msg in result.get("messages", []):
+        role = msg.get("role", "user")
+        content = msg.get("content", {})
+        if isinstance(content, dict):
+            text = content.get("text", "")
+        elif isinstance(content, list):
+            text = "\n".join(b.get("text", "") for b in content
+                             if isinstance(b, dict) and b.get("type") == "text")
+        else:
+            text = str(content)
+        if text:
+            parts.append(f"[{role}] {text}")
+    return "\n".join(parts) if parts else json.dumps(result, ensure_ascii=False)
+
+
 class MCPServer:
     """اتصال بخادم MCP واحد عبر stdio + JSON-RPC 2.0"""
 
@@ -41,6 +75,8 @@ class MCPServer:
         self._id = 0
         self._lock = asyncio.Lock()
         self.tools: List[Dict[str, Any]] = []
+        self.resources: List[Dict[str, Any]] = []
+        self.prompts: List[Dict[str, Any]] = []
 
     async def start(self) -> None:
         full_env = dict(os.environ)
@@ -55,6 +91,9 @@ class MCPServer:
         )
         await self._initialize()
         await self._load_tools()
+        # resources & prompts اختياريان — الخادم قد لا يدعمهما
+        await self._load_resources()
+        await self._load_prompts()
 
     def _next_id(self) -> int:
         self._id += 1
@@ -106,6 +145,34 @@ class MCPServer:
     async def _load_tools(self) -> None:
         result = await self._send("tools/list", {})
         self.tools = (result or {}).get("tools", [])
+
+    async def _load_resources(self) -> None:
+        """جلب قائمة الموارد (resources) إن دعمها الخادم — فشل صامت."""
+        try:
+            result = await self._send("resources/list", {})
+            self.resources = (result or {}).get("resources", [])
+        except Exception:
+            self.resources = []
+
+    async def _load_prompts(self) -> None:
+        """جلب قائمة البرومبتات (prompts) إن دعمها الخادم — فشل صامت."""
+        try:
+            result = await self._send("prompts/list", {})
+            self.prompts = (result or {}).get("prompts", [])
+        except Exception:
+            self.prompts = []
+
+    async def read_resource(self, uri: str) -> str:
+        """قراءة مورد MCP عبر resources/read وإرجاع نصّه."""
+        result = await self._send("resources/read", {"uri": uri})
+        return _extract_resource_text(result)
+
+    async def get_prompt(self, name: str,
+                         arguments: Optional[Dict[str, Any]] = None) -> str:
+        """جلب برومبت MCP عبر prompts/get وإرجاع نصّه المدموج."""
+        result = await self._send("prompts/get",
+                                  {"name": name, "arguments": arguments or {}})
+        return _extract_prompt_text(result)
 
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
         result = await self._send("tools/call", {
@@ -364,8 +431,56 @@ class MCPManager:
             self.servers[name] = server
             for tool in server.tools:
                 registered.append(self._register_tool(registry, server, tool))
+            # سجّل أداتَي الوصول للموارد/البرومبتات إن دعمها هذا الخادم
+            self._register_resource_tools(registry, server)
 
         return [r for r in registered if r]
+
+    def _register_resource_tools(self, registry, server) -> None:
+        """يسجّل mcp__<server>__read_resource و mcp__<server>__get_prompt
+        إذا كان الخادم يعرض موارد/برومبتات."""
+        sname = server.name
+        if getattr(server, "resources", None):
+            uris = ", ".join(str(r.get("uri", "")) for r in server.resources[:10])
+
+            async def _read(uri: str, _srv=server):
+                return await _srv.read_resource(uri)
+
+            registry.register_dynamic(
+                name=f"mcp__{sname}__read_resource",
+                description=(f"قراءة مورد MCP من الخادم '{sname}'. "
+                             f"الموارد المتاحة: {uris}"),
+                parameters={
+                    "type": "object",
+                    "properties": {"uri": {"type": "string",
+                                           "description": "معرّف المورد (uri)"}},
+                    "required": ["uri"],
+                },
+                fn=_read,
+                requires_permission=True,
+            )
+        if getattr(server, "prompts", None):
+            names = ", ".join(str(p.get("name", "")) for p in server.prompts[:10])
+
+            async def _getp(name: str, arguments: Optional[Dict] = None, _srv=server):
+                return await _srv.get_prompt(name, arguments or {})
+
+            registry.register_dynamic(
+                name=f"mcp__{sname}__get_prompt",
+                description=(f"جلب برومبت MCP من الخادم '{sname}'. "
+                             f"البرومبتات المتاحة: {names}"),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "اسم البرومبت"},
+                        "arguments": {"type": "object",
+                                      "description": "وسائط البرومبت (اختياري)"},
+                    },
+                    "required": ["name"],
+                },
+                fn=_getp,
+                requires_permission=True,
+            )
 
     def _register_tool(self, registry, server: MCPServer, tool: Dict[str, Any]) -> str:
         tool_name = tool.get("name", "")
@@ -386,6 +501,69 @@ class MCPManager:
             requires_permission=True,
         )
         return full_name
+
+    # ── الموارد (resources) والبرومبتات (prompts) ────────────────────────────
+
+    def list_resources(self) -> List[Dict[str, Any]]:
+        """كل الموارد من كل الخوادم، مع إضافة اسم الخادم لكل مورد."""
+        out: List[Dict[str, Any]] = []
+        for name, server in self.servers.items():
+            for res in getattr(server, "resources", []) or []:
+                entry = dict(res)
+                entry["_server"] = name
+                out.append(entry)
+        return out
+
+    def list_prompts(self) -> List[Dict[str, Any]]:
+        """كل البرومبتات من كل الخوادم، مع إضافة اسم الخادم لكل برومبت."""
+        out: List[Dict[str, Any]] = []
+        for name, server in self.servers.items():
+            for pr in getattr(server, "prompts", []) or []:
+                entry = dict(pr)
+                entry["_server"] = name
+                out.append(entry)
+        return out
+
+    async def read_resource(self, uri: str,
+                            server_name: Optional[str] = None) -> str:
+        """قراءة مورد بالـ uri. إن حُدّد الخادم استُخدم مباشرةً، وإلا بحثنا."""
+        if server_name:
+            if server_name not in self.servers:
+                return f"خطأ: لا يوجد خادم MCP باسم '{server_name}'."
+            srv = self.servers[server_name]
+            if hasattr(srv, "read_resource"):
+                return await srv.read_resource(uri)
+            return f"خطأ: الخادم '{server_name}' لا يدعم الموارد."
+        # ابحث عن الخادم الذي يملك هذا المورد
+        for name, server in self.servers.items():
+            uris = [r.get("uri") for r in getattr(server, "resources", []) or []]
+            if uri in uris and hasattr(server, "read_resource"):
+                return await server.read_resource(uri)
+        # محاولة أخيرة: أول خادم يدعم القراءة
+        for server in self.servers.values():
+            if hasattr(server, "read_resource"):
+                try:
+                    return await server.read_resource(uri)
+                except Exception:
+                    continue
+        return f"خطأ: لم يُعثر على مورد '{uri}'."
+
+    async def get_prompt(self, name: str,
+                         arguments: Optional[Dict[str, Any]] = None,
+                         server_name: Optional[str] = None) -> str:
+        """جلب برومبت بالاسم من الخادم المناسب."""
+        if server_name:
+            if server_name not in self.servers:
+                return f"خطأ: لا يوجد خادم MCP باسم '{server_name}'."
+            srv = self.servers[server_name]
+            if hasattr(srv, "get_prompt"):
+                return await srv.get_prompt(name, arguments)
+            return f"خطأ: الخادم '{server_name}' لا يدعم البرومبتات."
+        for _sname, server in self.servers.items():
+            names = [p.get("name") for p in getattr(server, "prompts", []) or []]
+            if name in names and hasattr(server, "get_prompt"):
+                return await server.get_prompt(name, arguments)
+        return f"خطأ: لم يُعثر على برومبت '{name}'."
 
     async def stop_all(self) -> None:
         for server in self.servers.values():
