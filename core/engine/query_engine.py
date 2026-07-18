@@ -14,6 +14,10 @@ from dataclasses import dataclass, field
 from .provider import WeaverProvider, Message, get_provider
 from ..tools.registry import ToolRegistry
 from ..memory.store import MemoryStore
+try:
+    from ..permissions import PermissionManager
+except Exception:  # النظام يعمل حتى لو غاب ملف الأذونات
+    PermissionManager = None
 
 
 # ── حارس الهوية على مستوى رسالة المستخدم ─────────────────────────────────────
@@ -148,6 +152,8 @@ class QueryEngine:
         # صلاحيات: قائمة سماح للجلسة + وضع الموافقة التلقائية
         self.auto_approve = _auto_approve_enabled()
         self.session_allow: set = set()
+        # طبقة قواعد أذونات اختيارية (settings.json) — الافتراضي "ask" فلا تغيّر شيئاً
+        self.permissions = PermissionManager() if PermissionManager else None
         # وضع التخطيط: لا تُنفَّذ أدوات التعديل حتى تُعتمد الخطة
         self.plan_mode = plan_mode or os.environ.get(
             "WEAVER_PLAN_MODE", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -418,9 +424,27 @@ class QueryEngine:
                         tool_call_id=tool_id, name=tool_name))
                     continue
 
+                # ── طبقة قواعد الأذونات (settings.json) قبل السؤال التفاعلي ───
+                # الافتراضي "ask" (بلا إعدادات) فلا تغيّر السلوك القائم.
+                perm_preapproved = False
+                if self.permissions is not None:
+                    parg = ""
+                    if isinstance(args, dict):
+                        parg = str(args.get("path") or args.get("command")
+                                   or args.get("url") or args.get("query") or "")
+                    pdec = self.permissions.decide(tool_name, parg)
+                    if pdec == "deny":
+                        tool_results.append(Message(
+                            role="tool",
+                            content=f"🛑 مرفوض بقاعدة أذونات: {tool_name}({parg[:60]})",
+                            tool_call_id=tool_id, name=tool_name))
+                        continue
+                    perm_preapproved = (pdec == "allow")
+
                 # ── فحص الصلاحية قبل تنفيذ الأدوات الخطرة ─────────────────────
                 if self.tools.requires_permission(tool_name) and \
-                        not self._tool_pre_approved(tool_name):
+                        not self._tool_pre_approved(tool_name) and \
+                        not perm_preapproved:
                     decision = self._request_permission(tool_name, args, on_permission)
                     if decision == PERM_ALLOW_ALWAYS:
                         self.session_allow.add(tool_name)
@@ -467,6 +491,13 @@ class QueryEngine:
                 )
 
             messages.extend(tool_results)
+
+            # asyncRewake: إن أرجع hook (مثل security-guidance) رسالة إعادة تنبيه،
+            # نحقنها كرسالة مستخدم في الجولة التالية ليعالجها الوكيل.
+            if self.hooks:
+                rewake = self.hooks.pop_rewake()
+                if rewake:
+                    messages.append(Message(role="user", content=rewake))
 
         result.turns = turns
 

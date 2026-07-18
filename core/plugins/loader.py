@@ -95,12 +95,25 @@ class PluginLoader:
 
     @staticmethod
     def _fix_entry(entry: Dict, root: str) -> Dict:
-        """نسخ الإدخال مع استبدال ${CLAUDE_PLUGIN_ROOT} بالمسار الفعلي."""
+        """نسخ الإدخال (محتفظاً بمفاتيحه مثل if/asyncRewake/matcher) مع استبدال
+        ${CLAUDE_PLUGIN_ROOT} و${WEAVER_PLUGIN_ROOT} بالمسار الفعلي."""
         fixed = dict(entry)
         if "command" in fixed and isinstance(fixed["command"], str):
-            fixed["command"] = fixed["command"].replace(
-                "${CLAUDE_PLUGIN_ROOT}", root)
+            fixed["command"] = (fixed["command"]
+                                .replace("${CLAUDE_PLUGIN_ROOT}", root)
+                                .replace("${WEAVER_PLUGIN_ROOT}", root))
         return fixed
+
+    def get_all_agents(self) -> Dict[str, Path]:
+        """جمع كل agents من كل plugins (المفتاح: plugin/agent)."""
+        agents: Dict[str, Path] = {}
+        for name, plugin in self._plugins.items():
+            agents_dir = plugin.get("agents_dir") or (plugin["dir"] / "agents")
+            if not agents_dir.exists():
+                continue
+            for md in agents_dir.glob("*.md"):
+                agents[f"{name}/{md.stem}"] = md
+        return agents
 
     def get_all_commands(self) -> Dict[str, Path]:
         """جمع كل commands من كل plugins."""

@@ -140,3 +140,38 @@ WEAVER_DB_PATH=~/.weaver/memory.db
 
 ### FTS5 الحقيقي
 - `get_relevant()` تستخدم FTS5 الحقيقي مع triggers تلقائية
+
+---
+
+## الميزات المضافة (v4.0) — Plugins والأمان
+
+### Plugins المدمجة (plugins/)
+- **security-guidance**: مراجعة أمنية تلقائية بـ LLM على كل edit وcommit وstop
+  - يكتشف: SQL injection، XSS، SSRF، hardcoded secrets، command injection
+  - **معطّل افتراضياً** (SessionStart يثبّت SDK + مراجعات LLM = استهلاك مفاتيح/بطء
+    على Termux). للتفعيل: أزل `"disabled": true` من
+    `plugins/security-guidance/.claude-plugin/plugin.json` (يتطلب `ANTHROPIC_API_KEY`).
+  - `/weaver-security` للمراجعة اليدوية
+- **pr-review-toolkit**: 6 agents متخصصة لمراجعة الكود → `/weaver-review-pr`
+- **feature-dev**: تطوير features بمنهجية architect→explorer→reviewer → `/weaver-feature`
+- **commit-commands**: commit ذكي + push + PR → `/weaver-commit`, `/weaver-commit-push`, `/weaver-clean-gone`
+- **code-review**: مراجعة كود شاملة → `/weaver-code-review`
+- **agent-sdk-dev**: إنشاء agents جديدة → `/weaver-new-sdk-app`
+
+### نظام Permissions (core/permissions.py)
+- قواعد على مستوى الملفات: `Edit(src/**)`, `Read(~/.ssh/**)`
+- قواعد على مستوى الأوامر: `Bash(git:*)`, `Bash(npm:*)`
+- أولويات: deny → allow → ask (افتراضي)
+- إعدادات في: `config/settings-strict.json`, `config/settings-lax.json`
+- طبقة اختيارية: بلا `settings.json` يبقى السلوك "ask" (لا تغيير)
+- `/weaver-permissions` لإدارة القواعد
+
+### asyncRewake Support
+- hooks الآن تدعم `asyncRewake: true` و`if` لإعادة تنبيه WeaverCode بعد تنفيذ الأدوات
+- `run()` يبقى يُرجع bool (منع PreToolUse) — الدعم إضافي غير كاسر
+
+### DevContainer (بيئة عزل)
+- `.devcontainer/` جاهز لـ VS Code DevContainers / Codespaces (لا يعمل على Termux)
+
+### GCP Gateway
+- `scripts/weaver-gateway.sh [setup|deploy|destroy]` + Terraform في `scripts/gateway/`
