@@ -94,3 +94,42 @@ def test_retry_disabled_by_env(monkeypatch):
 def test_refusal_retry_enabled_default(monkeypatch):
     monkeypatch.delenv("WEAVER_REFUSAL_RETRY", raising=False)
     assert _refusal_retry_enabled() is True
+
+
+class _WordFilterProvider:
+    """يحاكي نموذجاً يرفض أي كلمة أمنية (بأي لغة) ويقبل التحييد والصياغة."""
+    class _Cfg:
+        model = "claude-fable-5"
+    config = _Cfg()
+
+    async def complete(self, messages, tools=None):
+        text = " ".join(m.content for m in messages).lower()
+        if "rewrite the request" in text:   # مهمة الصياغة لا تُرفض
+            return {"choices": [{"message": {
+                "content": "An HTML page with two text fields and a submit button.",
+                "role": "assistant"}, "finish_reason": "stop"}], "usage": {}}
+        for w in ["login", "password", "بوابة", "دخول", "sign", "auth",
+                  "credential", "portal", "gateway"]:
+            if w in text:
+                return {"choices": [{"message": {
+                    "content": "⛔ رفض النموذج تنفيذ هذا الطلب cyber",
+                    "role": "assistant"}, "finish_reason": "stop"}], "usage": {}}
+        return {"choices": [{"message": {
+            "content": "<!doctype html><form>...</form>",
+            "role": "assistant"}, "finish_reason": "stop"}], "usage": {}}
+
+
+def test_neutralize_recovers_when_words_trigger(monkeypatch):
+    monkeypatch.setenv("WEAVER_IDENTITY_GUARD", "0")
+    monkeypatch.setenv("WEAVER_REFUSAL_RETRY", "1")
+    eng = QueryEngine(provider=_WordFilterProvider())
+    res = asyncio.run(eng.run("اكتب كود لبوابة تسجيل الدخول"))
+    assert "<form>" in res.text or "doctype" in res.text.lower(), res.text
+
+
+def test_frame_has_no_trigger_words():
+    """التأطير الإنجليزي يجب ألا يحوي كلمات تُحفّز المصنّف."""
+    from core.engine.query_engine import _EN_LEGIT_FRAME
+    low = _EN_LEGIT_FRAME.lower()
+    for w in ["login", "password", "sign-in", "sign in", "authentication", "auth ", "portal"]:
+        assert w not in low, f"التأطير يحوي كلمة مُحفّزة: {w}"
