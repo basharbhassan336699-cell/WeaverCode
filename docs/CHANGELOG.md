@@ -1,5 +1,22 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## Action Blocks — ملخص بصري لعمليات الأدوات (بصيغة Claude Code)
+
+بعد كل جولة أدوات يظهر سطر ملخّص مثل `‹ 2- +11  edited a file, read a file`
+(أحمر للمحذوف، أخضر للمُضاف) — في الطرفية وعلى لوحة الويب. إضافات فقط دون
+مسّ أي كود قائم (ولا provider.py ولا المفاتيح)، 67 اختباراً ناجحة:
+
+- **`core/action_blocks.py`**: `ToolOp` / `ActionBlock` / `ActionBlockTracker`
+  + `_compute_diff` (يحسب أسطر Write/Edit/MultiEdit المضافة/المحذوفة).
+- **`core/ui.py`**: `draw_tool_call` صار يعرض حالة «‹ Creating file …» أثناء
+  التنفيذ + `draw_action_block` / `clear_tool_line` / `draw_action_block_inline`
+  + `draw_stats(..., blocks)` تعرض إجمالي الـ diff.
+- **`core/engine/query_engine.py`**: يتتبّع كل أداة (begin/end) ويعرض ملخص كل
+  جولة وينشره كحدث للوحة الويب؛ `QueryResult.blocks` تحمل ملخصات الجولات.
+- **`background/events.py`**: نوع حدث `action_block` (يستخدم حقلَي
+  `diff_added`/`diff_removed` الموجودَين).
+- **الويب** (`app.js` + `style.css`): عرض Action Block بالأسهم وألوان الـ diff.
+
 ## v4.0 — Plugins والأمان (تكامل الميزات المتبقية، إضافات فقط)
 
 نُفّذت المهام من مواصفة weaver-integrate-remaining دون مسّ أي كود قائم

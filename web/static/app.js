@@ -283,6 +283,16 @@
         chatHistory.push({ role: "assistant", content: txt });
       } else if (d.type === "done") {
         $("#chatMsgs").insertAdjacentHTML("beforeend", '<div class="bubble event">✅ اكتملت</div>');
+      } else if (d.type === "action_block") {
+        // ملخص جولة الأدوات بصيغة Claude Code:  ‹ 2- +11  edited a file, read a file
+        const hasDiff = (d.diff_removed || 0) > 0 || (d.diff_added || 0) > 0;
+        const diff = hasDiff
+          ? '<span class="ab-removed">' + (d.diff_removed || 0) + '-</span> '
+            + '<span class="ab-added">+' + (d.diff_added || 0) + '</span>&nbsp;&nbsp;'
+          : "";
+        $("#chatMsgs").insertAdjacentHTML("beforeend",
+          '<div class="action-block"><span class="ab-arrow">‹</span> ' + diff +
+          '<span class="ab-desc">' + escapeHtml(d.detail || d.message) + '</span></div>');
       } else if (d.type !== "status") {
         const ic = EV_ICON[d.type] || "•";
         $("#chatMsgs").insertAdjacentHTML("beforeend", '<div class="bubble event">' + ic + " " + escapeHtml(d.message) + (d.detail ? " · " + escapeHtml(d.detail.slice(0, 50)) : "") + "</div>");
