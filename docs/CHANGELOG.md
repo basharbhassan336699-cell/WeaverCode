@@ -1,5 +1,31 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## الميزات الخمس (بصيغة Claude Code) — إضافات فقط، بلا مسّ provider/المفاتيح
+
+خمس ميزات إضافية مطابقة لسلوك Claude Code، كلها إضافية ومعزولة ولا تمسّ طبقة
+المصادقة/المفاتيح في `provider.py` إطلاقاً. 88 اختباراً ناجحة (67 قائمة + 21 جديدة):
+
+1. **أداتا TodoWrite + NotebookEdit** (`core/tools/registry.py`):
+   - `TodoWrite`: قائمة مهام حيّة (☐ pending / ▶ in_progress / ☑ completed)
+     تُحفظ على مستوى السجل مع `get_todos()` للواجهات.
+   - `NotebookEdit`: تعديل/إدراج/حذف خلايا دفتر Jupyter `.ipynb`
+     (replace / insert / delete) بصيغة nbformat.
+2. **إشارات الملفات @file** (`core/mentions.py`): كتابة `@path/to/file` داخل
+   رسالة المستخدم تحقن محتوى الملف تلقائياً في سياق النموذج (يتجاهل الملفات
+   غير الموجودة وعناوين البريد؛ حدود حجم وعدد). يبقى `prompt` الأصلي للذاكرة.
+3. **معاينة الفروق قبل الكتابة** (`core/diff_preview.py`): unified diff ملوّن
+   لـ Write/Edit/MultiEdit يُعرض *قبل* الكتابة (طرفية + لوحة ويب)، بلا لمس القرص.
+4. **قراءة الوسائط المتعددة** (`core/multimodal.py`): اكتشاف الصور/PDF وترميزها
+   base64 إلى كتل محتوى Anthropic/OpenAI؛ أداة `Read` تصف ملفات الوسائط بدل
+   قراءتها كنص. (مُنتِج كتل فقط — لا يمسّ إرسال الطلب أو المصادقة.)
+5. **تحليل إعدادات الـ Plugins** (`core/plugins/settings.py`): محلّل frontmatter
+   (bool/int/float/str/list) لملفات `.claude/<plugin>.local.md` بلا اعتماديات؛
+   مدمج في `PluginLoader.get_settings()` / `get_all_settings()`.
+
+- **`core/engine/query_engine.py`**: توسيع `@file` قبل رسالة النموذج +
+  `_emit_diff_preview` قبل تنفيذ أدوات الكتابة (كلاهما محاط بـ try/except آمن).
+- **`tests/test_five_features.py`**: 21 اختباراً للميزات الخمس.
+
 ## Action Blocks — ملخص بصري لعمليات الأدوات (بصيغة Claude Code)
 
 بعد كل جولة أدوات يظهر سطر ملخّص مثل `‹ 2- +11  edited a file, read a file`

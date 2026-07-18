@@ -200,6 +200,46 @@ class QueryEngine:
         except Exception:
             pass
 
+    def _emit_diff_preview(self, tool_name: str, args: dict) -> None:
+        """معاينة فرق قبل تنفيذ Write/Edit/MultiEdit (طرفية + لوحة ويب)."""
+        try:
+            from core.diff_preview import preview_change, is_previewable
+        except Exception:
+            return
+        if not is_previewable(tool_name) or not isinstance(args, dict):
+            return
+        try:
+            preview = preview_change(tool_name, args)
+        except Exception:
+            return
+        if getattr(preview, "error", "") or not preview.has_changes:
+            return
+        # (1) طرفية CLI
+        try:
+            from core.ui import GRY, RST
+            print(f"\n{GRY}{preview.stat_line()}{RST}")
+            print(preview.colored())
+        except Exception:
+            try:
+                print(preview.stat_line())
+                print(preview.plain())
+            except Exception:
+                pass
+        # (2) لوحة الويب عبر EventBus (اختياري/آمن)
+        try:
+            from background.events import event_bus, WeaverEvent, EventType
+            import asyncio as _asyncio
+            ev = WeaverEvent(
+                EventType.FILE_EDIT,
+                preview.stat_line(),
+                preview.plain(),
+                diff_added=preview.added,
+                diff_removed=preview.removed,
+            )
+            _asyncio.create_task(event_bus.emit(ev))
+        except Exception:
+            pass
+
     async def _run_subagent(self, prompt: str, mode: str = "main") -> str:
         """تشغيل وكيل فرعي معزول لمهمة فرعية، وإرجاع خلاصته النصية."""
         if self.depth >= self.max_depth:
@@ -346,6 +386,19 @@ class QueryEngine:
         messages: List[Message] = []
         self._completed_blocks = []   # Action Blocks لهذه المهمة
 
+        # ── توسيع إشارات الملفات @file في رسالة المستخدم (اختياري/آمن) ──────
+        # يبقى prompt الأصلي كما هو للذاكرة والـ hooks؛ المحتوى المحقون يذهب
+        # فقط إلى رسالة النموذج (model_prompt).
+        model_prompt = prompt
+        try:
+            from pathlib import Path as _Path
+            from core.mentions import expand_mentions
+            expanded, injected = expand_mentions(prompt, _Path(self.tools.work_dir))
+            if injected:
+                model_prompt = expanded
+        except Exception:
+            pass
+
         # إضافة السياق من الذاكرة
         memory_context = await self.memory.get_relevant(prompt)
         system = self.system_prompt
@@ -367,7 +420,7 @@ class QueryEngine:
         if history:
             messages.extend(history)
 
-        messages.append(Message(role="user", content=_guard_user_prompt(prompt)))
+        messages.append(Message(role="user", content=_guard_user_prompt(model_prompt)))
 
         # hook: تسليم رسالة المستخدم
         if self.hooks:
@@ -502,6 +555,9 @@ class QueryEngine:
                         )
                     )
                     continue
+
+                # ── معاينة الفروق قبل الكتابة (Write/Edit/MultiEdit) ─────────
+                self._emit_diff_preview(tool_name, args)
 
                 # ── Action Blocks: بدء تتبّع الأداة ──────────────────────────
                 self._tracker.begin_tool(tool_name, args)

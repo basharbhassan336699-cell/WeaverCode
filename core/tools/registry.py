@@ -52,6 +52,8 @@ class ToolRegistry:
         # يضبطه QueryEngine ليمكّن أداة Agent من تشغيل وكيل فرعي
         # التوقيع: async (prompt: str, mode: str) -> str
         self.agent_runner: Optional[Callable] = None
+        # قائمة المهام الحيّة (TodoWrite) — تُحفظ لكل جلسة على مستوى السجل
+        self._todos: List[Dict[str, Any]] = []
         self._register_all()
 
     def _register_all(self):
@@ -649,6 +651,67 @@ class ToolRegistry:
             fn=self._skill_load,
         ))
 
+        # ── قائمة المهام الحيّة (TodoWrite) ──────────────────────────────────
+
+        self._add(Tool(
+            name="TodoWrite",
+            description=("إدارة قائمة مهام حيّة للمهمة الحالية. مرّر قائمة كاملة "
+                         "من العناصر، كل عنصر {content, status, activeForm}. "
+                         "الحالات: pending | in_progress | completed."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "description": "القائمة الكاملة للمهام (تستبدل السابقة)",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {"type": "string",
+                                            "description": "وصف المهمة"},
+                                "status": {"type": "string",
+                                           "enum": ["pending", "in_progress",
+                                                    "completed"]},
+                                "activeForm": {"type": "string",
+                                               "description": "الصيغة الجارية للعرض"},
+                            },
+                            "required": ["content", "status"],
+                        },
+                    },
+                },
+                "required": ["todos"],
+            },
+            fn=self._todo_write,
+        ))
+
+        # ── تعديل خلايا دفتر Jupyter (NotebookEdit) ──────────────────────────
+
+        self._add(Tool(
+            name="NotebookEdit",
+            description=("تعديل خلية في دفتر Jupyter (.ipynb). الأوضاع: "
+                         "replace (استبدال المصدر) | insert (إدراج خلية جديدة) | "
+                         "delete (حذف الخلية)."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "مسار ملف .ipynb"},
+                    "cell_id": {"type": "string",
+                                "description": "معرّف الخلية أو رقمها (0-based)"},
+                    "new_source": {"type": "string",
+                                   "description": "المصدر الجديد للخلية"},
+                    "cell_type": {"type": "string",
+                                  "enum": ["code", "markdown"],
+                                  "description": "نوع الخلية عند الإدراج"},
+                    "edit_mode": {"type": "string",
+                                  "enum": ["replace", "insert", "delete"],
+                                  "default": "replace"},
+                },
+                "required": ["path"],
+            },
+            fn=self._notebook_edit,
+            requires_permission=True,
+        ))
+
     # ── تنفيذ الأدوات ────────────────────────────────────────────────────────
 
     def _add(self, tool: Tool):
@@ -796,6 +859,13 @@ class ToolRegistry:
             p = Path(path)
             if not p.exists():
                 return f"الملف غير موجود: {path}"
+            # وسائط متعددة (صورة/PDF): لا تُقرأ كنص — تُوصف بياناتها الوصفية
+            try:
+                from core.multimodal import is_multimodal, describe
+                if is_multimodal(str(p)):
+                    return describe(str(p))
+            except Exception:
+                pass
             lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
             if offset:
                 lines = lines[offset:]
@@ -854,6 +924,123 @@ class ToolRegistry:
         except Exception as e:
             return f"خطأ في الكتابة: {e}"
         return f"✅ طُبّقت {applied} تعديلات على {path}"
+
+    # ── قائمة المهام الحيّة (TodoWrite) ──────────────────────────────────────
+
+    _TODO_MARK = {"pending": "☐", "in_progress": "▶", "completed": "☑"}
+
+    def _todo_write(self, todos: List[Dict[str, Any]]) -> str:
+        """يستبدل قائمة المهام الحالية ويُرجع عرضاً مُنسّقاً لها."""
+        if not isinstance(todos, list):
+            return "خطأ: يجب أن تكون todos قائمة."
+        cleaned: List[Dict[str, Any]] = []
+        for t in todos:
+            if not isinstance(t, dict):
+                continue
+            content = str(t.get("content", "")).strip()
+            if not content:
+                continue
+            status = t.get("status", "pending")
+            if status not in self._TODO_MARK:
+                status = "pending"
+            cleaned.append({
+                "content": content,
+                "status": status,
+                "activeForm": str(t.get("activeForm", "")).strip(),
+            })
+        self._todos = cleaned
+        if not cleaned:
+            return "📋 قائمة المهام فارغة."
+        lines = ["📋 قائمة المهام:"]
+        done = 0
+        for t in cleaned:
+            mark = self._TODO_MARK[t["status"]]
+            label = t["content"]
+            if t["status"] == "in_progress" and t["activeForm"]:
+                label = t["activeForm"]
+            lines.append(f"  {mark} {label}")
+            if t["status"] == "completed":
+                done += 1
+        lines.append(f"  ({done}/{len(cleaned)} مكتملة)")
+        return "\n".join(lines)
+
+    def get_todos(self) -> List[Dict[str, Any]]:
+        """إرجاع نسخة من قائمة المهام الحالية (للواجهات)."""
+        return list(self._todos)
+
+    # ── تعديل دفتر Jupyter (NotebookEdit) ────────────────────────────────────
+
+    def _notebook_edit(self, path: str, cell_id: Optional[str] = None,
+                       new_source: str = "", cell_type: Optional[str] = None,
+                       edit_mode: str = "replace") -> str:
+        """تعديل/إدراج/حذف خلية في دفتر Jupyter (.ipynb)."""
+        p = Path(path)
+        if not p.exists():
+            return f"الدفتر غير موجود: {path}"
+        try:
+            nb = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as e:
+            return f"خطأ في قراءة الدفتر (JSON غير صالح؟): {e}"
+        cells = nb.setdefault("cells", [])
+
+        def _resolve_index() -> Optional[int]:
+            if cell_id is None or cell_id == "":
+                return None
+            # مطابقة على المعرّف id أولاً
+            for i, c in enumerate(cells):
+                if str(c.get("id")) == str(cell_id):
+                    return i
+            # ثم كرقم فهرس
+            try:
+                idx = int(cell_id)
+                if -len(cells) <= idx < len(cells):
+                    return idx
+            except (ValueError, TypeError):
+                pass
+            return None
+
+        # مصدر الخلية يُخزّن كقائمة أسطر في صيغة nbformat
+        src_lines = new_source.splitlines(keepends=True) if new_source else []
+
+        if edit_mode == "insert":
+            new_cell: Dict[str, Any] = {
+                "cell_type": cell_type or "code",
+                "metadata": {},
+                "source": src_lines,
+            }
+            if (cell_type or "code") == "code":
+                new_cell["outputs"] = []
+                new_cell["execution_count"] = None
+            idx = _resolve_index()
+            pos = (idx + 1) if idx is not None else len(cells)
+            cells.insert(pos, new_cell)
+            action = f"أُدرجت خلية جديدة عند الموضع {pos}"
+
+        elif edit_mode == "delete":
+            idx = _resolve_index()
+            if idx is None:
+                return "خطأ: يجب تحديد cell_id صالح للحذف."
+            cells.pop(idx)
+            action = f"حُذفت الخلية {cell_id}"
+
+        else:  # replace
+            idx = _resolve_index()
+            if idx is None:
+                return "خطأ: يجب تحديد cell_id صالح للاستبدال."
+            cells[idx]["source"] = src_lines
+            if cell_type:
+                cells[idx]["cell_type"] = cell_type
+            if cells[idx].get("cell_type") == "code":
+                cells[idx].setdefault("outputs", [])
+                cells[idx].setdefault("execution_count", None)
+            action = f"استُبدل مصدر الخلية {cell_id}"
+
+        try:
+            p.write_text(json.dumps(nb, ensure_ascii=False, indent=1),
+                         encoding="utf-8")
+        except Exception as e:
+            return f"خطأ في كتابة الدفتر: {e}"
+        return f"✅ {action} في {path} ({len(cells)} خلية إجمالاً)."
 
     async def _agent(self, prompt: str, mode: str = "main") -> str:
         """تشغيل وكيل فرعي عبر agent_runner الذي يضبطه QueryEngine."""
