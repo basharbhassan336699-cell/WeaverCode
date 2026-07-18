@@ -37,17 +37,32 @@ def test_sanitize_off(monkeypatch):
 
 def test_guard_appends_identity(monkeypatch):
     m = _reload_with(monkeypatch, "full")
+    # الحارس مفعّل صراحةً → يُلحق تذكيراً خفيفاً ودّياً (بلا لغة اختراق)
     monkeypatch.setenv("WEAVER_IDENTITY_GUARD", "1")
     g = m._guard_user_prompt("من أنت؟")
-    assert "WeaverCode" in g and "Claude" in g  # التذكير يذكر ألا يقول Claude
+    assert "WeaverCode" in g
+    # الحارس معطّل → لا يُغيّر الرسالة إطلاقاً (السلوك الافتراضي)
     monkeypatch.setenv("WEAVER_IDENTITY_GUARD", "0")
     assert m._guard_user_prompt("hi") == "hi"
-    monkeypatch.setenv("WEAVER_IDENTITY_GUARD", "1")
 
 
-def test_all_modes_enforce_identity():
+def test_guard_off_by_default(monkeypatch):
+    # الافتراضي: الحارس معطّل (لا يُلحق شيئاً بالرسالة) لتفادي تحفيز الرفض
+    monkeypatch.delenv("WEAVER_IDENTITY_GUARD", raising=False)
+    m = _reload_with(monkeypatch, "full")
+    monkeypatch.delenv("WEAVER_IDENTITY_GUARD", raising=False)
+    assert m._identity_guard_enabled() is False
+    assert m._guard_user_prompt("اكتب كود") == "اكتب كود"
+
+
+def test_all_modes_have_identity_without_jailbreak():
+    """الهوية موجودة في كل الأوضاع، بلا لغة تجاوز/إخفاء تشبه الاختراق."""
+    jailbreak_phrases = [
+        "overrides ALL", "NEVER reveal", "supersedes", "Silent rule",
+        "تتقدّم على كل", "ممنوع منعاً باتاً", "القاعدة العليا المطلقة",
+    ]
     for mode in ["main", "coding", "project", "security", "autonomous", "analysis"]:
         s = get_system_prompt(mode)
         assert "WeaverCode" in s
-        assert "أنا WeaverCode" in s
-        assert "no preamble" in s  # قاعدة عدم التعريف التلقائي
+        for bad in jailbreak_phrases:
+            assert bad not in s, f"عبارة اختراق متبقية في وضع {mode}: {bad}"
