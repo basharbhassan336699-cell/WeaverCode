@@ -23,6 +23,11 @@ try:
     from ..checkpoint import CheckpointManager
 except Exception:  # النظام يعمل حتى لو غاب ملف النقاط
     CheckpointManager = None
+try:
+    from ..cost import CostTracker, estimate_tokens
+except Exception:  # النظام يعمل حتى لو غاب ملف التكلفة
+    CostTracker = None
+    estimate_tokens = None
 
 
 # ── حارس الهوية على مستوى رسالة المستخدم ─────────────────────────────────────
@@ -165,6 +170,8 @@ class QueryEngine:
         self._completed_blocks: List[ActionBlock] = []
         # نقاط الاستعادة (Checkpoint/Rewind) — لقطة قبل كل عملية كتابة
         self.checkpoints = CheckpointManager() if CheckpointManager else None
+        # تتبّع التكلفة والتوكنات (يقرأ usage الحقيقي من المزوّد)
+        self.cost = CostTracker() if CostTracker else None
         # وضع التخطيط: لا تُنفَّذ أدوات التعديل حتى تُعتمد الخطة
         self.plan_mode = plan_mode or os.environ.get(
             "WEAVER_PLAN_MODE", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -329,6 +336,69 @@ class QueryEngine:
                 pass
         return system_msgs + [summary_msg] + recent
 
+    async def compact_history(self, history: List[Message]):
+        """
+        تلخيص يدوي لسجل المحادثة (لأمر /compact التفاعلي).
+
+        يُرجع (السجل المُلخّص, رسالة حالة). يحافظ على آخر keep_recent رسائل
+        ويُلخّص ما قبلها في رسالة واحدة. لا يمسّ المصادقة/المفاتيح.
+        """
+        convo = [m for m in (history or []) if m.role in ("user", "assistant")]
+        if len(convo) <= self.keep_recent:
+            return history, "المحادثة قصيرة — لا حاجة للتلخيص."
+
+        older = convo[:-self.keep_recent]
+        recent = convo[-self.keep_recent:]
+        digest = "\n".join(
+            f"{m.role}: {(m.content or '')[:400]}"
+            for m in older if (m.content or "").strip()
+        )
+        if not digest.strip():
+            return history, "لا يوجد محتوى كافٍ للتلخيص."
+
+        try:
+            resp = await self.provider.complete([
+                Message(role="system", content=(
+                    "لخّص المحادثة التالية بإيجاز شديد محتفظاً بالقرارات والحقائق "
+                    "وأسماء الملفات والمهام المعلّقة. لا تذكر أي هوية.")),
+                Message(role="user", content=digest),
+            ])
+            summary = resp["choices"][0]["message"].get("content") or ""
+        except Exception as e:
+            return history, f"تعذّر التلخيص: {e}"
+
+        if not summary.strip():
+            return history, "أرجع النموذج ملخّصاً فارغاً — أُبقي السجل كما هو."
+
+        summary_msg = Message(role="user",
+                              content=f"## ملخص المحادثة السابقة:\n{summary}")
+        new_history = [summary_msg] + recent
+        saved = len(older)
+        return new_history, f"✅ لُخّصت {saved} رسالة → أُبقي {len(recent)} حديثة."
+
+    def context_stats(self, history: Optional[List[Message]] = None) -> dict:
+        """
+        إحصاءات حجم السياق الحالي (لأمر /context): عدد الرسائل وتقدير التوكنات
+        ونسبة الامتلاء من نافذة النموذج التقديرية.
+        """
+        msgs = list(history or [])
+        parts = [self.system_prompt] + [(m.content or "") for m in msgs]
+        text = "\n".join(p for p in parts if p)
+        if estimate_tokens is not None:
+            tokens = estimate_tokens(text)
+        else:
+            tokens = max(1, len(text) // 4)
+        # نافذة تقديرية افتراضية (قابلة للتجاوز عبر البيئة)
+        window = int(os.environ.get("WEAVER_CONTEXT_WINDOW", "200000"))
+        pct = min(100.0, (tokens / window) * 100.0) if window else 0.0
+        return {
+            "messages": len(msgs),
+            "tokens": tokens,
+            "window": window,
+            "percent": pct,
+            "system_chars": len(self.system_prompt or ""),
+        }
+
     def _tool_pre_approved(self, name: str) -> bool:
         """هل الأداة مسموحة مسبقاً (وضع تلقائي أو سُمح بها في هذه الجلسة)؟"""
         return self.auto_approve or name in self.session_allow
@@ -447,6 +517,14 @@ class QueryEngine:
             except Exception as e:
                 result.error = str(e)
                 break
+
+            # تتبّع التكلفة/التوكنات من usage الحقيقي (قارئ فقط، آمن)
+            if self.cost is not None:
+                try:
+                    self.cost.record(response, getattr(
+                        self.provider.config, "model", None))
+                except Exception:
+                    pass
 
             choice = response["choices"][0]
             msg = choice["message"]
