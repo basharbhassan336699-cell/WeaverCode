@@ -43,6 +43,8 @@ class HookManager:
     def __init__(self, config_path: Optional[Path] = None,
                  load_plugins: bool = True):
         self._hooks: Dict[str, List[Dict[str, str]]] = {}
+        # رسائل asyncRewake المُعلّقة (إن أرجعها hook ليعيد تنبيه الوكيل)
+        self._pending_rewake: List[str] = []
         # دمج hooks الإضافات (plugins) تلقائياً؛ يمكن تعطيله عبر
         # WEAVER_LOAD_PLUGINS=0 أو تمرير load_plugins=False (للاختبارات/الأداء).
         self._load_plugins = load_plugins and os.environ.get(
@@ -114,6 +116,10 @@ class HookManager:
         for entry in entries:
             if not self._matches(entry.get("matcher"), tool_name):
                 continue
+            # شرط if (صيغة: Bool مثل "Bash(git commit:*)") — إضافي، يتخطّى إن لم يطابق
+            if entry.get("if") and not self._check_if_condition(
+                    entry["if"], tool_name, tool_args):
+                continue
             command = entry.get("command")
             if not command:
                 continue
@@ -126,10 +132,41 @@ class HookManager:
                 # في PreToolUse فقط: رمز خروج غير صفري يمنع الأداة
                 if event == "PreToolUse" and proc.returncode != 0:
                     allowed = False
+                # asyncRewake: يجمع مخرجات الـ hook لإعادة تنبيه الوكيل لاحقاً
+                if entry.get("asyncRewake") and (proc.stdout or "").strip() \
+                        and proc.returncode != 0:
+                    msg = entry.get("rewakeMessage", "")
+                    out = proc.stdout.strip()
+                    self._pending_rewake.append(f"{msg}\n\n{out}" if msg else out)
             except Exception:
                 # فشل hook لا يُسقط النظام؛ يُتجاهَل بأمان
                 continue
         return allowed
+
+    def _check_if_condition(self, condition: str, tool_name: str,
+                            tool_args: Any) -> bool:
+        """فحص شرط if بصيغة ToolName(pattern:*) — مثل Bash(git commit:*)."""
+        import re as _re
+        m = _re.match(r"^(\w+)\((.+)\)$", (condition or "").strip())
+        if not m:
+            return True  # شرط غير معروف = لا يمنع
+        cond_tool, cond_pattern = m.group(1), m.group(2)
+        if cond_tool != tool_name:
+            return False
+        if isinstance(tool_args, dict):
+            cmd = tool_args.get("command", "") or tool_args.get("cmd", "")
+        else:
+            cmd = str(tool_args or "")
+        pattern = _re.escape(cond_pattern).replace(r"\*", ".*")
+        return bool(_re.search(pattern, cmd))
+
+    def pop_rewake(self) -> str:
+        """سحب رسائل asyncRewake المُعلّقة (وتفريغها). يُرجع '' إن لا شيء."""
+        if not self._pending_rewake:
+            return ""
+        msg = "\n\n---\n\n".join(self._pending_rewake)
+        self._pending_rewake = []
+        return msg
 
     # ── أحداث الجلسة والتلخيص (SessionStart / PreCompact / ...) ───────────────
 

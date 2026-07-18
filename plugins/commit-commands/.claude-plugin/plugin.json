@@ -1,5 +1,10 @@
 {
   "name": "commit-commands",
-  "version": "0.1.0",
-  "description": "أوامر الـ commit والدفع"
+  "description": "Streamline your git workflow with simple commands for committing, pushing, and creating pull requests",
+  "version": "1.0.0",
+  "author": {
+    "name": "Anthropic",
+    "email": "support@anthropic.com"
+  }
 }
+

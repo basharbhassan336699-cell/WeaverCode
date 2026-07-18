@@ -1,5 +1,30 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## v4.0 — Plugins والأمان (تكامل الميزات المتبقية، إضافات فقط)
+
+نُفّذت المهام من مواصفة weaver-integrate-remaining دون مسّ أي كود قائم
+(ولا provider.py ولا منطق المفاتيح)، 67 اختباراً كلها ناجحة:
+
+1. **6 plugins** → `plugins/`: security-guidance، pr-review-toolkit،
+   feature-dev، code-review، commit-commands، agent-sdk-dev (بنسخها الكاملة:
+   plugin.json + agents + README).
+2. **loader.py**: `get_all_agents()` + استبدال `${WEAVER_PLUGIN_ROOT}` (مع
+   `${CLAUDE_PLUGIN_ROOT}`)، والحفاظ على `if`/`asyncRewake`/`matcher`.
+3. **hooks.py**: دعم `if` و`asyncRewake`/`rewakeMessage` **إضافةً** — `run()`
+   يبقى يُرجع bool (منع PreToolUse) فلا يُكسَر السلوك؛ `pop_rewake()` +
+   حقنها في query_engine كرسالة مستخدم بالجولة التالية.
+4. **core/permissions.py**: نظام قواعد `Edit(src/**)` / `Bash(git:*)` مع
+   أولوية deny→allow→ask، مدموج في query_engine كطبقة قبل السؤال (الافتراضي
+   "ask" بلا إعدادات فلا تغيير سلوك).
+5. **9 أوامر سلاش**: weaver-security/review-pr/feature/commit/commit-push/
+   clean-gone/code-review/new-sdk-app/permissions.
+6. `.devcontainer/` + `scripts/gateway/` + `scripts/weaver-gateway.sh` +
+   قوالب إعدادات في `config/`.
+
+قرار وقائي: **security-guidance معطّل افتراضياً** (`disabled:true`) لأن
+SessionStart فيه يثبّت SDK بمهلة 180ث + مراجعات LLM لكل edit/commit =
+استهلاك مفاتيح وبطء/تعليق على Termux. يُفعَّل يدوياً عند الحاجة.
+
 ## أوامر تفاعلية: /model (اختيار النموذج) و/mcp (حالة MCP)
 
 بطلب المستخدم — كتجربة OpenClaude:
