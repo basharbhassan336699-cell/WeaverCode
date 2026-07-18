@@ -1,0 +1,96 @@
+{
+  "name": "weavercode",
+  "displayName": "WeaverCode",
+  "description": "وكيل WeaverCode البرمجي المستقل داخل VS Code — يعمل مع أي مزوّد ونموذج AI. Run the provider-agnostic WeaverCode agent from VS Code.",
+  "version": "1.0.0",
+  "publisher": "weavercode",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Other", "Machine Learning", "Programming Languages"],
+  "keywords": ["ai", "agent", "weavercode", "coding-assistant", "arabic"],
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/basharbhassan336699-cell/WeaverCode"
+  },
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "weavercode.openChat",
+        "title": "WeaverCode: فتح المحادثة التفاعلية / Open Interactive Chat"
+      },
+      {
+        "command": "weavercode.runTask",
+        "title": "WeaverCode: تنفيذ مهمة / Run Task"
+      },
+      {
+        "command": "weavercode.runSelection",
+        "title": "WeaverCode: تنفيذ على التحديد / Run on Selection"
+      },
+      {
+        "command": "weavercode.explainFile",
+        "title": "WeaverCode: اشرح هذا الملف / Explain This File"
+      },
+      {
+        "command": "weavercode.status",
+        "title": "WeaverCode: فحص الحالة / Show Status"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "weavercode.runSelection",
+          "when": "editorHasSelection",
+          "group": "weavercode@1"
+        },
+        {
+          "command": "weavercode.explainFile",
+          "group": "weavercode@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "weavercode.runTask",
+        "key": "ctrl+alt+w",
+        "mac": "cmd+alt+w"
+      },
+      {
+        "command": "weavercode.openChat",
+        "key": "ctrl+alt+c",
+        "mac": "cmd+alt+c"
+      }
+    ],
+    "configuration": {
+      "title": "WeaverCode",
+      "properties": {
+        "weavercode.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "مسار مفسّر Python المستخدم لتشغيل weaver.py"
+        },
+        "weavercode.weaverPath": {
+          "type": "string",
+          "default": "",
+          "description": "مسار weaver.py (يُترك فارغاً لاكتشافه في جذر مساحة العمل)"
+        },
+        "weavercode.mode": {
+          "type": "string",
+          "default": "main",
+          "description": "وضع الوكيل الافتراضي (main/coding/project...)"
+        },
+        "weavercode.autoApprove": {
+          "type": "boolean",
+          "default": false,
+          "description": "تمرير --yes (موافقة تلقائية على الأدوات) — استخدمه بحذر"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "echo \"no linter configured\""
+  }
+}

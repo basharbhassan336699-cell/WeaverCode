@@ -416,6 +416,35 @@ def _show_mcp_status(mcp):
               f"مثال في التوثيق. مسار الإعداد: {cfg}{RESET}")
 
 
+def _list_agents():
+    """يجمع الوكلاء المتاحين من .claude/agents/*.md وplugins."""
+    agents = {}
+    # (1) وكلاء المشروع .claude/agents/
+    proj = Path(__file__).parent / ".claude" / "agents"
+    if proj.exists():
+        for md in sorted(proj.glob("*.md")):
+            agents[md.stem] = ("مشروع", md)
+    # (2) وكلاء الـ plugins
+    try:
+        from core.plugins.loader import PluginLoader
+        for name, path in PluginLoader().get_all_agents().items():
+            agents[name] = ("plugin", path)
+    except Exception:
+        pass
+    return agents
+
+
+def _show_agents():
+    """عرض قائمة الوكلاء المتاحين (لأمر /agents)."""
+    agents = _list_agents()
+    if not agents:
+        draw_info("لا يوجد وكلاء مخصّصون. الأوضاع المدمجة متاحة عبر /mode.")
+        return
+    draw_info(f"الوكلاء المتاحون ({len(agents)}):")
+    for name, (source, _path) in agents.items():
+        print(f"  {ORANGE}•{RESET} {name}  {GRAY}({source}){RESET}")
+
+
 # بروموه /init — يُوجّه الوكيل لتحليل المشروع وكتابة CLAUDE.md
 _INIT_PROMPT = (
     "حلّل هذا المشروع في مجلد العمل الحالي وأنشئ ملف `CLAUDE.md` شاملاً "
@@ -443,6 +472,12 @@ _BUILTIN_CMDS = [
     {"name": "add-dir", "description": "إضافة مجلد عمل إضافي (multi-workspace)"},
     {"name": "rewind", "description": "التراجع عن آخر تعديل (أو /rewind <رقم>)"},
     {"name": "init", "description": "توليد ملف CLAUDE.md بتحليل المشروع"},
+    {"name": "cost", "description": "عرض التكلفة بالدولار والتوكنات المستهلكة"},
+    {"name": "context", "description": "حجم السياق الحالي ونسبة امتلاء النافذة"},
+    {"name": "clear", "description": "مسح سجل المحادثة والبدء من جديد"},
+    {"name": "compact", "description": "تلخيص المحادثة يدوياً لتوفير السياق"},
+    {"name": "agents", "description": "عرض الوكلاء المتاحين (مشروع + plugins)"},
+    {"name": "vim", "description": "تفعيل/إيقاف وضع Vim للإدخال"},
 ]
 
 
@@ -458,6 +493,10 @@ def _make_slash_prompt(commands):
         from prompt_toolkit.shortcuts import CompleteStyle
     except Exception:
         return None
+
+    # وضع Vim للإدخال (WEAVER_VIM=1) — قابل للتبديل حياً عبر /vim
+    vi_mode = os.environ.get("WEAVER_VIM", "0").strip().lower() in (
+        "1", "true", "yes", "on")
 
     metas = _BUILTIN_CMDS + commands.list_meta()
 
@@ -483,13 +522,15 @@ def _make_slash_prompt(commands):
             reserve_space_for_menu=8,         # يحجز مساحة للقائمة (مهم لظهورها)
             complete_style=CompleteStyle.COLUMN,  # سطر لكل أمر + وصفه
             mouse_support=True,               # اللمس لاختيار أمر (Termux)
+            vi_mode=vi_mode,                  # وضع Vim (اختصارات hjkl/esc)
         )
     except Exception:
         # نسخ قديمة قد لا تدعم بعض الوسائط → أنشئ جلسة أبسط
         try:
             return PromptSession(completer=_SlashCompleter(),
                                  complete_while_typing=True,
-                                 reserve_space_for_menu=8)
+                                 reserve_space_for_menu=8,
+                                 vi_mode=vi_mode)
         except Exception:
             return None
 
@@ -630,6 +671,70 @@ async def interactive_mode(initial_history=None, session_id=None,
                 draw_success(f"تراجع: استُعيد {Path(cp.path).name} ({cp.describe()}).")
             else:
                 draw_info("لا شيء للتراجع عنه.")
+            continue
+
+        # ── /cost: التكلفة والتوكنات ─────────────────────────────────────────
+        if prompt.strip() == "/cost":
+            if getattr(engine, "cost", None) is not None:
+                print(engine.cost.summary())
+            else:
+                draw_info("تتبّع التكلفة غير متاح.")
+            continue
+
+        # ── /context: حجم السياق الحالي ──────────────────────────────────────
+        if prompt.strip() == "/context":
+            st = engine.context_stats(history)
+            bar_len = 20
+            filled = int(bar_len * st["percent"] / 100)
+            bar = "█" * filled + "░" * (bar_len - filled)
+            draw_info("حجم السياق الحالي:")
+            print(f"  الرسائل:  {st['messages']}")
+            print(f"  التوكنات: ~{st['tokens']:,} / {st['window']:,}")
+            print(f"  الامتلاء: {GRAY}{bar}{RESET} {st['percent']:.1f}%")
+            continue
+
+        # ── /clear: مسح سجل المحادثة ─────────────────────────────────────────
+        if prompt.strip() == "/clear":
+            history.clear()
+            if getattr(engine, "cost", None) is not None:
+                engine.cost.reset()
+            print("\033[2J\033[H", end="")
+            draw_welcome(provider.config.model, provider.config.base_url)
+            draw_success("مُسِح سجل المحادثة والتكلفة — بداية جديدة.")
+            continue
+
+        # ── /compact: تلخيص يدوي للمحادثة ────────────────────────────────────
+        if prompt.strip() == "/compact":
+            spin = Spinner("يلخّص المحادثة...")
+            spin.start()
+            try:
+                new_history, msg = await engine.compact_history(history)
+            finally:
+                await spin.stop()
+            history[:] = new_history
+            draw_success(msg) if msg.startswith("✅") else draw_info(msg)
+            continue
+
+        # ── /agents: عرض الوكلاء المتاحين ────────────────────────────────────
+        if prompt.strip() == "/agents":
+            _show_agents()
+            continue
+
+        # ── /vim: تفعيل/إيقاف وضع Vim للإدخال ────────────────────────────────
+        if prompt.strip() in ("/vim", "/vim on", "/vim off"):
+            on = os.environ.get("WEAVER_VIM", "0").lower() in ("1", "true", "on", "yes")
+            if prompt.strip() == "/vim off":
+                on = False
+            elif prompt.strip() == "/vim on":
+                on = True
+            else:
+                on = not on
+            os.environ["WEAVER_VIM"] = "1" if on else "0"
+            # أعِد بناء جلسة الإدخال لتطبيق الوضع فوراً
+            new_sess = _make_slash_prompt(commands)
+            if new_sess is not None:
+                slash_session = new_sess
+            draw_success(f"وضع Vim {'مُفعّل' if on else 'مُعطّل'}.")
             continue
 
         # ── /init: توليد CLAUDE.md بتحليل المشروع ────────────────────────────
