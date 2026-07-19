@@ -451,9 +451,10 @@
     const it = intg[i];
     if (!it) return;
     if (it.id === "github") {
+      // بضغطة واحدة لمن أضاف تطبيقه الخاص (secret)، وإلا device flow العام للجميع
       if (oauthStatus.github_oneclick) return githubAuthorize();
-      // لم يُضبط بعد → افتح نافذة الإعداد (مرة واحدة) بدل تعديل .env يدوياً
-      return openGithubSetup();
+      const gi = intg.findIndex((x) => x.id === "github");
+      return startGithubDeviceFlow(gi);   // يعمل لأي مستخدم بلا إعداد
     }
     const authUrl = it.auth_url || it.url;
     if (authUrl) window.open(authUrl, "_blank", "noopener");
@@ -478,6 +479,7 @@
     $("#ghSec").placeholder = cfg.has_secret ? "محفوظ — اتركه فارغاً للإبقاء عليه" : "يُحفظ محلياً — لا يُرفع";
     $("#ghSetupModal").classList.add("open");
   }
+  { const _adv = $("#ghAdvancedSetup"); if (_adv) _adv.onclick = (e) => { e.preventDefault(); openGithubSetup(); }; }
   $$("[data-ghclose]").forEach((b) => b.onclick = () => $("#ghSetupModal").classList.remove("open"));
   $("#ghSetupModal").addEventListener("click", (e) => { if (e.target.id === "ghSetupModal") $("#ghSetupModal").classList.remove("open"); });
   $("#ghSave").onclick = async () => {

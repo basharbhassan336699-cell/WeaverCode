@@ -140,12 +140,16 @@ def test_integrations_connected_only_with_token(tmp_path, monkeypatch):
 
 # ── تفويض GitHub الحقيقي (Device Flow) ───────────────────────────────────────
 
-def test_oauth_status_reflects_client_id(monkeypatch):
+def test_oauth_status_reflects_client_id(monkeypatch, tmp_path):
     from web import server
+    # المعرّف العام مشحون → device flow متاح دائماً (بلا إعداد)
     monkeypatch.delenv("GITHUB_OAUTH_CLIENT_ID", raising=False)
-    assert server._api_oauth_status()["github"] is False
-    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "Ov23test")
+    monkeypatch.setattr(server, "_OAUTH_CONFIG_FILE", tmp_path / "o.json")
     assert server._api_oauth_status()["github"] is True
+    assert server._gh_client_id() == server._DEFAULT_GH_CLIENT_ID
+    # .env يتجاوز المعرّف العام
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "Ov23custom")
+    assert server._gh_client_id() == "Ov23custom"
 
 
 def test_oauth_start_errors_without_client_id(monkeypatch):

@@ -356,12 +356,21 @@ def _oauth_config_save(cfg: dict) -> None:
         json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# معرّف تطبيق WeaverCode العام (client_id عام وآمن للنشر — ليس سرّاً).
+# يتيح Device Flow لأي مستخدم دون تسجيل تطبيق خاص. يبقى قابلاً للتجاوز عبر
+# .env أو إعداد الواجهة (لمن يريد تطبيقه الخاص + الضغطة الواحدة).
+_DEFAULT_GH_CLIENT_ID = "Ov23liwzvdZiy6rN8J7X"
+
+
 def _gh_client_id() -> str:
-    # الأولوية للبيئة (.env) ثم للإعداد المحفوظ من الواجهة
+    # الأولوية: البيئة (.env) → إعداد الواجهة → المعرّف العام المشحون
     v = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "").strip()
     if v:
         return v
-    return str(_oauth_config().get("github", {}).get("client_id", "")).strip()
+    v = str(_oauth_config().get("github", {}).get("client_id", "")).strip()
+    if v:
+        return v
+    return _DEFAULT_GH_CLIENT_ID
 
 
 def _gh_client_secret() -> str:
