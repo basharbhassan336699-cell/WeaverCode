@@ -299,12 +299,15 @@ def _load_integrations() -> list:
     for d in _default_integrations():
         s = saved.get(d["id"], {})
         merged = {**d, **{k: v for k, v in s.items() if k in ("url", "token", "enabled", "name", "icon")}}
+        # حالة الاتصال الصادقة: متصل فقط إذا وُجد اعتماد (token) حقيقي
+        merged["connected"] = bool(str(merged.get("token", "")).strip())
         result.append(merged)
         seen.add(d["id"])
     # ارتباطات مخصّصة أضافها المستخدم
     for iid, it in saved.items():
         if iid not in seen:
             it.setdefault("builtin", False)
+            it["connected"] = bool(str(it.get("token", "")).strip())
             result.append(it)
     return result
 

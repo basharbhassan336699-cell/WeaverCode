@@ -407,51 +407,81 @@
     if (svg) return '<span class="ic-svg">' + svg + "</span>";
     return '<span class="ic-emoji">' + escapeHtml(it.icon || "🔗") + "</span>";
   }
+  // الاتصال صادق: «متصل» فقط عند وجود اعتماد حقيقي (token)
+  function isConnected(it) { return !!(it.connected || (it.token && String(it.token).trim())); }
   function renderIntegrations() {
     const box = $("#intgList");
     box.innerHTML = "";
     intg.forEach((it, idx) => {
+      const conn = isConnected(it);
       const card = document.createElement("div");
-      card.className = "intg-card" + (it.enabled ? "" : " off");
+      card.className = "intg-card" + (conn ? "" : " off");
       const url = it.url || "";
+      let actions = '<button class="ic" data-edit="' + idx + '" title="تعديل">✎</button>';
+      if (conn) {
+        // متصل فعلاً: شارة خضراء صادقة + زر قطع الاتصال
+        actions =
+          '<span class="conn-badge">✓ متصل</span>' +
+          '<button class="ic" data-open="' + idx + '" title="فتح الموقع">↗</button>' +
+          '<button class="ic" data-disc="' + idx + '" title="قطع الاتصال">⏻</button>' +
+          actions;
+      } else if (url) {
+        // غير متصل: زر اتصال يبدأ التدفّق الحقيقي
+        actions = '<button class="conn-btn" data-conn="' + idx + '">اتصال</button>' + actions;
+      }
       card.innerHTML =
         '<div class="intg-ic i-' + escapeHtml(it.id || "x") + '">' + intgIcon(it) + "</div>" +
         '<div class="intg-main"><div class="intg-name">' + escapeHtml(it.name) +
-        (it.token ? ' <span class="tok" title="مفتاح محفوظ">🔑</span>' : "") + "</div>" +
-        '<div class="intg-url ellip">' + escapeHtml(url || "—") + "</div></div>" +
-        '<div class="intg-actions">' +
-        '<label class="switch" title="' + (it.enabled ? "متصل" : "غير متصل") + '">' +
-        '<input type="checkbox" ' + (it.enabled ? "checked" : "") + ' data-tog="' + idx + '">' +
-        '<span class="slider"></span></label>' +
-        '<button class="ic" data-edit="' + idx + '" title="تعديل">✎</button>' +
-        (url ? '<button class="conn-btn' + (it.enabled ? " on" : "") + '" data-conn="' + idx + '">' +
-               (it.enabled ? "متصل" : "اتصال") + "</button>" : "") +
-        "</div>";
+        (conn ? ' <span class="tok" title="اعتماد محفوظ">🔑</span>' : "") + "</div>" +
+        '<div class="intg-url ellip">' + escapeHtml(url || "—") +
+        '</div><div class="intg-state ' + (conn ? "on" : "off") + '">' +
+        (conn ? "متصل" : "غير متصل") + "</div></div>" +
+        '<div class="intg-actions">' + actions + "</div>";
       box.appendChild(card);
     });
-    $$("#intgList [data-tog]").forEach((b) => b.onclick = () => { const i = +b.dataset.tog; intg[i].enabled = b.checked; saveIntg(); });
     $$("#intgList [data-edit]").forEach((b) => b.onclick = () => editIntg(+b.dataset.edit));
     $$("#intgList [data-conn]").forEach((b) => b.onclick = () => connectIntg(+b.dataset.conn));
+    $$("#intgList [data-open]").forEach((b) => b.onclick = () => { const it = intg[+b.dataset.open]; if (it && it.url) window.open(it.url, "_blank", "noopener"); });
+    $$("#intgList [data-disc]").forEach((b) => b.onclick = () => disconnectIntg(+b.dataset.disc));
   }
-  // اتصال: يفعّل الخدمة (إن لم تكن مفعّلة) ثم ينتقل إلى الموقع
+  // تدفّق الاتصال الحقيقي: افتح موقع الخدمة (للدخول/التفويض) ثم أكمل بلصق الاعتماد
   function connectIntg(i) {
     const it = intg[i];
     if (!it || !it.url) return;
-    window.open(it.url, "_blank", "noopener");
-    if (!it.enabled) { it.enabled = true; saveIntg(); }
+    window.open(it.url, "_blank", "noopener");   // (1) اذهب للموقع لتسجيل الدخول/التفويض
+    openIntgModal(i, true);                        // (2) الصق الاعتماد لإتمام الربط فعلاً
+  }
+  // قطع الاتصال: يمسح الاعتماد فيعود صادقاً «غير متصل»
+  function disconnectIntg(i) {
+    const it = intg[i];
+    if (!it) return;
+    if (!confirm("قطع الاتصال بـ " + it.name + "؟ (سيُحذف الاعتماد المحفوظ)")) return;
+    it.token = ""; it.connected = false;
+    saveIntg();
   }
   async function saveIntg() { await post("/api/integrations", { integrations: intg }); loadIntegrations(); }
 
   // نافذة تعديل/إضافة (بدل prompt الذي كان يفقد الرابط)
   let editIdx = -1;
-  function openIntgModal(idx) {
+  function openIntgModal(idx, connecting) {
     editIdx = idx;
     const it = idx >= 0 ? intg[idx] : { name: "", url: "https://", token: "" };
-    $("#intgModalTitle").textContent = idx >= 0 ? "تعديل: " + it.name : "إضافة ارتباط";
+    $("#intgModalTitle").textContent = connecting
+      ? ("إتمام الاتصال بـ " + it.name)
+      : (idx >= 0 ? "تعديل: " + it.name : "إضافة ارتباط");
     $("#mName").value = it.name || "";
     $("#mName").parentElement.style.display = (idx >= 0 && it.builtin) ? "none" : "block";
     $("#mUrl").value = it.url || "";
     $("#mToken").value = it.token || "";
+    // تلميح أثناء الاتصال: افتحنا الموقع — الصق المفتاح/التوكن لإتمام الربط فعلاً
+    const hint = $("#mHint");
+    if (hint) {
+      hint.textContent = connecting
+        ? "فُتح موقع الخدمة في تبويب جديد. سجّل الدخول وانسخ المفتاح/التوكن ثم الصقه هنا لإتمام الاتصال."
+        : "";
+      hint.style.display = connecting ? "block" : "none";
+    }
+    if (connecting) setTimeout(() => $("#mToken").focus(), 100);
     $("#intgModal").classList.add("open");
   }
   function editIntg(i) { openIntgModal(i); }

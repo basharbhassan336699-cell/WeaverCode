@@ -231,7 +231,17 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .conn-btn { background: var(--orange); border: none; color: #fff; border-radius: 11px;
   padding: 8px 16px; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .conn-btn:active { filter: brightness(.92); }
-.conn-btn.on { background: var(--card-2); color: var(--green, #22c55e); border: 1px solid #22c55e33; }
+/* شارة «متصل» الصادقة (تظهر فقط عند وجود اعتماد حقيقي) */
+.conn-badge { display: inline-flex; align-items: center; gap: 4px; background: #22c55e1a;
+  color: #22c55e; border: 1px solid #22c55e44; border-radius: 999px; padding: 5px 11px;
+  font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+/* سطر الحالة تحت الرابط */
+.intg-state { font-size: 11px; font-weight: 600; margin-top: 3px; }
+.intg-state.on { color: #22c55e; }
+.intg-state.off { color: var(--muted-2); }
+/* تلميح داخل نافذة إتمام الاتصال */
+.modal-hint { background: #22c55e12; border: 1px solid #22c55e33; color: var(--text);
+  border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
 
 /* نافذة منبثقة (Modal) */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 40; display: none;

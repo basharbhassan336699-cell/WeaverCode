@@ -114,3 +114,25 @@ def test_webfetch_has_curl_fallback():
     # _web_fetch يستدعي _http_get لا httpx مباشرة
     fetch_src = inspect.getsource(ToolRegistry._web_fetch)
     assert "_http_get" in fetch_src
+
+
+# ── الاتصال الصادق بالخدمات (connected من token حقيقي فقط) ────────────────────
+
+def test_integrations_connected_only_with_token(tmp_path, monkeypatch):
+    # عزل ملف الارتباطات في مجلد مؤقت
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "integrations.json")
+    # الافتراضي: لا اعتمادات → لا شيء متصل (لا حالة وهمية)
+    items = server._load_integrations()
+    assert all(it.get("connected") is False for it in items), \
+        "يجب ألا يظهر أي ارتباط كـ متصل دون اعتماد"
+    # بعد حفظ توكن حقيقي لـ github → متصل صادقاً
+    server._save_integrations([{"id": "github", "name": "GitHub",
+                                "url": "https://github.com",
+                                "token": "ghp_real", "enabled": True, "builtin": True}])
+    items2 = server._load_integrations()
+    gh = next(i for i in items2 if i["id"] == "github")
+    assert gh["connected"] is True
+    # ارتباط بلا توكن يبقى غير متصل
+    others = [i for i in items2 if i["id"] != "github"]
+    assert all(i.get("connected") is False for i in others)

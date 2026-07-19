@@ -130,7 +130,7 @@
 <section id="v-integrations" class="view">
   <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">الارتباطات</div>
     <button id="addIntg" class="ic" title="إضافة">＋</button></div>
-  <div class="note">🔌 روابط سريعة مع خدماتك. «اتصال» يفعّل الخدمة ويفتح موقعها، المفتاح الجانبي للتفعيل السريع، و✎ لتعديل الرابط/المفتاح. يُخزَّن محلياً في <code>config/integrations.json</code>.</div>
+  <div class="note">🔌 «اتصال» يفتح موقع الخدمة لتسجّل الدخول، ثم تُكمل الربط بلصق المفتاح/التوكن. تظهر شارة «متصل» الخضراء <b>فقط</b> عند وجود اعتماد حقيقي — لا حالة وهمية. ⏻ لقطع الاتصال. يُخزَّن محلياً في <code>config/integrations.json</code>.</div>
   <div id="intgList" class="intg-list"></div>
 </section>
 
@@ -138,6 +138,7 @@
 <div id="intgModal" class="modal">
   <div class="modal-box">
     <div class="modal-head"><span id="intgModalTitle">تعديل ارتباط</span><button class="ic" data-mclose>✕</button></div>
+    <div id="mHint" class="modal-hint" style="display:none"></div>
     <label class="field"><span>الاسم</span><input id="mName" type="text" placeholder="مثل Notion"/></label>
     <label class="field"><span>الرابط</span><input id="mUrl" type="url" placeholder="https://…" inputmode="url"/></label>
     <label class="field"><span>مفتاح / توكِن (اختياري)</span><input id="mToken" type="text" placeholder="اتركه فارغاً إن لم يلزم"/></label>
