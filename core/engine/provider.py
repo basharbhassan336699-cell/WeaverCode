@@ -520,6 +520,7 @@ class WeaverProvider:
                 }
 
         text_parts: List[str] = []
+        thinking_parts: List[str] = []
         tool_calls: List[Dict[str, Any]] = []
 
         content = data.get("content")
@@ -539,6 +540,12 @@ class WeaverProvider:
             btype = block.get("type")
             if btype == "text" or (btype is None and "text" in block):
                 text_parts.append(block.get("text", ""))
+            elif btype in ("thinking", "redacted_thinking"):
+                # النماذج التفكيرية (مثل claude-fable-5) تُرجع كتلة تفكير قبل النص.
+                # لا نعرضها كإجابة عادةً، لكن نحتفظ بها احتياطاً إن غاب نص الإجابة.
+                t = block.get("thinking") or block.get("text") or ""
+                if t:
+                    thinking_parts.append(t)
             elif btype == "tool_use":
                 tool_calls.append({
                     "id": block.get("id", ""),
@@ -548,6 +555,10 @@ class WeaverProvider:
                         "arguments": json.dumps(block.get("input", {}), ensure_ascii=False),
                     },
                 })
+            elif btype is None and "thinking" in block:
+                t = block.get("thinking") or ""
+                if t:
+                    thinking_parts.append(t)
 
         # ── حالة (ج): احتياطي — بعض الوسطاء يضعون النص في completion/text ─────
         if not text_parts and not tool_calls:
@@ -556,6 +567,12 @@ class WeaverProvider:
                 if isinstance(v, str) and v.strip():
                     text_parts.append(v)
                     break
+
+        # ── حالة (ج-2): استجابة تفكير فقط بلا نص (نموذج تفكيري اقتُطع أو لم يُخرج
+        # كتلة نص) → نعرض محتوى التفكير كإجابة بدل ترك الرد فارغاً. برمجة حقيقية:
+        # المستخدم يرى تحليل النموذج الفعلي (وصف الصورة/الملف) لا رسالة «لا نص».
+        if not text_parts and not tool_calls and thinking_parts:
+            text_parts.append("\n".join(thinking_parts))
 
         stop_reason = data.get("stop_reason", "end_turn")
 

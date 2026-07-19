@@ -219,3 +219,55 @@ def test_materialize_attachments_respects_total_cap(tmp_path):
 def test_materialize_attachments_empty():
     from core.engine.query_engine import _materialize_attachments
     assert _materialize_attachments([]) == ""
+
+
+# ── النماذج التفكيرية (claude-fable-5): استخراج نصّ الإجابة من كتل thinking ──
+
+def test_thinking_only_response_surfaces_analysis():
+    """رد يحوي كتلة تفكير فقط (اقتُطع) → يُعرض التحليل بدل رسالة فارغة."""
+    from core.engine.provider import WeaverProvider
+    r = WeaverProvider._anthropic_to_openai_response({
+        "model": "claude-fable-5", "role": "assistant",
+        "content": [{"type": "thinking",
+                     "thinking": "في الصورة قطة بيضاء.",
+                     "signature": "CAISpw"}],
+        "stop_reason": "max_tokens",
+    })
+    assert "قطة بيضاء" in r["choices"][0]["message"]["content"]
+
+
+def test_thinking_plus_text_returns_text_only():
+    """عند وجود نص فعلي: يُعرض النص لا التفكير (لا تسريب للتفكير الداخلي)."""
+    from core.engine.provider import WeaverProvider
+    r = WeaverProvider._anthropic_to_openai_response({
+        "content": [
+            {"type": "thinking", "thinking": "تحليل داخلي", "signature": "x"},
+            {"type": "text", "text": "الجواب النهائي"}],
+        "stop_reason": "end_turn",
+    })
+    content = r["choices"][0]["message"]["content"]
+    assert content == "الجواب النهائي"
+    assert "تحليل داخلي" not in content
+
+
+def test_thinking_plus_tool_use_preserved():
+    from core.engine.provider import WeaverProvider
+    r = WeaverProvider._anthropic_to_openai_response({
+        "content": [
+            {"type": "thinking", "thinking": "t", "signature": "x"},
+            {"type": "tool_use", "id": "t1", "name": "Read", "input": {"path": "a"}}],
+        "stop_reason": "tool_use",
+    })
+    msg = r["choices"][0]["message"]
+    assert msg.get("tool_calls")
+    assert r["choices"][0]["finish_reason"] == "tool_calls"
+
+
+def test_redacted_thinking_handled():
+    from core.engine.provider import WeaverProvider
+    r = WeaverProvider._anthropic_to_openai_response({
+        "content": [{"type": "redacted_thinking", "text": "محجوب"}],
+        "stop_reason": "end_turn",
+    })
+    # لا يتعطّل؛ يُرجع المحتوى المتاح
+    assert isinstance(r["choices"][0]["message"]["content"], str)
