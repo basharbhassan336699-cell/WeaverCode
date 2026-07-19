@@ -86,6 +86,61 @@ def _extract_media_paths(text: str, work_dir: str) -> List[str]:
     return found[:8]  # حدّ آمن: 8 وسائط كحدّ أقصى للرسالة الواحدة
 
 
+def _extract_readable_paths(text: str, work_dir: str) -> List[str]:
+    """يستخرج مسارات ملفات موجودة (غير الصور/PDF) لقراءة محتواها وحقنه مباشرةً."""
+    try:
+        from core.multimodal import is_multimodal
+    except Exception:
+        def is_multimodal(_):  # type: ignore
+            return False
+    found: List[str] = []
+    seen = set()
+    for tok in _PATH_RE.findall(text or ""):
+        cand = os.path.expanduser(tok)
+        for full in (cand, os.path.join(work_dir, cand)):
+            try:
+                if (full not in seen and os.path.isfile(full)
+                        and not is_multimodal(full)):
+                    seen.add(full)
+                    found.append(full)
+                    break
+            except Exception:
+                continue
+    return found[:6]
+
+
+def _materialize_attachments(paths: List[str], per_cap: int = 30000,
+                             total_cap: int = 80000) -> str:
+    """يقرأ محتوى الملفات المرفقة (غير الصور) ويعيده نصّاً جاهزاً للحقن في الرسالة.
+
+    EN: Read attached non-media files with the smart reader and return their
+    content inline, so the model can answer directly without calling Read
+    (which it sometimes only *narrates*). Capped to protect the context window.
+    """
+    if not paths:
+        return ""
+    try:
+        from core.filetypes import read_any
+    except Exception:
+        return ""
+    chunks: List[str] = []
+    used = 0
+    for p in paths:
+        try:
+            content = read_any(p)
+        except Exception as e:
+            content = f"(تعذّرت القراءة: {e})"
+        if len(content) > per_cap:
+            content = content[:per_cap] + "\n… [اقتُطع]"
+        if used + len(content) > total_cap:
+            chunks.append(f"\n[تُخطّي بقية المرفقات لتجاوز حدّ الحجم]")
+            break
+        used += len(content)
+        chunks.append(f"\n\n===== محتوى الملف المرفق: {os.path.basename(p)} =====\n"
+                      f"{content}\n===== نهاية {os.path.basename(p)} =====")
+    return "".join(chunks)
+
+
 # ── التعافي من الرفض الزائف ──────────────────────────────────────────────────
 # بعض النماذج/البوابات تُفسّر غلاف إخفاء الهوية (بروموه نظامي صارم + تذكير صامت)
 # كمحاولة اختراق، فترفض حتى الطلبات البريئة (فئة "cyber"). عند اكتشاف رفض،
@@ -590,9 +645,20 @@ class QueryEngine:
         if history:
             messages.extend(history)
 
+        # حقن محتوى الملفات المرفقة (غير الصور) مباشرةً في النص — حتى يجيب النموذج
+        # فوراً بلا حاجة لاستدعاء Read (الذي يكتفي أحياناً بقول «سأقرأ» دون فعل).
+        try:
+            readable = _extract_readable_paths(model_prompt, self.tools.work_dir)
+            inlined = _materialize_attachments(readable)
+            if inlined:
+                model_prompt = model_prompt + inlined
+        except Exception:
+            pass
+
         user_msg = Message(role="user",
                            content=_guard_user_prompt(_sanitize_prompt(model_prompt)))
         # إرفاق الوسائط (صور/PDF) المذكورة فعلاً ليراها النموذج الرؤيوي مباشرةً
+        media: List[str] = []
         try:
             media = _extract_media_paths(model_prompt, self.tools.work_dir)
             if media:
@@ -642,8 +708,15 @@ class QueryEngine:
                     except Exception:
                         pass
                     # سلّم إعادة المحاولة: (بروموه النظام, أدوات, تحويل رسالة المستخدم)
-                    # مبني على الدليل: التأطير الإنجليزي يمرّ من مصنّف الأمان العربي.
-                    _ladder = [
+                    # مبني على الدليل: طلب بسيط بلا نظام/أدوات يمرّ من مصنّف الأمان.
+                    # مهم: نحافظ على الوسائط (الصور) في كل محاولة — بلا الصورة لا يمكن
+                    # وصفها. عند وجود صورة نبدأ بطلب رؤية «عارٍ» يحاكي تطبيقاً بسيطاً.
+                    _ladder = []
+                    if media:
+                        _ladder.append(
+                            (None, None,
+                             lambda p: "صِف بدقّة وتفصيل كل ما تراه في هذه الصورة/الصور."))
+                    _ladder += [
                         (None, None, lambda p: p),                       # عارٍ
                         (None, None, lambda p: _EN_LEGIT_FRAME + p),     # تأطير إنجليزي
                         (_EN_LEGIT_FRAME.strip(), None, lambda p: p),    # التأطير كنظام
@@ -652,7 +725,10 @@ class QueryEngine:
                         _msgs: List[Message] = []
                         if _sys:
                             _msgs.append(Message(role="system", content=_sys))
-                        _msgs.append(Message(role="user", content=_xf(model_prompt)))
+                        _um = Message(role="user", content=_xf(model_prompt))
+                        if media:
+                            _um.media = media   # الصورة تبقى مرفقة في المحاولة
+                        _msgs.append(_um)
                         try:
                             retry = await self.provider.complete(_msgs, tools=_tools)
                         except Exception:

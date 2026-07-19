@@ -176,3 +176,46 @@ def test_registry_extract_archive_tool(tmp_path):
     res = reg._extract_archive("a.zip", "dest")
     assert "✅" in res
     assert (tmp_path / "dest" / "f.txt").exists()
+
+
+# ── حقن محتوى المرفقات مباشرةً (يعالج «سأقرأ الملف» دون قراءة فعلية) ─────────
+
+def test_extract_readable_paths_separates_media(tmp_path):
+    from core.engine.query_engine import _extract_readable_paths
+    html = tmp_path / "page.html"
+    html.write_text("<h1>hi</h1>")
+    img = tmp_path / "pic.png"
+    img.write_bytes(_PNG_1x1)
+    readable = _extract_readable_paths(f"اقرأ {html} و {img}", str(tmp_path))
+    assert str(html) in readable
+    assert str(img) not in readable  # الصورة ليست ملفاً نصياً
+
+
+def test_materialize_attachments_inlines_html(tmp_path):
+    from core.engine.query_engine import _materialize_attachments
+    html = tmp_path / "page.html"
+    html.write_text("<h1>عنوان</h1><p>محتوى</p>")
+    out = _materialize_attachments([str(html)])
+    assert "page.html" in out and "عنوان" in out and "محتوى" in out
+
+
+def test_materialize_attachments_inlines_zip(tmp_path):
+    from core.engine.query_engine import _materialize_attachments
+    z = tmp_path / "d.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("note.txt", "secret42")
+    out = _materialize_attachments([str(z)])
+    assert "note.txt" in out and "secret42" in out
+
+
+def test_materialize_attachments_respects_total_cap(tmp_path):
+    from core.engine.query_engine import _materialize_attachments
+    big = tmp_path / "big.txt"
+    big.write_text("x" * 200000)
+    out = _materialize_attachments([str(big)], per_cap=1000, total_cap=1500)
+    assert "اقتُطع" in out
+
+
+def test_materialize_attachments_empty():
+    from core.engine.query_engine import _materialize_attachments
+    assert _materialize_attachments([]) == ""
