@@ -158,15 +158,68 @@
       ghConnected = !!(gh && gh.enabled && gh.token);
     } catch (e) {}
     const chip = $("#repoChip");
-    if (ghConnected && ghRepo) {
-      chip.innerHTML = '<span class="ellip">🔗 ' + escapeHtml(ghRepo) + " (متصل)</span>";
+    if (ghConnected) {
+      const label = ghRepo ? ("🔗 " + escapeHtml(ghRepo) + " (متصل)") : "🔗 اختر مستودعاً…";
+      chip.innerHTML = '<span class="ellip">' + label + "</span><span class=\"chip-caret\">▾</span>";
+      chip.classList.add("clickable");
+      chip.title = "اضغط لاختيار مستودع من GitHub";
+      chip.onclick = openRepoPicker;
     } else {
       chip.innerHTML = '<span class="ellip">📁 ' + escapeHtml(localFolder()) + " · محلي</span>";
+      chip.classList.remove("clickable");
+      chip.title = "المستودع المحلي على جهازك";
+      chip.onclick = null;
     }
     $("#buildInput").value = "";
     attached = []; renderAttached();
   }
   function localFolder() { return (ghRepo && ghRepo.split("/").pop()) || "WeaverCode"; }
+
+  // ── مستعرض مستودعات GitHub الحقيقية (بلا وهم) ──
+  let repoCache = [];
+  async function openRepoPicker() {
+    $("#repoModal").classList.add("open");
+    $("#repoSearch").value = "";
+    const box = $("#repoList");
+    box.innerHTML = '<div class="muted small">…جارٍ جلب مستودعاتك</div>';
+    try {
+      const r = await api("/api/github/repos");
+      if (!r.connected) { box.innerHTML = '<div class="muted small">لست متصلاً بـ GitHub بعد.</div>'; return; }
+      if (r.error) { box.innerHTML = '<div class="muted small">⚠️ ' + escapeHtml(r.error) + "</div>"; return; }
+      repoCache = r.repos || [];
+      if (!repoCache.length) { box.innerHTML = '<div class="muted small">لا توجد مستودعات في حسابك.</div>'; return; }
+      renderRepoList(repoCache);
+    } catch (e) {
+      box.innerHTML = '<div class="muted small">⚠️ تعذّر جلب المستودعات.</div>';
+    }
+  }
+  function renderRepoList(list) {
+    const box = $("#repoList");
+    if (!list.length) { box.innerHTML = '<div class="muted small">لا نتائج.</div>'; return; }
+    box.innerHTML = list.map((r, i) =>
+      '<button class="repo-item" data-ri="' + i + '">'
+      + '<div class="repo-top"><span class="repo-name">' + escapeHtml(r.full_name) + "</span>"
+      + (r.private ? '<span class="repo-tag">🔒 خاص</span>' : '<span class="repo-tag pub">عام</span>') + "</div>"
+      + (r.description ? '<div class="repo-desc">' + escapeHtml(r.description) + "</div>" : "")
+      + '<div class="repo-meta">' + (r.language ? "● " + escapeHtml(r.language) + " · " : "")
+      + "الفرع: " + escapeHtml(r.default_branch || "main") + "</div>"
+      + "</button>").join("");
+    $$("#repoList [data-ri]").forEach((b) => b.onclick = () => pickRepo(list[+b.dataset.ri]));
+  }
+  function pickRepo(r) {
+    ghRepo = r.full_name;
+    activeRepo = r;
+    $("#repoModal").classList.remove("open");
+    const chip = $("#repoChip");
+    chip.innerHTML = '<span class="ellip">🔗 ' + escapeHtml(ghRepo) + " (متصل)</span><span class=\"chip-caret\">▾</span>";
+  }
+  $("#repoSearch") && ($("#repoSearch").oninput = (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    renderRepoList(!q ? repoCache : repoCache.filter((r) =>
+      (r.full_name || "").toLowerCase().includes(q) || (r.description || "").toLowerCase().includes(q)));
+  });
+  $$("[data-rpclose]").forEach((b) => b.onclick = () => $("#repoModal").classList.remove("open"));
+  $("#repoModal").addEventListener("click", (e) => { if (e.target.id === "repoModal") $("#repoModal").classList.remove("open"); });
 
   // ── إرفاق الملفات (لشاشتَي الإنشاء والمحادثة) ──
   let chatAttached = [];
@@ -207,9 +260,14 @@
     if (!v && !files.length) return;
     let prompt = v;
     if (files.length) prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" + files.map((a) => "- " + a.path).join("\n");
+    if (activeRepo && activeRepo.full_name) {
+      prompt = "[المستودع الهدف على GitHub: " + activeRepo.full_name +
+        " · فرع: " + (activeRepo.default_branch || "main") +
+        " · " + (activeRepo.clone_url || "") + "]\n\n" + prompt;
+    }
     chatHistory = []; // محادثة جديدة
     currentSessionId = uuid(); // معرّف جديد ثابت لهذه المحادثة
-    await post("/api/task", { prompt: prompt, mode: $("#buildMode").value, history: [], session_id: currentSessionId });
+    await post("/api/task", { prompt: prompt, mode: $("#buildMode").value, history: [], session_id: currentSessionId, repo: (activeRepo && activeRepo.full_name) || "" });
     chatHistory.push({ role: "user", content: prompt });
     $("#chatTitle").textContent = (v || "ملفات مرفقة").slice(0, 30);
     $("#chatMsgs").innerHTML = bubble("user", escapeHtml(v) +
@@ -375,6 +433,7 @@
 
   // ── GitHub ──
   let ghRepo = "";
+  let activeRepo = null; // المستودع المختار من مستعرض GitHub
   async function loadGithub() {
     const r = await api("/api/github");
     ghRepo = (r.remote || "").replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "");

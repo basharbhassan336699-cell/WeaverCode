@@ -177,6 +177,17 @@
   </div>
 </div>
 
+<!-- نافذة اختيار المستودع الحقيقي من GitHub -->
+<div id="repoModal" class="modal">
+  <div class="modal-box">
+    <div class="modal-head"><span>اختر مستودعاً من GitHub</span><button class="ic" data-rpclose>✕</button></div>
+    <div class="modal-hint">مستودعاتك الحقيقية من حسابك — اضغط أيّها لتكملة مشروعك عليه.</div>
+    <input id="repoSearch" type="text" placeholder="🔍 بحث…" autocomplete="off"/>
+    <div id="repoList" class="repo-list"><div class="muted small">…جارٍ التحميل</div></div>
+    <div class="row"><button class="chip-btn" data-rpclose>إغلاق</button></div>
+  </div>
+</div>
+
 <!-- زر محادثة جديدة -->
 <button id="newBtn" class="new-pill">محادثة جديدة <span class="plus">+</span></button>
 
