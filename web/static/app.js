@@ -391,7 +391,9 @@
 
   // ── الارتباطات (Integrations) ──
   let intg = [];
+  let oauthStatus = {};   // أي خدمات تدعم «Allow» الحقيقي (device flow)
   async function loadIntegrations() {
+    try { oauthStatus = await api("/api/oauth/status"); } catch (e) { oauthStatus = {}; }
     const r = await api("/api/integrations");
     intg = r.integrations || [];
     renderIntegrations();
@@ -444,13 +446,52 @@
     $$("#intgList [data-open]").forEach((b) => b.onclick = () => { const it = intg[+b.dataset.open]; if (it && it.url) window.open(it.url, "_blank", "noopener"); });
     $$("#intgList [data-disc]").forEach((b) => b.onclick = () => disconnectIntg(+b.dataset.disc));
   }
-  // تدفّق الاتصال الحقيقي: افتح صفحة إنشاء التوكن/التفويض ثم أكمل بلصق الاعتماد
+  // تدفّق الاتصال: «Allow» حقيقي (device flow) لـ GitHub إن توفّر، وإلا توكن
   function connectIntg(i) {
     const it = intg[i];
     if (!it) return;
-    const authUrl = it.auth_url || it.url;   // صفحة «السماح»/إنشاء التوكن مباشرةً
+    if (it.id === "github" && oauthStatus.github) {
+      return startGithubDeviceFlow(i);   // زر «Allow» الحقيقي بلا توكن
+    }
+    const authUrl = it.auth_url || it.url;
     if (authUrl) window.open(authUrl, "_blank", "noopener");
-    openIntgModal(i, true);                   // الصق الاعتماد لإتمام الربط فعلاً
+    openIntgModal(i, true);
+  }
+
+  // ── تفويض GitHub الحقيقي عبر Device Flow (بلا توكن يدوي) ──
+  let _devPoll = null, _devUri = "https://github.com/login/device", _devCodeVal = "";
+  function stopDevPoll() { if (_devPoll) { clearInterval(_devPoll); _devPoll = null; } }
+  $$("[data-dvclose]").forEach((b) => b.onclick = () => { stopDevPoll(); $("#deviceModal").classList.remove("open"); });
+  $("#deviceModal").addEventListener("click", (e) => { if (e.target.id === "deviceModal") { stopDevPoll(); $("#deviceModal").classList.remove("open"); } });
+  $("#devOpen").onclick = () => window.open(_devUri, "_blank", "noopener");
+  $("#devCopy").onclick = () => { navigator.clipboard.writeText(_devCodeVal).then(() => { $("#devCopy").textContent = "نُسِخ ✓"; setTimeout(() => $("#devCopy").textContent = "نسخ الرمز", 1200); }).catch(() => {}); };
+  async function startGithubDeviceFlow(i) {
+    $("#devTitle").textContent = "تفويض GitHub";
+    $("#devCode").textContent = "…"; $("#devStatus").textContent = "جارٍ البدء…";
+    $("#deviceModal").classList.add("open");
+    let start;
+    try { start = await api("/api/oauth/github/start"); } catch (e) { start = { error: "تعذّر البدء" }; }
+    if (start.error) { $("#devStatus").textContent = "❌ " + start.error; return; }
+    _devUri = start.verification_uri || "https://github.com/login/device";
+    _devCodeVal = start.user_code || "";
+    $("#devCode").textContent = _devCodeVal;
+    $("#devStatus").textContent = "افتح صفحة GitHub، أدخل الرمز، واضغط Authorize…";
+    window.open(_devUri, "_blank", "noopener");   // افتح صفحة التفويض تلقائياً
+    const interval = Math.max(5, start.interval || 5);
+    const deadline = Date.now() + (start.expires_in || 900) * 1000;
+    stopDevPoll();
+    _devPoll = setInterval(async () => {
+      if (Date.now() > deadline) { stopDevPoll(); $("#devStatus").textContent = "⏱️ انتهت المهلة — أعد المحاولة."; return; }
+      let r;
+      try { r = await post("/api/oauth/github/poll", { device_code: start.device_code }); } catch (e) { return; }
+      if (r.connected) {
+        stopDevPoll();
+        $("#devStatus").textContent = "✅ تم الاتصال بنجاح!";
+        setTimeout(() => { $("#deviceModal").classList.remove("open"); loadIntegrations(); }, 900);
+      } else if (r.error) {
+        stopDevPoll(); $("#devStatus").textContent = "❌ " + r.error;
+      }  // pending → تابع الاستطلاع
+    }, interval * 1000);
   }
   // قطع الاتصال: يمسح الاعتماد فيعود صادقاً «غير متصل»
   function disconnectIntg(i) {

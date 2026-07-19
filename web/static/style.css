@@ -242,6 +242,11 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 /* تلميح داخل نافذة إتمام الاتصال */
 .modal-hint { background: #22c55e12; border: 1px solid #22c55e33; color: var(--text);
   border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
+/* رمز التفويض (device flow) */
+.dev-code { font-family: monospace; font-size: 30px; font-weight: 700; letter-spacing: 6px;
+  text-align: center; color: var(--orange); background: var(--card-2); border: 1px solid var(--line);
+  border-radius: 12px; padding: 16px; margin: 6px 0; direction: ltr; }
+.dev-status { text-align: center; color: var(--muted); font-size: 13px; margin: 8px 0 12px; }
 
 /* نافذة منبثقة (Modal) */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 40; display: none;

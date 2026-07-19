@@ -136,3 +136,43 @@ def test_integrations_connected_only_with_token(tmp_path, monkeypatch):
     # ارتباط بلا توكن يبقى غير متصل
     others = [i for i in items2 if i["id"] != "github"]
     assert all(i.get("connected") is False for i in others)
+
+
+# ── تفويض GitHub الحقيقي (Device Flow) ───────────────────────────────────────
+
+def test_oauth_status_reflects_client_id(monkeypatch):
+    from web import server
+    monkeypatch.delenv("GITHUB_OAUTH_CLIENT_ID", raising=False)
+    assert server._api_oauth_status()["github"] is False
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "Ov23test")
+    assert server._api_oauth_status()["github"] is True
+
+
+def test_oauth_start_errors_without_client_id(monkeypatch):
+    from web import server
+    monkeypatch.delenv("GITHUB_OAUTH_CLIENT_ID", raising=False)
+    r = server._api_oauth_github_start()
+    assert "error" in r
+
+
+def test_oauth_poll_saves_token(monkeypatch, tmp_path):
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "integrations.json")
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "cid")
+    # حاكِ رد GitHub بنجاح التفويض
+    monkeypatch.setattr(server, "_http_post_form",
+                        lambda url, data, timeout=15: {"access_token": "gho_test123"})
+    r = server._api_oauth_github_poll("devcode")
+    assert r.get("connected") is True
+    gh = next(i for i in server._load_integrations() if i["id"] == "github")
+    assert gh["token"] == "gho_test123"
+    assert gh["connected"] is True
+
+
+def test_oauth_poll_pending(monkeypatch):
+    from web import server
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "cid")
+    monkeypatch.setattr(server, "_http_post_form",
+                        lambda url, data, timeout=15: {"error": "authorization_pending"})
+    r = server._api_oauth_github_poll("devcode")
+    assert r.get("pending") is True

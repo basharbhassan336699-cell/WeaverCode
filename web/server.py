@@ -22,6 +22,8 @@ import mimetypes
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
+import urllib.request
+import urllib.parse as _urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -314,6 +316,78 @@ def _load_integrations() -> list:
     return result
 
 
+def _http_post_form(url: str, data: dict, timeout: int = 15) -> dict:
+    """POST بصيغة form-urlencoded ويُرجع JSON (لتدفّق OAuth). fallback إلى curl."""
+    body = _urlparse.urlencode(data).encode("utf-8")
+    req = urllib.request.Request(
+        url, body, {"Accept": "application/json",
+                    "Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception:
+        # fallback: curl (متوفّر دائماً على Termux)
+        try:
+            args = ["curl", "-sS", "-X", "POST", url,
+                    "-H", "Accept: application/json",
+                    "--data", _urlparse.urlencode(data), "--max-time", str(timeout)]
+            out = subprocess.run(args, capture_output=True, text=True, timeout=timeout + 5)
+            return json.loads(out.stdout)
+        except Exception as e:
+            return {"error": "network", "error_description": str(e)}
+
+
+def _gh_client_id() -> str:
+    return os.environ.get("GITHUB_OAUTH_CLIENT_ID", "").strip()
+
+
+def _api_oauth_status() -> dict:
+    """يخبر الواجهة أي خدمات تدعم «Allow» الحقيقي (device flow) الآن."""
+    return {"github": bool(_gh_client_id())}
+
+
+def _api_oauth_github_start() -> dict:
+    """يبدأ device flow: يطلب رمز المستخدم ورابط التفويض من GitHub."""
+    cid = _gh_client_id()
+    if not cid:
+        return {"error": "GITHUB_OAUTH_CLIENT_ID غير مضبوط في config/.env"}
+    r = _http_post_form("https://github.com/login/device/code",
+                        {"client_id": cid, "scope": "repo"})
+    if not r.get("device_code"):
+        return {"error": r.get("error_description") or r.get("error") or "فشل بدء التفويض"}
+    return {
+        "user_code": r.get("user_code"),
+        "verification_uri": r.get("verification_uri", "https://github.com/login/device"),
+        "device_code": r.get("device_code"),
+        "interval": int(r.get("interval", 5)),
+        "expires_in": int(r.get("expires_in", 900)),
+    }
+
+
+def _api_oauth_github_poll(device_code: str) -> dict:
+    """يستعلم عن اكتمال التفويض؛ عند النجاح يحفظ التوكن في تكامل github."""
+    cid = _gh_client_id()
+    if not cid or not device_code:
+        return {"error": "بيانات ناقصة"}
+    r = _http_post_form(
+        "https://github.com/login/oauth/access_token",
+        {"client_id": cid, "device_code": device_code,
+         "grant_type": "urn:ietf:params:oauth:grant-type:device_code"})
+    token = r.get("access_token")
+    if token:
+        items = _load_integrations()
+        for it in items:
+            if it.get("id") == "github":
+                it["token"] = token
+                it["enabled"] = True
+        _save_integrations(items)
+        return {"connected": True}
+    err = r.get("error")
+    if err in ("authorization_pending", "slow_down"):
+        return {"pending": True, "slow_down": err == "slow_down"}
+    return {"error": r.get("error_description") or err or "لم يكتمل التفويض"}
+
+
 def _save_integrations(items: list) -> None:
     _INTEGRATIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
     clean = []
@@ -515,6 +589,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_api_sessions(limit, search))
         if path == "/api/session":
             return self._json(_api_session(qs.get("id", [""])[0]))
+        if path == "/api/oauth/status":
+            return self._json(_api_oauth_status())
+        if path == "/api/oauth/github/start":
+            return self._json(_api_oauth_github_start())
         if path == "/api/settings":
             s = {}
             for k, v in _read_env().items():
@@ -570,6 +648,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_save_upload(body))
         if path == "/api/session/delete":
             return self._json(_api_session_delete((body.get("id") or "").strip()))
+        if path == "/api/oauth/github/poll":
+            return self._json(_api_oauth_github_poll((body.get("device_code") or "").strip()))
         return self._json({"error": "not found"}, 404)
 
     # -- SSE (البثّ الحيّ) --

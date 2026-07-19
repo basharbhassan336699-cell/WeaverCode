@@ -146,6 +146,21 @@
   </div>
 </div>
 
+<!-- نافذة تفويض «Allow» الحقيقي (Device Flow) -->
+<div id="deviceModal" class="modal">
+  <div class="modal-box">
+    <div class="modal-head"><span id="devTitle">تفويض الاتصال</span><button class="ic" data-dvclose>✕</button></div>
+    <div class="modal-hint">اضغط «فتح صفحة GitHub» ثم أدخل الرمز أدناه واضغط <b>Authorize</b>. سيتصل النظام تلقائياً — بلا توكن.</div>
+    <div class="dev-code" id="devCode">————</div>
+    <div class="dev-status" id="devStatus">بانتظار التفويض…</div>
+    <div class="row">
+      <button id="devOpen" class="accept">فتح صفحة GitHub</button>
+      <button id="devCopy" class="chip-btn">نسخ الرمز</button>
+      <button class="chip-btn" data-dvclose>إلغاء</button>
+    </div>
+  </div>
+</div>
+
 <!-- زر محادثة جديدة -->
 <button id="newBtn" class="new-pill">محادثة جديدة <span class="plus">+</span></button>
 
