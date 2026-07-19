@@ -55,6 +55,40 @@ def test_discover_models_provider_unsupported(tmp_path, monkeypatch):
     assert "error" in r and r["models"] == []
 
 
+def test_discover_models_universal_anthropic_xapikey(tmp_path, monkeypatch):
+    """Anthropic الرسمي: يعمل عبر x-api-key حتى لو فشل Bearer (اكتشاف كوني)."""
+    server = _fresh_server(
+        tmp_path, monkeypatch,
+        "WEAVER_API_KEY=sk-ant\nWEAVER_BASE_URL=https://api.anthropic.com\n")
+
+    def http(url, headers=None, timeout=15):
+        if "x-api-key" in (headers or {}) and url.endswith("/v1/models"):
+            return {"data": [{"id": "claude-opus-4-8"}]}, None
+        return None, "HTTP 401"
+
+    monkeypatch.setattr(server, "_http_get_json", http)
+    r = server._discover_models()
+    assert r["models"] == ["claude-opus-4-8"]
+    assert r["auth"] == "x-api-key"
+
+
+def test_discover_models_universal_bearer_openrouter(tmp_path, monkeypatch):
+    server = _fresh_server(
+        tmp_path, monkeypatch,
+        "WEAVER_API_KEY=sk-or\nWEAVER_BASE_URL=https://openrouter.ai/api/v1\n")
+
+    def http(url, headers=None, timeout=15):
+        if ("Bearer" in (headers or {}).get("Authorization", "")
+                and url == "https://openrouter.ai/api/v1/models"):
+            return {"data": [{"id": "openai/gpt-4o"}]}, None
+        return None, "HTTP 404"
+
+    monkeypatch.setattr(server, "_http_get_json", http)
+    r = server._discover_models()
+    assert r["models"] == ["openai/gpt-4o"]
+    assert r["source"] == "https://openrouter.ai/api/v1/models"
+
+
 # ── مزامنة الإعدادات ────────────────────────────────────────────────────────
 
 def test_settings_save_allowlist_and_env(tmp_path, monkeypatch):

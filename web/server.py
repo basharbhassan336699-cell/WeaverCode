@@ -775,38 +775,53 @@ def _discover_models() -> dict:
     base = (env.get("WEAVER_BASE_URL") or os.environ.get("WEAVER_BASE_URL", "")).strip().rstrip("/")
     if not key or not base:
         return {"error": "لم يُحدَّد مفتاح أو رابط المزود", "models": []}
-    headers = {"Authorization": f"Bearer {key}",
-               "Content-Type": "application/json",
-               "User-Agent": "WeaverCode"}
-    # جرّب /models ثم /v1/models (بعض الروابط تنتهي بـ /v1 وبعضها لا)
+
+    # مسارات مرشّحة: نطبّع الجذر (نزيل /v1 الأخيرة) ثم نجرّب /v1/models و/models.
+    root = base[:-3].rstrip("/") if base.lower().endswith("/v1") else base
+    urls = []
+    for u in (root + "/v1/models", root + "/models", base + "/models"):
+        if u not in urls:
+            urls.append(u)
+
+    # صيغتا المصادقة: Bearer (OpenAI-متوافق: OpenRouter/DeepSeek/Groq/Together/
+    # Ollama/aerolink…) وx-api-key (Anthropic الرسمي). نجرّب الأنسب أولاً حسب
+    # المضيف ثم الأخرى — فيعمل الاكتشاف مع أي منصة مهما كانت.
+    _ct = {"Content-Type": "application/json", "User-Agent": "WeaverCode"}
+    bearer = dict(_ct, Authorization=f"Bearer {key}")
+    anthropic = dict(_ct, **{"x-api-key": key, "anthropic-version": "2023-06-01"})
+    header_sets = ([anthropic, bearer] if "anthropic" in base.lower()
+                   else [bearer, anthropic])
+
     tried = []
     last_err = ""
-    for suffix in ("/models", "/v1/models"):
-        url = base + suffix
-        tried.append(url)
-        data, err = _http_get_json(url, headers, timeout=15)
-        if err or not isinstance(data, (dict, list)):
-            last_err = err or "استجابة غير متوقعة"
-            continue
-        items = data.get("data", data.get("models", [])) if isinstance(data, dict) else data
-        ids = []
-        for m in items or []:
-            if isinstance(m, str):
-                mid = m
-            elif isinstance(m, dict):
-                mid = m.get("id") or m.get("name") or m.get("model") or ""
-            else:
-                mid = ""
-            if mid:
-                ids.append(str(mid))
-        if ids:
-            return {"models": sorted(set(ids)), "source": url, "count": len(set(ids))}
-        # ربما رسالة خطأ في jsom
-        if isinstance(data, dict) and data.get("error"):
-            e = data["error"]
-            last_err = e.get("message") if isinstance(e, dict) else str(e)
+    for url in urls:
+        for headers in header_sets:
+            tried.append(url)
+            data, err = _http_get_json(url, headers, timeout=15)
+            if err or not isinstance(data, (dict, list)):
+                last_err = err or "استجابة غير متوقعة"
+                continue
+            items = (data.get("data", data.get("models", []))
+                     if isinstance(data, dict) else data)
+            ids = []
+            for m in items or []:
+                if isinstance(m, str):
+                    mid = m
+                elif isinstance(m, dict):
+                    mid = m.get("id") or m.get("name") or m.get("model") or ""
+                else:
+                    mid = ""
+                if mid:
+                    ids.append(str(mid))
+            if ids:
+                auth = "x-api-key" if "x-api-key" in headers else "Bearer"
+                return {"models": sorted(set(ids)), "source": url,
+                        "auth": auth, "count": len(set(ids))}
+            if isinstance(data, dict) and data.get("error"):
+                e = data["error"]
+                last_err = e.get("message") if isinstance(e, dict) else str(e)
     return {"error": last_err or "لا يدعم المزوّد /models أو المفتاح خاطئ",
-            "models": [], "tried": tried}
+            "models": [], "tried": sorted(set(tried))}
 
 
 def _api_settings_save(body: dict) -> dict:
