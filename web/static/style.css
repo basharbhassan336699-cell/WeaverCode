@@ -98,7 +98,10 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 .repo-chip { display: inline-flex; align-items: center; gap: 8px; background: var(--card);
   border: 1px solid var(--line); color: var(--muted); border-radius: 14px; padding: 8px 14px;
   font-size: 13px; margin-bottom: 10px; max-width: 100%; overflow: hidden; }
-.repo-chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: ltr; }
+.repo-chip span.ellip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: ltr; }
+.repo-chip.clickable { cursor: pointer; border-color: var(--orange); color: var(--text); }
+.repo-chip.clickable:active { transform: scale(.98); }
+.repo-chip .chip-caret { color: var(--orange); font-size: 12px; margin-inline-start: 2px; }
 .build-box { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 14px 16px; }
 .build-box textarea { width: 100%; background: none; border: none; color: var(--text);
   font-size: 16px; resize: none; font-family: inherit; outline: none; }
@@ -247,6 +250,23 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
   text-align: center; color: var(--orange); background: var(--card-2); border: 1px solid var(--line);
   border-radius: 12px; padding: 16px; margin: 6px 0; direction: ltr; }
 .dev-status { text-align: center; color: var(--muted); font-size: 13px; margin: 8px 0 12px; }
+
+/* مستعرض مستودعات GitHub */
+#repoSearch { width: 100%; background: var(--card-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 10px; padding: 10px 12px; font-size: 14px; font-family: inherit; outline: none; margin-bottom: 10px; }
+#repoSearch::placeholder { color: var(--muted-2); }
+.repo-list { max-height: 52vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.repo-item { text-align: right; background: var(--card-2); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 12px; color: var(--text); cursor: pointer; font-family: inherit; width: 100%; }
+.repo-item:hover { border-color: var(--orange); }
+.repo-item:active { transform: scale(.99); }
+.repo-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.repo-name { font-weight: 600; font-size: 14px; direction: ltr; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-tag { font-size: 11px; color: var(--muted); background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; padding: 2px 7px; white-space: nowrap; }
+.repo-tag.pub { color: #22c55e; }
+.repo-desc { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.5; }
+.repo-meta { color: var(--muted-2); font-size: 11px; margin-top: 5px; direction: ltr; text-align: right; }
 
 /* نافذة منبثقة (Modal) */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 40; display: none;

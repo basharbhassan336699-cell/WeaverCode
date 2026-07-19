@@ -253,6 +253,64 @@ def _api_github() -> dict:
             "branch": _git("branch", "--show-current")}
 
 
+def _github_token() -> str:
+    """التوكن المتصل لـ GitHub (من الارتباطات)."""
+    try:
+        for it in _load_integrations():
+            if it.get("id") == "github":
+                return str(it.get("token", "")).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _http_get_json(url: str, headers=None, timeout: int = 20):
+    """GET يُرجع JSON. يجرّب urllib ثم curl (Termux). يُرجع (data, error)."""
+    req = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8")), None
+    except Exception:
+        try:
+            args = ["curl", "-sS", url, "--max-time", str(timeout)]
+            for k, v in (headers or {}).items():
+                args += ["-H", f"{k}: {v}"]
+            out = subprocess.run(args, capture_output=True, text=True,
+                                 timeout=timeout + 5)
+            return json.loads(out.stdout), None
+        except Exception as e:
+            return None, str(e)
+
+
+def _api_github_repos() -> dict:
+    """قائمة مستودعات المستخدم الحقيقية من GitHub API (بلا وهم)."""
+    token = _github_token()
+    if not token:
+        return {"connected": False, "repos": []}
+    data, err = _http_get_json(
+        "https://api.github.com/user/repos"
+        "?per_page=100&sort=updated"
+        "&affiliation=owner,collaborator,organization_member",
+        {"Authorization": f"Bearer {token}",
+         "Accept": "application/vnd.github+json",
+         "User-Agent": "WeaverCode"})
+    if err or not isinstance(data, list):
+        detail = err or (data.get("message") if isinstance(data, dict) else "")
+        return {"connected": True, "repos": [], "error": detail or "تعذّر جلب المستودعات"}
+    repos = [{
+        "full_name": r.get("full_name"),
+        "name": r.get("name"),
+        "private": bool(r.get("private", False)),
+        "description": r.get("description") or "",
+        "url": r.get("html_url"),
+        "clone_url": r.get("clone_url"),
+        "default_branch": r.get("default_branch", "main"),
+        "updated_at": r.get("updated_at"),
+        "language": r.get("language") or "",
+    } for r in data if r.get("full_name")]
+    return {"connected": True, "repos": repos, "count": len(repos)}
+
+
 # ── الارتباطات (Integrations) ────────────────────────────────────────────────
 
 _INTEGRATIONS_FILE = WEAVER_ROOT / "config" / "integrations.json"
@@ -852,6 +910,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"settings": s})
         if path == "/api/github":
             return self._json(_api_github())
+        if path == "/api/github/repos":
+            return self._json(_api_github_repos())
         if path == "/api/integrations":
             return self._json({"integrations": _load_integrations()})
         if path == "/api/files/download-zip":

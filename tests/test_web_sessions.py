@@ -138,6 +138,56 @@ def test_integrations_connected_only_with_token(tmp_path, monkeypatch):
     assert all(i.get("connected") is False for i in others)
 
 
+# ── مستعرض مستودعات GitHub الحقيقية ─────────────────────────────────────────
+
+def test_github_repos_requires_connection(tmp_path, monkeypatch):
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "integrations.json")
+    # بلا توكن → غير متصل، قائمة فارغة (بلا وهم)
+    r = server._api_github_repos()
+    assert r["connected"] is False
+    assert r["repos"] == []
+
+
+def test_github_repos_returns_real_list(tmp_path, monkeypatch):
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "integrations.json")
+    server._save_integrations([{"id": "github", "name": "GitHub",
+                                "url": "https://github.com",
+                                "token": "ghp_real", "enabled": True, "builtin": True}])
+    fake = [
+        {"full_name": "bashar/proj", "name": "proj", "private": True,
+         "description": "d", "html_url": "https://github.com/bashar/proj",
+         "clone_url": "https://github.com/bashar/proj.git",
+         "default_branch": "main", "updated_at": "2026-01-01", "language": "Python"},
+        {"name": "no_full_name"},  # يُتجاهَل: بلا full_name
+    ]
+    monkeypatch.setattr(server, "_http_get_json", lambda *a, **k: (fake, None))
+    r = server._api_github_repos()
+    assert r["connected"] is True
+    assert r["count"] == 1
+    repo = r["repos"][0]
+    assert repo["full_name"] == "bashar/proj"
+    assert repo["private"] is True
+    assert repo["clone_url"] == "https://github.com/bashar/proj.git"
+    assert repo["default_branch"] == "main"
+
+
+def test_github_repos_surfaces_api_error(tmp_path, monkeypatch):
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "integrations.json")
+    server._save_integrations([{"id": "github", "name": "GitHub",
+                                "url": "https://github.com",
+                                "token": "bad", "enabled": True, "builtin": True}])
+    # GitHub يعيد رسالة خطأ (dict) بدل قائمة → تُعرض بصدق
+    monkeypatch.setattr(server, "_http_get_json",
+                        lambda *a, **k: ({"message": "Bad credentials"}, None))
+    r = server._api_github_repos()
+    assert r["connected"] is True
+    assert r["repos"] == []
+    assert "Bad credentials" in r["error"]
+
+
 # ── تفويض GitHub الحقيقي (Device Flow) ───────────────────────────────────────
 
 def test_oauth_status_reflects_client_id(monkeypatch, tmp_path):
