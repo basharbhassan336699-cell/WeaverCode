@@ -337,12 +337,38 @@ def _http_post_form(url: str, data: dict, timeout: int = 15) -> dict:
             return {"error": "network", "error_description": str(e)}
 
 
+# إعداد OAuth الدائم (يُدار من الواجهة، محفوظ محلياً، غير مرفوع لـ git)
+_OAUTH_CONFIG_FILE = WEAVER_ROOT / "config" / "oauth.json"
+
+
+def _oauth_config() -> dict:
+    if _OAUTH_CONFIG_FILE.exists():
+        try:
+            return json.loads(_OAUTH_CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _oauth_config_save(cfg: dict) -> None:
+    _OAUTH_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _OAUTH_CONFIG_FILE.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _gh_client_id() -> str:
-    return os.environ.get("GITHUB_OAUTH_CLIENT_ID", "").strip()
+    # الأولوية للبيئة (.env) ثم للإعداد المحفوظ من الواجهة
+    v = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "").strip()
+    if v:
+        return v
+    return str(_oauth_config().get("github", {}).get("client_id", "")).strip()
 
 
 def _gh_client_secret() -> str:
-    return os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "").strip()
+    v = os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "").strip()
+    if v:
+        return v
+    return str(_oauth_config().get("github", {}).get("client_secret", "")).strip()
 
 
 def _gh_redirect_uri() -> str:
@@ -360,6 +386,33 @@ def _api_oauth_status() -> dict:
     github          = device flow (client_id فقط)"""
     cid, sec = _gh_client_id(), _gh_client_secret()
     return {"github": bool(cid), "github_oneclick": bool(cid and sec)}
+
+
+def _api_oauth_config_get() -> dict:
+    """يُرجع إعداد OAuth للعرض (بلا كشف السرّ)."""
+    gh = _oauth_config().get("github", {})
+    env_cid = bool(os.environ.get("GITHUB_OAUTH_CLIENT_ID", "").strip())
+    env_sec = bool(os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "").strip())
+    return {"github": {
+        "client_id": _gh_client_id(),
+        "has_secret": bool(_gh_client_secret()),
+        "from_env": env_cid or env_sec,   # مضبوط عبر .env (لا يُعدَّل من الواجهة)
+    }}
+
+
+def _api_oauth_config_save(body: dict) -> dict:
+    """يحفظ Client ID/Secret من الواجهة في config/oauth.json (دائم، محلي)."""
+    cid = str(body.get("client_id", "")).strip()
+    sec = str(body.get("client_secret", "")).strip()
+    cfg = _oauth_config()
+    gh = cfg.setdefault("github", {})
+    if cid:
+        gh["client_id"] = cid
+    # لا نمسح السرّ إن تُرك فارغاً (يبقى المحفوظ)؛ نحدّثه فقط إن أُدخل
+    if sec:
+        gh["client_secret"] = sec
+    _oauth_config_save(cfg)
+    return {"saved": True, **_api_oauth_status()}
 
 
 def _api_oauth_github_authorize() -> dict:
@@ -648,6 +701,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_api_session(qs.get("id", [""])[0]))
         if path == "/api/oauth/status":
             return self._json(_api_oauth_status())
+        if path == "/api/oauth/config":
+            return self._json(_api_oauth_config_get())
         if path == "/api/oauth/github/authorize":
             return self._json(_api_oauth_github_authorize())
         if path == "/api/oauth/github/start":
@@ -737,6 +792,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_api_session_delete((body.get("id") or "").strip()))
         if path == "/api/oauth/github/poll":
             return self._json(_api_oauth_github_poll((body.get("device_code") or "").strip()))
+        if path == "/api/oauth/config":
+            return self._json(_api_oauth_config_save(body))
         return self._json({"error": "not found"}, 404)
 
     # -- SSE (البثّ الحيّ) --

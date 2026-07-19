@@ -221,3 +221,40 @@ def test_oauth_exchange_surfaces_github_error(monkeypatch, tmp_path):
                                                        "error_description": "The code is incorrect."})
     ok, detail = server._oauth_github_exchange("badcode")
     assert ok is False and "incorrect" in detail.lower()
+
+
+# ── إعداد OAuth الدائم من الواجهة (بدل تعديل .env يدوياً) ─────────────────────
+
+def test_oauth_config_persists_and_no_leak(monkeypatch, tmp_path):
+    from web import server
+    monkeypatch.setattr(server, "_OAUTH_CONFIG_FILE", tmp_path / "oauth.json")
+    monkeypatch.delenv("GITHUB_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GITHUB_OAUTH_CLIENT_SECRET", raising=False)
+    assert server._api_oauth_status()["github_oneclick"] is False
+    server._api_oauth_config_save({"client_id": "Ov23x", "client_secret": "sekret"})
+    assert server._api_oauth_status()["github_oneclick"] is True
+    assert server._gh_client_id() == "Ov23x"
+    assert server._gh_client_secret() == "sekret"
+    got = server._api_oauth_config_get()["github"]
+    assert got["client_id"] == "Ov23x"
+    assert got["has_secret"] is True
+    assert "client_secret" not in got   # لا يُكشف السرّ أبداً
+
+
+def test_oauth_config_keeps_secret_when_blank(monkeypatch, tmp_path):
+    from web import server
+    monkeypatch.setattr(server, "_OAUTH_CONFIG_FILE", tmp_path / "oauth.json")
+    monkeypatch.delenv("GITHUB_OAUTH_CLIENT_SECRET", raising=False)
+    server._api_oauth_config_save({"client_id": "id1", "client_secret": "s1"})
+    # حفظ لاحق بلا سرّ لا يمسح القديم
+    server._api_oauth_config_save({"client_id": "id2", "client_secret": ""})
+    assert server._gh_client_id() == "id2"
+    assert server._gh_client_secret() == "s1"
+
+
+def test_oauth_env_overrides_file(monkeypatch, tmp_path):
+    from web import server
+    monkeypatch.setattr(server, "_OAUTH_CONFIG_FILE", tmp_path / "oauth.json")
+    server._api_oauth_config_save({"client_id": "fileid", "client_secret": "filesec"})
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "envid")
+    assert server._gh_client_id() == "envid"   # .env له الأولوية

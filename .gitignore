@@ -32,3 +32,4 @@ config/integrations.json
 config/mcp.json
 config/providers.json
 ~/.weaver/
+config/oauth.json

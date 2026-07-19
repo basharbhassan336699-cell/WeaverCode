@@ -446,28 +446,54 @@
     $$("#intgList [data-open]").forEach((b) => b.onclick = () => { const it = intg[+b.dataset.open]; if (it && it.url) window.open(it.url, "_blank", "noopener"); });
     $$("#intgList [data-disc]").forEach((b) => b.onclick = () => disconnectIntg(+b.dataset.disc));
   }
-  // تدفّق الاتصال: «Allow» بضغطة واحدة → device flow → توكن
+  // تدفّق الاتصال: «Allow» بضغطة واحدة → إعداد أول مرة → device flow → توكن
   async function connectIntg(i) {
     const it = intg[i];
     if (!it) return;
-    if (it.id === "github" && oauthStatus.github_oneclick) {
-      // زر «Authorize» واحد بلا رموز: افتح صفحة السماح، والباقي تلقائي
-      let r;
-      try { r = await api("/api/oauth/github/authorize"); } catch (e) { r = {}; }
-      if (r.authorize_url) {
-        // افتح صفحة «Authorize» في تبويب جديد؛ تبقى اللوحة تستطلع الحالة
-        window.open(r.authorize_url, "_blank");
-        pollConnectedAfterReturn("github");
-        return;
-      }
-    }
-    if (it.id === "github" && oauthStatus.github) {
-      return startGithubDeviceFlow(i);   // بديل: device flow (بلا secret)
+    if (it.id === "github") {
+      if (oauthStatus.github_oneclick) return githubAuthorize();
+      // لم يُضبط بعد → افتح نافذة الإعداد (مرة واحدة) بدل تعديل .env يدوياً
+      return openGithubSetup();
     }
     const authUrl = it.auth_url || it.url;
     if (authUrl) window.open(authUrl, "_blank", "noopener");
     openIntgModal(i, true);
   }
+  async function githubAuthorize() {
+    let r;
+    try { r = await api("/api/oauth/github/authorize"); } catch (e) { r = {}; }
+    if (r.authorize_url) {
+      window.open(r.authorize_url, "_blank");   // صفحة «Authorize» — ضغطة واحدة
+      pollConnectedAfterReturn("github");
+    } else if (r.error) {
+      openGithubSetup(r.error);
+    }
+  }
+  // ── إعداد GitHub OAuth من الواجهة (بدل تعديل .env) ──
+  async function openGithubSetup(errMsg) {
+    let cfg = {};
+    try { cfg = (await api("/api/oauth/config")).github || {}; } catch (e) {}
+    $("#ghCid").value = cfg.client_id || "";
+    $("#ghSec").value = "";
+    $("#ghSec").placeholder = cfg.has_secret ? "محفوظ — اتركه فارغاً للإبقاء عليه" : "يُحفظ محلياً — لا يُرفع";
+    $("#ghSetupModal").classList.add("open");
+  }
+  $$("[data-ghclose]").forEach((b) => b.onclick = () => $("#ghSetupModal").classList.remove("open"));
+  $("#ghSetupModal").addEventListener("click", (e) => { if (e.target.id === "ghSetupModal") $("#ghSetupModal").classList.remove("open"); });
+  $("#ghSave").onclick = async () => {
+    const cid = $("#ghCid").value.trim(), sec = $("#ghSec").value.trim();
+    if (!cid) { alert("أدخل Client ID"); return; }
+    $("#ghSave").textContent = "…جارٍ الحفظ";
+    let r;
+    try { r = await post("/api/oauth/config", { client_id: cid, client_secret: sec }); } catch (e) { r = {}; }
+    $("#ghSave").textContent = "حفظ واتصال";
+    // أعد تحميل الحالة
+    try { oauthStatus = await api("/api/oauth/status"); } catch (e) {}
+    $("#ghSetupModal").classList.remove("open");
+    if (oauthStatus.github_oneclick) { githubAuthorize(); }
+    else if (oauthStatus.github) { const gi = intg.findIndex((x) => x.id === "github"); startGithubDeviceFlow(gi); }
+    else alert("حُفظ Client ID. للاتصال بضغطة واحدة أضِف Client Secret أيضاً.");
+  };
   // بعد العودة من «Authorize» (callback حفظ التوكن) نُحدّث البطاقة
   function pollConnectedAfterReturn(id) {
     let tries = 0;

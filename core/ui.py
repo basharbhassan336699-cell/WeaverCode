@@ -51,7 +51,7 @@ GRAY   = GRY
 RESET  = RST
 BOLD   = BLD
 
-WEAVER_VERSION = "v3.6.1"
+WEAVER_VERSION = "v3.7.0"
 
 # قائمة كل رموز الـ ANSI لإزالتها عند حساب العرض الحقيقي
 _ANSI = [OR, OR2, DRK, WHT, GRY, GR2, GRN, RED, CYN, RST, BLD, DIM,

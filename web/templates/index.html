@@ -161,6 +161,22 @@
   </div>
 </div>
 
+<!-- نافذة إعداد GitHub OAuth (مرة واحدة، دائمة) -->
+<div id="ghSetupModal" class="modal">
+  <div class="modal-box">
+    <div class="modal-head"><span>إعداد اتصال GitHub (مرة واحدة)</span><button class="ic" data-ghclose>✕</button></div>
+    <div class="modal-hint">
+      لتفعيل زر «Authorize» بضغطة واحدة، أدخل بيانات تطبيق OAuth الخاص بك (يُحفظ على جهازك فقط).<br>
+      1) افتح <a id="ghDevLink" href="https://github.com/settings/developers" target="_blank" rel="noopener">github.com/settings/developers</a> → New OAuth App.<br>
+      2) Callback URL: <code>http://localhost:8080/oauth/callback</code> — وفعّل Device Flow (اختياري).<br>
+      3) انسخ Client ID، وولّد Client Secret، والصقهما هنا.
+    </div>
+    <label class="field"><span>Client ID</span><input id="ghCid" type="text" placeholder="Ov23li…" inputmode="text"/></label>
+    <label class="field"><span>Client Secret</span><input id="ghSec" type="text" placeholder="يُحفظ محلياً — لا يُرفع"/></label>
+    <div class="row"><button id="ghSave" class="accept">حفظ واتصال</button><button class="chip-btn" data-ghclose>إلغاء</button></div>
+  </div>
+</div>
+
 <!-- زر محادثة جديدة -->
 <button id="newBtn" class="new-pill">محادثة جديدة <span class="plus">+</span></button>
 
