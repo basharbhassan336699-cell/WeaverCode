@@ -205,6 +205,19 @@ def test_oauth_exchange_saves_token(monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_OAUTH_CLIENT_SECRET", "sec")
     monkeypatch.setattr(server, "_http_post_form",
                         lambda url, data, timeout=15: {"access_token": "gho_x"})
-    assert server._oauth_github_exchange("code123") is True
+    ok, detail = server._oauth_github_exchange("code123")
+    assert ok is True
     gh = next(i for i in server._load_integrations() if i["id"] == "github")
     assert gh["token"] == "gho_x" and gh["connected"] is True
+
+
+def test_oauth_exchange_surfaces_github_error(monkeypatch, tmp_path):
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "i2.json")
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_SECRET", "sec")
+    monkeypatch.setattr(server, "_http_post_form",
+                        lambda url, data, timeout=15: {"error": "bad_verification_code",
+                                                       "error_description": "The code is incorrect."})
+    ok, detail = server._oauth_github_exchange("badcode")
+    assert ok is False and "incorrect" in detail.lower()

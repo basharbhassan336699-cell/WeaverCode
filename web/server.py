@@ -378,23 +378,29 @@ def _api_oauth_github_authorize() -> dict:
     return {"authorize_url": url}
 
 
-def _oauth_github_exchange(code: str) -> bool:
-    """يبدّل رمز التفويض بتوكن ويحفظه في تكامل github. يُرجع True عند النجاح."""
+def _oauth_github_exchange(code: str):
+    """يبدّل رمز التفويض بتوكن ويحفظه. يُرجع (نجاح, تفصيل الخطأ)."""
     if not code:
-        return False
+        return False, "لم يصل رمز من GitHub."
+    if not _gh_client_id():
+        return False, "GITHUB_OAUTH_CLIENT_ID غير مضبوط في config/.env."
+    if not _gh_client_secret():
+        return False, "GITHUB_OAUTH_CLIENT_SECRET غير مضبوط — أضفه لـ config/.env وأعد تشغيل الخادم."
     r = _http_post_form("https://github.com/login/oauth/access_token", {
         "client_id": _gh_client_id(), "client_secret": _gh_client_secret(),
         "code": code, "redirect_uri": _gh_redirect_uri()})
     token = r.get("access_token")
-    if not token:
-        return False
-    items = _load_integrations()
-    for it in items:
-        if it.get("id") == "github":
-            it["token"] = token
-            it["enabled"] = True
-    _save_integrations(items)
-    return True
+    if token:
+        items = _load_integrations()
+        for it in items:
+            if it.get("id") == "github":
+                it["token"] = token
+                it["enabled"] = True
+        _save_integrations(items)
+        return True, ""
+    # رسالة GitHub الفعلية (bad_verification_code / incorrect_client_credentials / …)
+    detail = r.get("error_description") or r.get("error") or "لم يُرجع GitHub توكناً."
+    return False, detail
 
 
 def _api_oauth_github_start() -> dict:
@@ -649,12 +655,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/oauth/callback":
             code = qs.get("code", [""])[0]
             state = qs.get("state", [""])[0]
-            ok = False
-            if state in _oauth_states:
-                _oauth_states.discard(state)
-                ok = _oauth_github_exchange(code)
-            elif code:  # حالة غياب state (نسمح لكن نبدّل)
-                ok = _oauth_github_exchange(code)
+            gh_err = qs.get("error_description", [qs.get("error", [""])[0]])[0]
+            _oauth_states.discard(state)
+            if gh_err:
+                ok, detail = False, gh_err
+            else:
+                ok, detail = _oauth_github_exchange(code)
             if ok:
                 return self._html(
                     "<div style='font-family:sans-serif;text-align:center;"
@@ -664,12 +670,16 @@ class Handler(BaseHTTPRequestHandler):
                     "<p>ارجع إلى تبويب WeaverCode — ستظهر «متصل» تلقائياً.</p>"
                     "<script>setTimeout(function(){window.close()},1200)</script>"
                     "</div>")
+            import html as _htmlmod
             return self._html(
                 "<div style='font-family:sans-serif;text-align:center;padding:60px 20px;"
                 "color:#e6e6e6;background:#0F0F19;min-height:100vh'>"
                 "<div style='font-size:56px'>❌</div>"
                 "<h2>تعذّر إتمام الاتصال</h2>"
-                "<p>تأكّد من GITHUB_OAUTH_CLIENT_SECRET في config/.env وأعد المحاولة.</p></div>")
+                "<p style='color:#f87171;direction:ltr'>" + _htmlmod.escape(str(detail)) + "</p>"
+                "<p style='color:#928a80;font-size:13px'>الأرجح: أضف "
+                "GITHUB_OAUTH_CLIENT_SECRET إلى config/.env ثم <b>أعد تشغيل الخادم</b> "
+                "(bash scripts/weaver-stop.sh &amp;&amp; python3 weaver.py --background).</p></div>")
         if path == "/api/settings":
             s = {}
             for k, v in _read_env().items():
