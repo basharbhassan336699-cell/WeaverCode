@@ -81,6 +81,47 @@ def test_reselect_updates_existing(tmp_path, monkeypatch):
     assert r2["action"] == "تحديث"
 
 
+def test_files_follow_active_workspace(tmp_path, monkeypatch):
+    """الملفات المعروضة/القابلة للتنزيل = مساحة العمل النشِطة (لا OUTPUTS الثابت)."""
+    server = _server(tmp_path, monkeypatch)
+    clone = tmp_path / "clone"
+    (clone / ".git").mkdir(parents=True)
+    (clone / ".git" / "config").write_text("secret")
+    (clone / "src").mkdir()
+    (clone / "src" / "main.py").write_text("print(1)")
+    (clone / "report.md").write_text("# r")
+    (tmp_path / "config" / "workspace.json").write_text(
+        json.dumps({"repo": "me/p", "work_dir": str(clone), "branch": "main"}))
+    r = server._api_files()
+    paths = sorted(f["path"] for f in r["files"])
+    assert paths == ["report.md", "src/main.py"]  # .git مُتخطّى
+    assert r["repo"] == "me/p"
+
+
+def test_download_path_within_workspace(tmp_path, monkeypatch):
+    server = _server(tmp_path, monkeypatch)
+    clone = tmp_path / "clone"
+    (clone / "src").mkdir(parents=True)
+    (clone / "src" / "a.py").write_text("x")
+    (tmp_path / "config" / "workspace.json").write_text(
+        json.dumps({"repo": "me/p", "work_dir": str(clone), "branch": "main"}))
+    ok = server._safe_output_path("src/a.py")
+    assert ok is not None and os.path.isfile(ok)
+    assert server._safe_output_path("../../etc/passwd") is None
+
+
+def test_files_fallback_to_outputs_without_workspace(tmp_path, monkeypatch):
+    server = _server(tmp_path, monkeypatch)
+    # لا مساحة عمل → يعود لمجلد المخرجات
+    out = tmp_path / "outs"
+    out.mkdir()
+    monkeypatch.setattr(server, "OUTPUTS", out)
+    (out / "deliver.txt").write_text("done")
+    r = server._api_files()
+    assert any(f["name"] == "deliver.txt" for f in r["files"])
+    assert r["repo"] == ""
+
+
 def test_daemon_uses_workspace_as_workdir(tmp_path, monkeypatch):
     import background.daemon as daemon
     (tmp_path / "config").mkdir()

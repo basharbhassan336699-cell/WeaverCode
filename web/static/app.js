@@ -453,7 +453,8 @@
   // ── الملفات ──
   async function loadFiles() {
     const r = await api("/api/files");
-    $("#outputsDir").textContent = "المجلد: " + (r.outputs_dir || "");
+    $("#outputsDir").textContent = (r.repo ? "📦 مستودع: " + r.repo + " · " : "") +
+      (r.count || 0) + " ملف · " + (r.outputs_dir || "");
     const box = $("#fileList");
     const files = r.files || [];
     box.innerHTML = files.length ? "" : '<div class="empty-note">لا ملفات بعد.</div>';

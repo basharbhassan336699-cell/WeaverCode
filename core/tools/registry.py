@@ -979,7 +979,8 @@ class ToolRegistry:
             sp = str(p)
             if sp not in self._created_files:
                 self._created_files.append(sp)
-            return f"✅ تم إنشاء ملف ثنائي {p} ({len(raw)} بايت)"
+            return (f"✅ تم إنشاء ملف ثنائي {p} ({len(raw)} بايت) — "
+                    f"متاح في شاشة «الملفات» للتنزيل.")
         except Exception as e:
             return f"خطأ في كتابة الملف الثنائي: {e}"
 
@@ -1011,7 +1012,8 @@ class ToolRegistry:
             sp = str(p)
             if sp not in self._created_files:
                 self._created_files.append(sp)
-            return f"✅ تم الكتابة إلى {p} ({len(content)} حرف)"
+            return (f"✅ تم إنشاء/تحديث {p} ({len(content)} حرف) — "
+                    f"متاح في شاشة «الملفات» للتنزيل.")
         except Exception as e:
             return f"خطأ في الكتابة: {e}"
 

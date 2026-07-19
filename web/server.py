@@ -161,15 +161,43 @@ def _api_status() -> dict:
     }
 
 
+_FILES_SKIP = {".git", "node_modules", "__pycache__", ".venv", "venv",
+               ".mypy_cache", ".pytest_cache", "dist", "build", ".next"}
+
+
+def _files_root() -> Path:
+    """مجلد الملفات المعروضة/القابلة للتنزيل = حيث يكتب الوكيل فعلاً.
+
+    المستودع المستنسَخ إن اختير، وإلا مجلد المخرجات. هكذا كل ملف يُنشئه الوكيل
+    (سواء مشروع محلي أو داخل مستودع) يظهر في شاشة «الملفات» ويكون قابلاً للتنزيل.
+    """
+    ws = _active_workspace()
+    if ws.get("work_dir") and os.path.isdir(ws["work_dir"]):
+        return Path(ws["work_dir"])
+    return OUTPUTS
+
+
 def _api_files() -> dict:
+    root = _files_root()
     files = []
-    for f in sorted(OUTPUTS.rglob("*"), key=lambda x: x.stat().st_mtime, reverse=True):
+    for f in root.rglob("*"):
+        # تخطّي مجلدات النظام/البناء الضخمة
+        if any(part in _FILES_SKIP for part in f.parts):
+            continue
         if f.is_file():
-            stt = f.stat()
-            files.append({"name": f.name, "path": str(f.relative_to(OUTPUTS)),
-                          "size": stt.st_size, "modified": stt.st_mtime,
-                          "type": f.suffix.lstrip(".") or "file"})
-    return {"files": files, "outputs_dir": str(OUTPUTS)}
+            try:
+                stt = f.stat()
+                files.append({"name": f.name, "path": str(f.relative_to(root)),
+                              "size": stt.st_size, "modified": stt.st_mtime,
+                              "type": f.suffix.lstrip(".") or "file"})
+            except Exception:
+                continue
+        if len(files) >= 2000:
+            break
+    files.sort(key=lambda x: x["modified"], reverse=True)
+    ws = _active_workspace()
+    return {"files": files, "outputs_dir": str(root),
+            "repo": ws.get("repo", ""), "count": len(files)}
 
 
 def _api_conversations(limit=20, search="") -> dict:
@@ -998,8 +1026,9 @@ def _save_upload(body: dict) -> dict:
 
 
 def _safe_output_path(rel: str):
-    target = (OUTPUTS / rel).resolve()
-    if not str(target).startswith(str(OUTPUTS.resolve())):
+    root = _files_root()
+    target = (root / rel).resolve()
+    if not str(target).startswith(str(root.resolve())):
         return None
     return target
 
@@ -1265,13 +1294,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def _zip(self):
+        root = _files_root()
         tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
         tmp.close()
         with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
-            for f in OUTPUTS.rglob("*"):
+            for f in root.rglob("*"):
+                if any(part in _FILES_SKIP for part in f.parts):
+                    continue
                 if f.is_file():
-                    zf.write(f, f.relative_to(OUTPUTS))
-        self._file(Path(tmp.name), "application/zip", "WeaverCode_outputs.zip")
+                    try:
+                        zf.write(f, f.relative_to(root))
+                    except Exception:
+                        continue
+        self._file(Path(tmp.name), "application/zip", "WeaverCode_files.zip")
         try:
             os.unlink(tmp.name)
         except Exception:
