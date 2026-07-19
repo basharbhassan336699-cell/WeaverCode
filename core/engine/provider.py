@@ -35,6 +35,44 @@ class Message:
     tool_calls: Optional[List[Dict]] = None
     tool_call_id: Optional[str] = None
     name: Optional[str] = None
+    # مسارات وسائط (صور/PDF) تُرفَق مع رسالة user لتُرسل للنموذج كـ vision blocks.
+    # حقل إضافي غير كاسر — لا يؤثر على المصادقة/المفاتيح، فقط على تركيب الرسالة.
+    media: Optional[List[str]] = None
+
+
+# ── بناء كتل الوسائط (رؤية) — يعتمد core.multimodal، لا يمسّ المصادقة ──────────
+
+def _media_blocks_anthropic(paths: List[str]) -> List[Dict[str, Any]]:
+    """كتل صورة/مستند بصيغة Anthropic لمسارات وسائط موجودة (يتجاهل الفاشل)."""
+    out: List[Dict[str, Any]] = []
+    try:
+        from core.multimodal import build_anthropic_block, is_multimodal
+    except Exception:
+        return out
+    for p in paths or []:
+        try:
+            if is_multimodal(p):
+                out.append(build_anthropic_block(p))
+        except Exception:
+            continue
+    return out
+
+
+def _media_blocks_openai(paths: List[str]) -> List[Dict[str, Any]]:
+    """كتل صورة بصيغة OpenAI لمسارات وسائط موجودة (يتجاهل الفاشل)."""
+    out: List[Dict[str, Any]] = []
+    try:
+        from core.multimodal import build_openai_block, is_image
+    except Exception:
+        return out
+    for p in paths or []:
+        try:
+            # OpenAI vision يدعم الصور؛ نتخطّى PDF هنا لتفادي رفض الصيغة.
+            if is_image(p):
+                out.append(build_openai_block(p))
+        except Exception:
+            continue
+    return out
 
 
 # ── إعدادات المزود ───────────────────────────────────────────────────────────
@@ -303,6 +341,15 @@ class WeaverProvider:
 
     def _msg_to_openai(self, msg: Message) -> Dict:
         d: Dict[str, Any] = {"role": msg.role, "content": msg.content}
+        # وسائط (رؤية) على رسالة user → صيغة OpenAI multipart
+        if msg.role == "user" and msg.media:
+            blocks = _media_blocks_openai(msg.media)
+            if blocks:
+                parts: List[Dict[str, Any]] = []
+                if msg.content:
+                    parts.append({"type": "text", "text": msg.content})
+                parts.extend(blocks)
+                d["content"] = parts
         if msg.tool_calls:
             d["tool_calls"] = msg.tool_calls
         if msg.tool_call_id:
@@ -415,7 +462,15 @@ class WeaverProvider:
                 conv.append({"role": "assistant", "content": blocks})
                 continue
 
-            # رسائل user/assistant النصية العادية
+            # رسائل user/assistant النصية العادية — مع دعم الوسائط (رؤية)
+            if m.role == "user" and m.media:
+                blocks = _media_blocks_anthropic(m.media)
+                if blocks:
+                    parts: List[Dict[str, Any]] = list(blocks)
+                    if m.content:
+                        parts.append({"type": "text", "text": m.content})
+                    conv.append({"role": "user", "content": parts})
+                    continue
             conv.append({"role": m.role, "content": m.content or ""})
 
         payload: Dict[str, Any] = {

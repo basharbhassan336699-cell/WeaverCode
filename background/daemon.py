@@ -20,6 +20,25 @@ from background.events import event_bus, WeaverEvent, EventType  # noqa: E402
 from background import status as st                      # noqa: E402
 
 
+def _outputs_dir() -> str:
+    """مجلد المخرجات — نفس منطق web/server._outputs_dir ليتطابق مع شاشة «الملفات».
+
+    نجعله مجلد عمل الوكيل حتى تظهر الملفات المُنشأة (بمسارات نسبية) فوراً في
+    شاشة الملفات وتكون قابلة للتنزيل — بدل أن تُكتب في جذر المستودع غير المرئي.
+    """
+    env = os.environ.get("WEAVER_OUTPUTS")
+    if env:
+        p = Path(os.path.expanduser(env))
+    else:
+        termux = Path(os.path.expanduser("~/storage/downloads/WeaverCode_outputs"))
+        p = termux if termux.parent.exists() else Path(os.path.expanduser("~/WeaverCode_outputs"))
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return os.getcwd()
+    return str(p)
+
+
 class WeaverDaemon:
     def __init__(self):
         self.running = False
@@ -50,7 +69,8 @@ class WeaverDaemon:
         await event_bus.emit(WeaverEvent(EventType.THINKING, "يعالج المهمة...", prompt))
 
         provider = get_provider()
-        tools = ToolRegistry()
+        # مجلد العمل = مجلد المخرجات: يضمن ظهور الملفات المُنشأة في شاشة «الملفات»
+        tools = ToolRegistry(work_dir=_outputs_dir())
         memory = MemoryStore()
         engine = QueryEngine(
             provider=provider,

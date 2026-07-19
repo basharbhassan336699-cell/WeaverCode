@@ -77,7 +77,10 @@ class ToolRegistry:
 
         self._add(Tool(
             name="Read",
-            description="قراءة محتوى ملف مع أرقام الأسطر. استخدم مسارات مطلقة دائماً.",
+            description=("قراءة أي ملف: نص وكود، CSV/JSON، أرشيفات ZIP/TAR (يسرد "
+                         "العناصر ويستخرج النصوص)، مستندات Office (docx/xlsx/pptx)، "
+                         "وملفات ثنائية (معاينة hex). الصور و PDF تُرسَل للنموذج "
+                         "كمحتوى مرئي تلقائياً — يمكنك تحليلها مباشرةً. استخدم مسارات مطلقة."),
             parameters={
                 "type": "object",
                 "properties": {
@@ -102,6 +105,37 @@ class ToolRegistry:
                 "required": ["path", "content"],
             },
             fn=self._write,
+            requires_permission=True,
+        ))
+
+        self._add(Tool(
+            name="WriteBinary",
+            description=("إنشاء ملف من أي نوع (صورة/PDF/أرشيف/ثنائي) من محتوى "
+                         "base64. استخدمه عندما يكون المحتوى غير نصّي."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "data_base64": {"type": "string", "description": "محتوى الملف مُرمَّزاً base64"},
+                },
+                "required": ["path", "data_base64"],
+            },
+            fn=self._write_binary,
+            requires_permission=True,
+        ))
+
+        self._add(Tool(
+            name="ExtractArchive",
+            description="فكّ ضغط أرشيف ZIP أو TAR إلى مجلد (dest اختياري).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "مسار الأرشيف"},
+                    "dest": {"type": "string", "description": "مجلد الوجهة (اختياري)"},
+                },
+                "required": ["path"],
+            },
+            fn=self._extract_archive,
             requires_permission=True,
         ))
 
@@ -908,13 +942,23 @@ class ToolRegistry:
             p = self._resolve(path)
             if not p.exists():
                 return f"الملف غير موجود: {path}"
-            # وسائط متعددة (صورة/PDF): لا تُقرأ كنص — تُوصف بياناتها الوصفية
+            # وسائط (صورة/PDF): تُرسَل للنموذج الرؤيوي على مستوى الرسالة تلقائياً.
+            # هنا نُرجع وصفاً مختصراً + تأكيداً أنها مرئية للنموذج.
             try:
                 from core.multimodal import is_multimodal, describe
                 if is_multimodal(str(p)):
-                    return describe(str(p))
+                    return (describe(str(p))
+                            + "\n\n✅ هذا الملف مُرسَل للنموذج كمحتوى مرئي — "
+                              "يمكنك تحليله/وصفه مباشرةً في ردّك.")
             except Exception:
                 pass
+            # قراءة ذكية لكل الأنواع (نص/CSV/zip/tar/office/ثنائي)
+            try:
+                from core.filetypes import read_any
+                return read_any(str(p), offset or 0, limit)
+            except Exception:
+                pass
+            # احتياط: نص خام
             lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
             if offset:
                 lines = lines[offset:]
@@ -923,6 +967,40 @@ class ToolRegistry:
             return "\n".join(f"{i+offset+1}\t{l}" for i, l in enumerate(lines))
         except Exception as e:
             return f"خطأ في قراءة {path}: {e}"
+
+    def _write_binary(self, path: str, data_base64: str) -> str:
+        """إنشاء ملف ثنائي من base64 (صور/PDF/أرشيفات/أي نوع)."""
+        try:
+            import base64 as _b64
+            raw = _b64.b64decode(data_base64)
+            p = self._resolve(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(raw)
+            sp = str(p)
+            if sp not in self._created_files:
+                self._created_files.append(sp)
+            return f"✅ تم إنشاء ملف ثنائي {p} ({len(raw)} بايت)"
+        except Exception as e:
+            return f"خطأ في كتابة الملف الثنائي: {e}"
+
+    def _extract_archive(self, path: str, dest: Optional[str] = None) -> str:
+        """فكّ ضغط أرشيف (zip/tar) إلى مجلد."""
+        try:
+            from core.filetypes import extract_archive
+            src = self._resolve(path)
+            out = self._resolve(dest) if dest else src.parent / (src.stem + "_extracted")
+            result = extract_archive(str(src), str(out))
+            try:
+                for f in Path(out).rglob("*"):
+                    if f.is_file():
+                        sp = str(f)
+                        if sp not in self._created_files:
+                            self._created_files.append(sp)
+            except Exception:
+                pass
+            return result
+        except Exception as e:
+            return f"خطأ في فكّ الأرشيف: {e}"
 
     def _write(self, path: str, content: str) -> str:
         try:

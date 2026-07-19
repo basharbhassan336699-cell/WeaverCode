@@ -57,6 +57,35 @@ def _guard_user_prompt(prompt: str) -> str:
     return prompt + IDENTITY_REMINDER if _identity_guard_enabled() else prompt
 
 
+# نمط مسارات ملفات محتملة داخل نص المستخدم (مطلقة أو ~ أو نسبية بامتداد)
+_PATH_RE = re.compile(r"(?:~?/[^\s'\"]+|[A-Za-z0-9_./\\-]+\.[A-Za-z0-9]{1,8})")
+
+
+def _extract_media_paths(text: str, work_dir: str) -> List[str]:
+    """يستخرج مسارات وسائط (صور/PDF) موجودة فعلاً ومذكورة في نص المستخدم.
+
+    EN: Scan the user text for real, existing image/PDF file paths so they can
+    be attached to the message as vision blocks (the model actually *sees* them).
+    """
+    try:
+        from core.multimodal import is_multimodal
+    except Exception:
+        return []
+    found: List[str] = []
+    seen = set()
+    for tok in _PATH_RE.findall(text or ""):
+        cand = os.path.expanduser(tok)
+        for full in (cand, os.path.join(work_dir, cand)):
+            try:
+                if full not in seen and os.path.isfile(full) and is_multimodal(full):
+                    seen.add(full)
+                    found.append(full)
+                    break
+            except Exception:
+                continue
+    return found[:8]  # حدّ آمن: 8 وسائط كحدّ أقصى للرسالة الواحدة
+
+
 # ── التعافي من الرفض الزائف ──────────────────────────────────────────────────
 # بعض النماذج/البوابات تُفسّر غلاف إخفاء الهوية (بروموه نظامي صارم + تذكير صامت)
 # كمحاولة اختراق، فترفض حتى الطلبات البريئة (فئة "cyber"). عند اكتشاف رفض،
@@ -561,7 +590,16 @@ class QueryEngine:
         if history:
             messages.extend(history)
 
-        messages.append(Message(role="user", content=_guard_user_prompt(_sanitize_prompt(model_prompt))))
+        user_msg = Message(role="user",
+                           content=_guard_user_prompt(_sanitize_prompt(model_prompt)))
+        # إرفاق الوسائط (صور/PDF) المذكورة فعلاً ليراها النموذج الرؤيوي مباشرةً
+        try:
+            media = _extract_media_paths(model_prompt, self.tools.work_dir)
+            if media:
+                user_msg.media = media
+        except Exception:
+            pass
+        messages.append(user_msg)
 
         # hook: تسليم رسالة المستخدم
         if self.hooks:
@@ -867,7 +905,14 @@ class QueryEngine:
         messages: List[Message] = [Message(role="system", content=self.system_prompt)]
         if history:
             messages.extend(history)
-        messages.append(Message(role="user", content=_guard_user_prompt(_sanitize_prompt(prompt))))
+        _um = Message(role="user", content=_guard_user_prompt(_sanitize_prompt(prompt)))
+        try:
+            _media = _extract_media_paths(prompt, self.tools.work_dir)
+            if _media:
+                _um.media = _media
+        except Exception:
+            pass
+        messages.append(_um)
 
         if self.hooks:
             self.hooks.run("UserPromptSubmit", prompt=prompt)
