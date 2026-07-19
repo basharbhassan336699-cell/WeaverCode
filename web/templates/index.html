@@ -182,6 +182,17 @@
   <div class="modal-box">
     <div class="modal-head"><span>اختر مستودعاً من GitHub</span><button class="ic" data-rpclose>✕</button></div>
     <div class="modal-hint">مستودعاتك الحقيقية من حسابك — اضغط أيّها لتكملة مشروعك عليه.</div>
+    <div class="repo-quick">
+      <button id="repoNone" class="repo-quick-btn">💬 محادثة بدون مستودع</button>
+      <button id="repoNew" class="repo-quick-btn accent">＋ إنشاء مستودع جديد</button>
+    </div>
+    <div id="repoNewForm" class="repo-new" style="display:none">
+      <label class="field"><span>اسم المستودع</span><input id="rnName" type="text" placeholder="my-project" autocomplete="off"/></label>
+      <label class="field"><span>الوصف (اختياري)</span><input id="rnDesc" type="text" placeholder="وصف قصير"/></label>
+      <label class="check-row"><input id="rnPrivate" type="checkbox" checked/><span>مستودع خاص 🔒</span></label>
+      <div id="rnMsg" class="muted small"></div>
+      <div class="row"><button id="rnCreate" class="accept">إنشاء واختيار</button><button id="rnCancel" class="chip-btn">إلغاء</button></div>
+    </div>
     <input id="repoSearch" type="text" placeholder="🔍 بحث…" autocomplete="off"/>
     <div id="repoList" class="repo-list"><div class="muted small">…جارٍ التحميل</div></div>
     <div class="row"><button class="chip-btn" data-rpclose>إغلاق</button></div>

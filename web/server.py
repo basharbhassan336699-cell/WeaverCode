@@ -23,6 +23,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 import urllib.request
+import urllib.error
 import urllib.parse as _urlparse
 import hashlib
 import base64
@@ -309,6 +310,68 @@ def _api_github_repos() -> dict:
         "language": r.get("language") or "",
     } for r in data if r.get("full_name")]
     return {"connected": True, "repos": repos, "count": len(repos)}
+
+
+def _http_post_json(url: str, payload: dict, headers=None, timeout: int = 20):
+    """POST بجسم JSON ويُرجع (data, error). urllib ثم curl (Termux)."""
+    body = json.dumps(payload).encode("utf-8")
+    hdrs = dict(headers or {})
+    hdrs.setdefault("Content-Type", "application/json")
+    req = urllib.request.Request(url, body, hdrs, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8")), None
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode("utf-8")), None
+        except Exception:
+            return None, f"HTTP {e.code}"
+    except Exception:
+        try:
+            args = ["curl", "-sS", "-X", "POST", url, "--data", body.decode("utf-8"),
+                    "--max-time", str(timeout)]
+            for k, v in hdrs.items():
+                args += ["-H", f"{k}: {v}"]
+            out = subprocess.run(args, capture_output=True, text=True, timeout=timeout + 5)
+            return json.loads(out.stdout), None
+        except Exception as e:
+            return None, str(e)
+
+
+def _api_github_create_repo(body: dict) -> dict:
+    """إنشاء مستودع جديد حقيقي في حساب المستخدم عبر GitHub API."""
+    token = _github_token()
+    if not token:
+        return {"ok": False, "error": "غير متصل بـ GitHub"}
+    name = str(body.get("name", "")).strip()
+    if not name:
+        return {"ok": False, "error": "اسم المستودع مطلوب"}
+    payload = {
+        "name": name,
+        "private": bool(body.get("private", True)),
+        "auto_init": True,  # ينشئ فرعاً افتراضياً (main) بـ README ليكون جاهزاً
+    }
+    desc = str(body.get("description", "")).strip()
+    if desc:
+        payload["description"] = desc
+    data, err = _http_post_json(
+        "https://api.github.com/user/repos", payload,
+        {"Authorization": f"Bearer {token}",
+         "Accept": "application/vnd.github+json",
+         "User-Agent": "WeaverCode"})
+    if err or not isinstance(data, dict) or not data.get("full_name"):
+        detail = err or (data.get("message") if isinstance(data, dict) else "")
+        return {"ok": False, "error": detail or "تعذّر إنشاء المستودع"}
+    return {"ok": True, "repo": {
+        "full_name": data.get("full_name"),
+        "name": data.get("name"),
+        "private": bool(data.get("private", False)),
+        "description": data.get("description") or "",
+        "url": data.get("html_url"),
+        "clone_url": data.get("clone_url"),
+        "default_branch": data.get("default_branch", "main"),
+        "language": data.get("language") or "",
+    }}
 
 
 # ── الارتباطات (Integrations) ────────────────────────────────────────────────
@@ -950,6 +1013,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_test_connection())
         if path == "/api/github/push":
             return self._json(_github_push(body.get("message", "🕸️ WeaverCode update")))
+        if path == "/api/github/create-repo":
+            return self._json(_api_github_create_repo(body))
         if path == "/api/integrations":
             items = body.get("integrations", [])
             if isinstance(items, list):

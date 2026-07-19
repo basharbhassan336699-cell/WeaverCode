@@ -267,6 +267,15 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .repo-tag.pub { color: #22c55e; }
 .repo-desc { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.5; }
 .repo-meta { color: var(--muted-2); font-size: 11px; margin-top: 5px; direction: ltr; text-align: right; }
+.repo-quick { display: flex; gap: 8px; margin-bottom: 10px; }
+.repo-quick-btn { flex: 1; background: var(--card-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 12px; padding: 10px 8px; font-size: 13px; font-family: inherit; cursor: pointer; }
+.repo-quick-btn:hover { border-color: var(--orange); }
+.repo-quick-btn.accent { border-color: var(--orange); color: var(--orange); }
+.repo-new { background: var(--card-2); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px; margin-bottom: 10px; }
+.check-row { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); margin: 6px 0; }
+.check-row input { width: 18px; height: 18px; accent-color: var(--orange); }
 
 /* نافذة منبثقة (Modal) */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 40; display: none;

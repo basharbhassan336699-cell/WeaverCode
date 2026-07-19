@@ -180,6 +180,8 @@
   async function openRepoPicker() {
     $("#repoModal").classList.add("open");
     $("#repoSearch").value = "";
+    $("#repoNewForm").style.display = "none";
+    $("#rnMsg").textContent = "";
     const box = $("#repoList");
     box.innerHTML = '<div class="muted small">…جارٍ جلب مستودعاتك</div>';
     try {
@@ -213,6 +215,37 @@
     const chip = $("#repoChip");
     chip.innerHTML = '<span class="ellip">🔗 ' + escapeHtml(ghRepo) + " (متصل)</span><span class=\"chip-caret\">▾</span>";
   }
+  // محادثة بدون أي مستودع → لا سياق مستودع، الرقاقة تعود «بلا مستودع»
+  function pickNoRepo() {
+    ghRepo = "";
+    activeRepo = null;
+    $("#repoModal").classList.remove("open");
+    const chip = $("#repoChip");
+    chip.innerHTML = '<span class="ellip">💬 بدون مستودع</span><span class="chip-caret">▾</span>';
+  }
+  $("#repoNone") && ($("#repoNone").onclick = pickNoRepo);
+  // نموذج إنشاء مستودع جديد
+  $("#repoNew") && ($("#repoNew").onclick = () => {
+    const f = $("#repoNewForm");
+    f.style.display = f.style.display === "none" ? "block" : "none";
+    $("#rnMsg").textContent = "";
+    if (f.style.display === "block") $("#rnName").focus();
+  });
+  $("#rnCancel") && ($("#rnCancel").onclick = () => { $("#repoNewForm").style.display = "none"; });
+  $("#rnCreate") && ($("#rnCreate").onclick = async () => {
+    const name = $("#rnName").value.trim();
+    if (!name) { $("#rnMsg").textContent = "⚠️ اكتب اسم المستودع."; return; }
+    $("#rnMsg").textContent = "…جارٍ الإنشاء على GitHub";
+    try {
+      const r = await post("/api/github/create-repo", {
+        name: name, description: $("#rnDesc").value.trim(), private: $("#rnPrivate").checked });
+      if (!r.ok) { $("#rnMsg").textContent = "⚠️ " + (r.error || "تعذّر الإنشاء"); return; }
+      repoCache.unshift(r.repo);
+      pickRepo(r.repo); // يُغلق النافذة ويختار الجديد
+      $("#repoNewForm").style.display = "none";
+      $("#rnName").value = ""; $("#rnDesc").value = "";
+    } catch (e) { $("#rnMsg").textContent = "⚠️ تعذّر الاتصال بـ GitHub."; }
+  });
   $("#repoSearch") && ($("#repoSearch").oninput = (e) => {
     const q = e.target.value.trim().toLowerCase();
     renderRepoList(!q ? repoCache : repoCache.filter((r) =>

@@ -188,6 +188,57 @@ def test_github_repos_surfaces_api_error(tmp_path, monkeypatch):
     assert "Bad credentials" in r["error"]
 
 
+def test_github_create_repo_requires_connection(tmp_path, monkeypatch):
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "integrations.json")
+    r = server._api_github_create_repo({"name": "x"})
+    assert r["ok"] is False
+
+
+def test_github_create_repo_requires_name(tmp_path, monkeypatch):
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "integrations.json")
+    server._save_integrations([{"id": "github", "name": "GitHub", "url": "https://github.com",
+                                "token": "ghp_real", "enabled": True, "builtin": True}])
+    r = server._api_github_create_repo({"name": "  "})
+    assert r["ok"] is False
+
+
+def test_github_create_repo_success(tmp_path, monkeypatch):
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "integrations.json")
+    server._save_integrations([{"id": "github", "name": "GitHub", "url": "https://github.com",
+                                "token": "ghp_real", "enabled": True, "builtin": True}])
+    captured = {}
+
+    def fake_post(url, payload, headers=None, timeout=20):
+        captured["url"] = url
+        captured["payload"] = payload
+        return {"full_name": "bashar/new", "name": "new", "private": True,
+                "html_url": "https://github.com/bashar/new",
+                "clone_url": "https://github.com/bashar/new.git",
+                "default_branch": "main", "description": "d"}, None
+
+    monkeypatch.setattr(server, "_http_post_json", fake_post)
+    r = server._api_github_create_repo({"name": "new", "private": True, "description": "d"})
+    assert r["ok"] is True
+    assert r["repo"]["full_name"] == "bashar/new"
+    assert captured["url"] == "https://api.github.com/user/repos"
+    assert captured["payload"]["auto_init"] is True
+
+
+def test_github_create_repo_surfaces_error(tmp_path, monkeypatch):
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "integrations.json")
+    server._save_integrations([{"id": "github", "name": "GitHub", "url": "https://github.com",
+                                "token": "ghp_real", "enabled": True, "builtin": True}])
+    monkeypatch.setattr(server, "_http_post_json",
+                        lambda *a, **k: ({"message": "name already exists on this account"}, None))
+    r = server._api_github_create_repo({"name": "dup"})
+    assert r["ok"] is False
+    assert "already exists" in r["error"]
+
+
 # ── تفويض GitHub الحقيقي (Device Flow) ───────────────────────────────────────
 
 def test_oauth_status_reflects_client_id(monkeypatch, tmp_path):
