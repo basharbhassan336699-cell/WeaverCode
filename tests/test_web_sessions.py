@@ -262,3 +262,51 @@ def test_oauth_env_overrides_file(monkeypatch, tmp_path):
     server._api_oauth_config_save({"client_id": "fileid", "client_secret": "filesec"})
     monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "envid")
     assert server._gh_client_id() == "envid"   # .env له الأولوية
+
+
+# ── محرّك OAuth-PKCE العام (Canva وأمثالها — Allow بلا سرّ) ────────────────────
+
+def test_pkce_service_configured_via_client_id(monkeypatch, tmp_path):
+    from web import server
+    monkeypatch.setattr(server, "_OAUTH_CONFIG_FILE", tmp_path / "o.json")
+    monkeypatch.delenv("CANVA_OAUTH_CLIENT_ID", raising=False)
+    assert server._api_pkce_services()["canva"]["configured"] is False
+    server._api_oauth_config_save({"service": "canva", "client_id": "pub"})
+    assert server._api_pkce_services()["canva"]["configured"] is True
+
+
+def test_pkce_authorize_builds_challenge(monkeypatch, tmp_path):
+    from web import server
+    monkeypatch.setattr(server, "_OAUTH_CONFIG_FILE", tmp_path / "o.json")
+    server._api_oauth_config_save({"service": "canva", "client_id": "pubid"})
+    a = server._api_pkce_authorize("canva")
+    assert "code_challenge=" in a["authorize_url"]
+    assert "code_challenge_method=S256" in a["authorize_url"]
+    assert "client_id=pubid" in a["authorize_url"]
+
+
+def test_pkce_exchange_uses_verifier_no_secret(monkeypatch, tmp_path):
+    from web import server
+    monkeypatch.setattr(server, "_OAUTH_CONFIG_FILE", tmp_path / "o.json")
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "i.json")
+    server._api_oauth_config_save({"service": "canva", "client_id": "pubid"})
+    a = server._api_pkce_authorize("canva")
+    state = list(server._pkce_pending.keys())[-1]
+    captured = {}
+
+    def _mock(url, data, timeout=15):
+        captured.update(data)
+        return {"access_token": "cv_tok"}
+    monkeypatch.setattr(server, "_http_post_form", _mock)
+    ok, svc, detail = server._pkce_exchange(state, "code")
+    assert ok is True and svc == "canva"
+    assert "code_verifier" in captured
+    assert "client_secret" not in captured   # PKCE = بلا سرّ
+    cv = next(i for i in server._load_integrations() if i["id"] == "canva")
+    assert cv["token"] == "cv_tok" and cv["connected"] is True
+
+
+def test_pkce_unknown_service(monkeypatch):
+    from web import server
+    r = server._api_pkce_authorize("nope")
+    assert "error" in r

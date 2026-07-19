@@ -24,6 +24,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 import urllib.request
 import urllib.parse as _urlparse
+import hashlib
+import base64
+import secrets as _secrets
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -410,18 +413,20 @@ def _api_oauth_config_get() -> dict:
 
 
 def _api_oauth_config_save(body: dict) -> dict:
-    """يحفظ Client ID/Secret من الواجهة في config/oauth.json (دائم، محلي)."""
+    """يحفظ Client ID/Secret لخدمة في config/oauth.json (دائم، محلي).
+    الافتراضي github؛ خدمات PKCE (canva...) تحفظ client_id فقط (بلا سرّ)."""
+    service = str(body.get("service", "github")).strip() or "github"
     cid = str(body.get("client_id", "")).strip()
     sec = str(body.get("client_secret", "")).strip()
     cfg = _oauth_config()
-    gh = cfg.setdefault("github", {})
+    node = cfg.setdefault(service, {})
     if cid:
-        gh["client_id"] = cid
-    # لا نمسح السرّ إن تُرك فارغاً (يبقى المحفوظ)؛ نحدّثه فقط إن أُدخل
-    if sec:
-        gh["client_secret"] = sec
+        node["client_id"] = cid
+    if sec:  # لا نمسح السرّ إن تُرك فارغاً
+        node["client_secret"] = sec
     _oauth_config_save(cfg)
-    return {"saved": True, **_api_oauth_status()}
+    return {"saved": True, **_api_oauth_status(),
+            "pkce": _api_pkce_services()}
 
 
 def _api_oauth_github_authorize() -> dict:
@@ -505,6 +510,94 @@ def _api_oauth_github_poll(device_code: str) -> dict:
     if err in ("authorization_pending", "slow_down"):
         return {"pending": True, "slow_down": err == "slow_down"}
     return {"error": r.get("error_description") or err or "لم يكتمل التفويض"}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# محرّك OAuth-PKCE العام — «Allow» بضغطة واحدة بلا سرّ (Canva وأمثالها)
+# ══════════════════════════════════════════════════════════════════════════
+# لإضافة خدمة: أضف مدخلاً هنا + client_id (عبر البيئة أو إعداد الواجهة).
+# scope قابل للضبط. redirect_uri = نفس callback المحلي.
+_PKCE_SERVICES = {
+    "canva": {
+        "authorize": "https://www.canva.com/api/oauth/authorize",
+        "token": "https://api.canva.com/rest/v1/oauth/token",
+        "scope": ("design:content:read design:content:write "
+                  "asset:read profile:read"),
+    },
+    # مستقبلاً: notion / figma / linear ... بنفس النمط
+}
+
+# تفويضات PKCE المعلّقة: state → {service, verifier}
+_pkce_pending = {}
+
+
+def _pkce_client_id(service: str) -> str:
+    """client_id لخدمة PKCE: البيئة ثم إعداد الواجهة (لا سرّ)."""
+    env_key = service.upper() + "_OAUTH_CLIENT_ID"
+    v = os.environ.get(env_key, "").strip()
+    if v:
+        return v
+    return str(_oauth_config().get(service, {}).get("client_id", "")).strip()
+
+
+def _pkce_gen():
+    """يولّد (code_verifier, code_challenge) بصيغة S256."""
+    verifier = base64.urlsafe_b64encode(_secrets.token_bytes(48)).rstrip(b"=").decode()
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    return verifier, challenge
+
+
+def _api_pkce_services() -> dict:
+    """يُرجع خدمات PKCE المدعومة وأيّها مُهيّأ (له client_id)."""
+    return {s: {"configured": bool(_pkce_client_id(s))}
+            for s in _PKCE_SERVICES}
+
+
+def _api_pkce_authorize(service: str) -> dict:
+    """يبدأ تدفّق PKCE: يبني رابط «Allow» ويخزّن verifier."""
+    svc = _PKCE_SERVICES.get(service)
+    if not svc:
+        return {"error": f"خدمة PKCE غير مدعومة: {service}"}
+    cid = _pkce_client_id(service)
+    if not cid:
+        return {"error": f"{service}: client_id غير مضبوط — أضِفه من الإعداد."}
+    verifier, challenge = _pkce_gen()
+    state = _secrets.token_urlsafe(16)
+    _pkce_pending[state] = {"service": service, "verifier": verifier}
+    if len(_pkce_pending) > 50:
+        _pkce_pending.pop(next(iter(_pkce_pending)))
+    url = svc["authorize"] + "?" + _urlparse.urlencode({
+        "response_type": "code", "client_id": cid,
+        "redirect_uri": _gh_redirect_uri(), "scope": svc["scope"],
+        "code_challenge": challenge, "code_challenge_method": "S256",
+        "state": state})
+    return {"authorize_url": url}
+
+
+def _pkce_exchange(state: str, code: str):
+    """يبدّل الرمز بتوكن (PKCE، بلا سرّ) ويحفظه في تكامل الخدمة."""
+    p = _pkce_pending.pop(state, None)
+    if not p:
+        return False, None, "state غير صالح أو منتهٍ."
+    service = p["service"]
+    svc = _PKCE_SERVICES.get(service, {})
+    cid = _pkce_client_id(service)
+    r = _http_post_form(svc.get("token", ""), {
+        "grant_type": "authorization_code", "code": code,
+        "client_id": cid, "redirect_uri": _gh_redirect_uri(),
+        "code_verifier": p["verifier"]})
+    token = r.get("access_token")
+    if not token:
+        return False, service, (r.get("error_description") or r.get("error")
+                                or "لم تُرجع الخدمة توكناً.")
+    items = _load_integrations()
+    for it in items:
+        if it.get("id") == service:
+            it["token"] = token
+            it["enabled"] = True
+    _save_integrations(items)
+    return True, service, ""
 
 
 def _save_integrations(items: list) -> None:
@@ -712,6 +805,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_api_oauth_status())
         if path == "/api/oauth/config":
             return self._json(_api_oauth_config_get())
+        if path == "/api/oauth/pkce/services":
+            return self._json(_api_pkce_services())
+        if path == "/api/oauth/pkce/authorize":
+            return self._json(_api_pkce_authorize(qs.get("service", [""])[0]))
         if path == "/api/oauth/github/authorize":
             return self._json(_api_oauth_github_authorize())
         if path == "/api/oauth/github/start":
@@ -720,10 +817,14 @@ class Handler(BaseHTTPRequestHandler):
             code = qs.get("code", [""])[0]
             state = qs.get("state", [""])[0]
             gh_err = qs.get("error_description", [qs.get("error", [""])[0]])[0]
-            _oauth_states.discard(state)
             if gh_err:
                 ok, detail = False, gh_err
+            elif state in _pkce_pending:
+                # خدمة PKCE (Canva وأمثالها) — بلا سرّ
+                ok, _svc, detail = _pkce_exchange(state, code)
             else:
+                # GitHub (authorization code + secret)
+                _oauth_states.discard(state)
                 ok, detail = _oauth_github_exchange(code)
             if ok:
                 return self._html(

@@ -391,9 +391,11 @@
 
   // ── الارتباطات (Integrations) ──
   let intg = [];
-  let oauthStatus = {};   // أي خدمات تدعم «Allow» الحقيقي (device flow)
+  let oauthStatus = {};   // GitHub (device flow / one-click)
+  let pkceStatus = {};    // خدمات PKCE (canva...) وأيّها مُهيّأ
   async function loadIntegrations() {
     try { oauthStatus = await api("/api/oauth/status"); } catch (e) { oauthStatus = {}; }
+    try { pkceStatus = await api("/api/oauth/pkce/services"); } catch (e) { pkceStatus = {}; }
     const r = await api("/api/integrations");
     intg = r.integrations || [];
     renderIntegrations();
@@ -456,9 +458,35 @@
       const gi = intg.findIndex((x) => x.id === "github");
       return startGithubDeviceFlow(gi);   // يعمل لأي مستخدم بلا إعداد
     }
+    // خدمات PKCE (Canva وأمثالها): «Allow» بضغطة واحدة بلا سرّ
+    if (pkceStatus[it.id]) {
+      if (pkceStatus[it.id].configured) return pkceAuthorize(it.id);
+      return openPkceSetup(it.id, it.name);   // أدخل client_id مرة واحدة
+    }
     const authUrl = it.auth_url || it.url;
     if (authUrl) window.open(authUrl, "_blank", "noopener");
     openIntgModal(i, true);
+  }
+  // ── PKCE «Allow» عام (Canva...) ──
+  async function pkceAuthorize(service) {
+    let r;
+    try { r = await api("/api/oauth/pkce/authorize?service=" + encodeURIComponent(service)); } catch (e) { r = {}; }
+    if (r.authorize_url) {
+      window.open(r.authorize_url, "_blank");   // صفحة «Allow» الحقيقية للخدمة
+      pollConnectedAfterReturn(service);
+    } else if (r.error) {
+      openPkceSetup(service, service);
+    }
+  }
+  // إعداد client_id لخدمة PKCE (مرة واحدة، عام بلا سرّ)
+  let _pkceSetupService = "";
+  async function openPkceSetup(service, name) {
+    _pkceSetupService = service;
+    $("#ghSetupModal").querySelector(".modal-head span").textContent = "إعداد اتصال " + (name || service);
+    $("#ghCid").value = "";
+    $("#ghSec").value = "";
+    $("#ghSec").parentElement.style.display = "none";   // PKCE لا يحتاج سرّاً
+    $("#ghSetupModal").classList.add("open");
   }
   async function githubAuthorize() {
     let r;
@@ -472,10 +500,13 @@
   }
   // ── إعداد GitHub OAuth من الواجهة (بدل تعديل .env) ──
   async function openGithubSetup(errMsg) {
+    _pkceSetupService = "";   // وضع GitHub (بسرّ)
+    $("#ghSetupModal").querySelector(".modal-head span").textContent = "إعداد اتصال GitHub (متقدّم)";
     let cfg = {};
     try { cfg = (await api("/api/oauth/config")).github || {}; } catch (e) {}
     $("#ghCid").value = cfg.client_id || "";
     $("#ghSec").value = "";
+    $("#ghSec").parentElement.style.display = "block";
     $("#ghSec").placeholder = cfg.has_secret ? "محفوظ — اتركه فارغاً للإبقاء عليه" : "يُحفظ محلياً — لا يُرفع";
     $("#ghSetupModal").classList.add("open");
   }
@@ -486,15 +517,18 @@
     const cid = $("#ghCid").value.trim(), sec = $("#ghSec").value.trim();
     if (!cid) { alert("أدخل Client ID"); return; }
     $("#ghSave").textContent = "…جارٍ الحفظ";
-    let r;
-    try { r = await post("/api/oauth/config", { client_id: cid, client_secret: sec }); } catch (e) { r = {}; }
+    const svc = _pkceSetupService || "github";
+    let body = { service: svc, client_id: cid };
+    if (!_pkceSetupService) body.client_secret = sec;   // GitHub فقط يحتاج سرّاً
+    try { await post("/api/oauth/config", body); } catch (e) {}
     $("#ghSave").textContent = "حفظ واتصال";
-    // أعد تحميل الحالة
-    try { oauthStatus = await api("/api/oauth/status"); } catch (e) {}
+    try { oauthStatus = await api("/api/oauth/status"); pkceStatus = await api("/api/oauth/pkce/services"); } catch (e) {}
     $("#ghSetupModal").classList.remove("open");
-    if (oauthStatus.github_oneclick) { githubAuthorize(); }
+    if (_pkceSetupService) {
+      if (pkceStatus[svc] && pkceStatus[svc].configured) pkceAuthorize(svc);
+    } else if (oauthStatus.github_oneclick) { githubAuthorize(); }
     else if (oauthStatus.github) { const gi = intg.findIndex((x) => x.id === "github"); startGithubDeviceFlow(gi); }
-    else alert("حُفظ Client ID. للاتصال بضغطة واحدة أضِف Client Secret أيضاً.");
+    else alert("حُفظ Client ID.");
   };
   // بعد العودة من «Authorize» (callback حفظ التوكن) نُحدّث البطاقة
   function pollConnectedAfterReturn(id) {
