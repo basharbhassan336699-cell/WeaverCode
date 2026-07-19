@@ -422,6 +422,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _html(self, html: str, code=200):
+        body = html.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _file(self, path: Path, content_type=None, download_name=None):
         size = path.stat().st_size
         ctype = content_type or mimetypes.guess_type(str(path))[0] or "application/octet-stream"
@@ -462,7 +472,18 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         if path == "/":
-            return self._file(INDEX_HTML, "text/html; charset=utf-8")
+            # حقن رمز كسر الكاش (الإصدار) لإجبار المتصفّح على تحميل أحدث JS/CSS
+            try:
+                from core.ui import get_version
+                bust = get_version().replace("·", "-").replace(" ", "")
+            except Exception:
+                bust = str(int(time.time()))
+            try:
+                html = INDEX_HTML.read_text(encoding="utf-8").replace(
+                    "__CACHEBUST__", bust)
+                return self._html(html)
+            except Exception:
+                return self._file(INDEX_HTML, "text/html; charset=utf-8")
         if path.startswith("/static/"):
             f = (STATIC / path[len("/static/"):]).resolve()
             if str(f).startswith(str(STATIC.resolve())) and f.is_file():
