@@ -740,14 +740,125 @@ def _save_integrations(items: list) -> None:
         json.dumps({"integrations": clean}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# ── مساحات عمل المستودعات (استنساخ حقيقي ليعمل الوكيل عليها) ─────────────────
+
+_WORKSPACE_FILE = WEAVER_ROOT / "config" / "workspace.json"
+
+
+def _workspaces_dir() -> Path:
+    """المجلد الأب لاستنساخات المستودعات."""
+    termux = Path(os.path.expanduser("~/storage/downloads/WeaverCode_repos"))
+    base = termux if termux.parent.exists() else Path(os.path.expanduser("~/WeaverCode_repos"))
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _active_workspace() -> dict:
+    """المستودع النشِط حالياً (المستنسَخ) أو {} إن لا شيء."""
+    if _WORKSPACE_FILE.exists():
+        try:
+            d = json.loads(_WORKSPACE_FILE.read_text(encoding="utf-8"))
+            if d.get("work_dir") and os.path.isdir(d["work_dir"]):
+                return d
+        except Exception:
+            pass
+    return {}
+
+
+def _token_clone_url(clone_url: str, token: str) -> str:
+    """يحقن التوكن في رابط الاستنساخ للمصادقة (لا يُحفَظ في .git/config)."""
+    if token and clone_url.startswith("https://"):
+        return "https://x-access-token:" + token + "@" + clone_url[len("https://"):]
+    return clone_url
+
+
+def _api_github_select_repo(body: dict) -> dict:
+    """استنساخ المستودع المختار محلياً (أو تحديثه) وتعيينه مساحة العمل النشِطة.
+
+    هذا ما يجعل «اختيار مستودع» فعّالاً: الوكيل يعمل على ملفات المستودع الحقيقية
+    ثم يُرفَع إليها — بدل اختراع مسارات وهمية.
+    """
+    full = str(body.get("full_name", "")).strip()
+    clone_url = str(body.get("clone_url", "")).strip()
+    branch = str(body.get("default_branch", "") or "main").strip()
+    if not full or not clone_url:
+        return {"ok": False, "error": "بيانات المستودع ناقصة"}
+    token = _github_token()
+    dest = _workspaces_dir() / full.replace("/", "__")
+    auth_url = _token_clone_url(clone_url, token)
+    try:
+        if (dest / ".git").is_dir():
+            # موجود: حدّثه
+            r = subprocess.run(["git", "-C", str(dest), "pull", auth_url, branch],
+                               capture_output=True, text=True, timeout=180)
+            action = "تحديث"
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            r = subprocess.run(["git", "clone", "--depth", "50", "-b", branch,
+                                auth_url, str(dest)],
+                               capture_output=True, text=True, timeout=300)
+            if r.returncode != 0:
+                # ربما الفرع غير موجود (مستودع فارغ جديد) → استنساخ بلا -b
+                r = subprocess.run(["git", "clone", "--depth", "50", auth_url, str(dest)],
+                                   capture_output=True, text=True, timeout=300)
+            action = "استنساخ"
+        if r.returncode != 0 and not (dest / ".git").is_dir():
+            return {"ok": False, "error": (r.stderr or r.stdout or "فشل الاستنساخ").strip()[:300]}
+        # أزل التوكن من remote المخزّن (أمان) واضبطه على الرابط النظيف
+        subprocess.run(["git", "-C", str(dest), "remote", "set-url", "origin", clone_url],
+                       capture_output=True, text=True)
+        _WORKSPACE_FILE.write_text(json.dumps(
+            {"repo": full, "work_dir": str(dest), "branch": branch,
+             "clone_url": clone_url}, ensure_ascii=False), encoding="utf-8")
+        # عدد الملفات (تأكيد أنه استُنسخ فعلاً)
+        n = sum(1 for _ in dest.rglob("*") if _.is_file() and ".git/" not in str(_))
+        return {"ok": True, "repo": full, "path": str(dest), "action": action, "files": n}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "انتهت مهلة الاستنساخ"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300]}
+
+
+def _api_workspace_get() -> dict:
+    ws = _active_workspace()
+    return {"active": bool(ws), "repo": ws.get("repo", ""),
+            "path": ws.get("work_dir", ""), "branch": ws.get("branch", "")}
+
+
+def _api_workspace_clear() -> dict:
+    """إلغاء المستودع النشِط → يعود الوكيل للعمل محلياً في مجلد المخرجات."""
+    try:
+        if _WORKSPACE_FILE.exists():
+            _WORKSPACE_FILE.unlink()
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 def _github_push(msg: str) -> dict:
-    branch = _git("branch", "--show-current") or "main"
+    # يعمل على مساحة العمل النشِطة (المستودع المستنسَخ) إن وُجدت، وإلا مستودع WeaverCode.
+    ws = _active_workspace()
+    cwd = ws.get("work_dir") or str(WEAVER_ROOT)
+    branch = subprocess.run(["git", "-C", cwd, "branch", "--show-current"],
+                            capture_output=True, text=True).stdout.strip() or \
+        ws.get("branch", "main")
+    push_target = ["git", "-C", cwd, "push", "origin", branch]
+    # للمستودعات المستنسَخة: احقن التوكن وقت الرفع فقط (لا يُخزَّن)
+    if ws:
+        token = _github_token()
+        clone_url = ws.get("clone_url", "")
+        if token and clone_url:
+            push_target = ["git", "-C", cwd, "push",
+                           _token_clone_url(clone_url, token), branch]
     out = []
-    for cmd in (["git", "add", "-A"], ["git", "commit", "-m", msg],
-                ["git", "push", "origin", branch]):
-        r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(WEAVER_ROOT))
-        out.append((r.stdout + r.stderr).strip())
-    return {"output": "\n".join(o for o in out if o)}
+    for cmd in (["git", "-C", cwd, "add", "-A"],
+                ["git", "-C", cwd, "commit", "-m", msg],
+                push_target):
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        # لا تُظهر التوكن في المخرجات
+        clean = (r.stdout + r.stderr).replace(_github_token(), "***") if _github_token() else (r.stdout + r.stderr)
+        out.append(clean.strip())
+    return {"output": "\n".join(o for o in out if o), "repo": ws.get("repo", "محلي")}
 
 
 def _test_connection() -> dict:
@@ -1056,6 +1167,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_api_github())
         if path == "/api/github/repos":
             return self._json(_api_github_repos())
+        if path == "/api/workspace":
+            return self._json(_api_workspace_get())
         if path == "/api/integrations":
             return self._json({"integrations": _load_integrations()})
         if path == "/api/files/download-zip":
@@ -1097,6 +1210,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_github_push(body.get("message", "🕸️ WeaverCode update")))
         if path == "/api/github/create-repo":
             return self._json(_api_github_create_repo(body))
+        if path == "/api/github/select-repo":
+            return self._json(_api_github_select_repo(body))
+        if path == "/api/workspace/clear":
+            return self._json(_api_workspace_clear())
         if path == "/api/integrations":
             items = body.get("integrations", [])
             if isinstance(items, list):

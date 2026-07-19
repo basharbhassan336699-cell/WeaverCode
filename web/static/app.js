@@ -208,18 +208,36 @@
       + "</button>").join("");
     $$("#repoList [data-ri]").forEach((b) => b.onclick = () => pickRepo(list[+b.dataset.ri]));
   }
-  function pickRepo(r) {
+  async function pickRepo(r) {
     ghRepo = r.full_name;
     activeRepo = r;
     $("#repoModal").classList.remove("open");
     const chip = $("#repoChip");
-    chip.innerHTML = '<span class="ellip">🔗 ' + escapeHtml(ghRepo) + " (متصل)</span><span class=\"chip-caret\">▾</span>";
+    // استنساخ المستودع فعلياً ليعمل الوكيل عليه (لا مجرّد سطر سياق)
+    chip.innerHTML = '<span class="ellip">⏳ يُستنسَخ ' + escapeHtml(ghRepo) + "…</span>";
+    try {
+      const res = await post("/api/github/select-repo", {
+        full_name: r.full_name, clone_url: r.clone_url, default_branch: r.default_branch });
+      if (res.ok) {
+        activeRepo.local_ready = true;
+        chip.innerHTML = '<span class="ellip">🔗 ' + escapeHtml(ghRepo) +
+          " (" + (res.files || 0) + " ملف)</span><span class=\"chip-caret\">▾</span>";
+      } else {
+        chip.innerHTML = '<span class="ellip">⚠️ ' + escapeHtml(ghRepo) +
+          " — تعذّر الاستنساخ</span><span class=\"chip-caret\">▾</span>";
+        alert("تعذّر استنساخ المستودع: " + (res.error || "خطأ") +
+          "\nتأكد أن اتصال GitHub يحمل صلاحية repo.");
+      }
+    } catch (e) {
+      chip.innerHTML = '<span class="ellip">🔗 ' + escapeHtml(ghRepo) + "</span><span class=\"chip-caret\">▾</span>";
+    }
   }
-  // محادثة بدون أي مستودع → لا سياق مستودع، الرقاقة تعود «بلا مستودع»
-  function pickNoRepo() {
+  // محادثة بدون أي مستودع → يلغي مساحة العمل، يعود الوكيل للعمل محلياً
+  async function pickNoRepo() {
     ghRepo = "";
     activeRepo = null;
     $("#repoModal").classList.remove("open");
+    try { await post("/api/workspace/clear", {}); } catch (e) {}
     const chip = $("#repoChip");
     chip.innerHTML = '<span class="ellip">💬 بدون مستودع</span><span class="chip-caret">▾</span>';
   }
@@ -294,9 +312,10 @@
     let prompt = v;
     if (files.length) prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" + files.map((a) => "- " + a.path).join("\n");
     if (activeRepo && activeRepo.full_name) {
-      prompt = "[المستودع الهدف على GitHub: " + activeRepo.full_name +
-        " · فرع: " + (activeRepo.default_branch || "main") +
-        " · " + (activeRepo.clone_url || "") + "]\n\n" + prompt;
+      prompt = "[أنت الآن داخل مستودع " + activeRepo.full_name +
+        " المستنسَخ محلياً في مجلد العمل الحالي (فرع " +
+        (activeRepo.default_branch || "main") + "). اعمل على ملفاته الفعلية " +
+        "بمسارات نسبية (استخدم Glob/Read لاستكشافها أولاً)، ولا تخترع مسارات.]\n\n" + prompt;
     }
     chatHistory = []; // محادثة جديدة
     currentSessionId = uuid(); // معرّف جديد ثابت لهذه المحادثة

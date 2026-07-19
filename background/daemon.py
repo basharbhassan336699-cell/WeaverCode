@@ -44,6 +44,25 @@ def _reload_env() -> None:
         pass
 
 
+def _active_work_dir() -> str:
+    """مجلد عمل الوكيل: مستودع GitHub المستنسَخ إن اختير، وإلا مجلد المخرجات.
+
+    يقرأ config/workspace.json الذي يكتبه الويب عند اختيار مستودع — فيعمل الوكيل
+    على ملفات المستودع الحقيقية (بدل اختراع مسارات وهمية) ثم يُرفَع إليها.
+    """
+    try:
+        f = Path(__file__).resolve().parent.parent / "config" / "workspace.json"
+        if f.exists():
+            import json as _json
+            d = _json.loads(f.read_text(encoding="utf-8"))
+            wd = d.get("work_dir")
+            if wd and os.path.isdir(wd):
+                return wd
+    except Exception:
+        pass
+    return _outputs_dir()
+
+
 def _outputs_dir() -> str:
     """مجلد المخرجات — نفس منطق web/server._outputs_dir ليتطابق مع شاشة «الملفات».
 
@@ -94,8 +113,8 @@ class WeaverDaemon:
 
         _reload_env()  # مزامنة: التقاط تغييرات الإعدادات من الويب (config/.env)
         provider = get_provider()
-        # مجلد العمل = مجلد المخرجات: يضمن ظهور الملفات المُنشأة في شاشة «الملفات»
-        tools = ToolRegistry(work_dir=_outputs_dir())
+        # مجلد العمل = المستودع المستنسَخ إن اختير، وإلا مجلد المخرجات.
+        tools = ToolRegistry(work_dir=_active_work_dir())
         memory = MemoryStore()
         engine = QueryEngine(
             provider=provider,
@@ -150,10 +169,24 @@ class WeaverDaemon:
         else:
             text = result.text
             if not text or not text.strip():
-                raw = (getattr(provider, "last_raw", "") or "").strip()
-                text = "(لم يُرجع النموذج نصاً — جرّب صياغة أوضح أو نموذجاً آخر.)"
-                if raw:
-                    text += f"\n\n🔎 آخر استجابة خام من المزوّد (تشخيص):\n{raw[:800]}"
+                # الوكيل نفّذ أدوات لكن لم يكتب نصاً ختامياً → لخّص ما فعله بدل
+                # ترك رسالة فارغة أو JSON خام (أوضح وأنفع للمستخدم).
+                tools_used = list(result.tool_calls_made or [])
+                if tools_used:
+                    from collections import Counter
+                    c = Counter(tools_used)
+                    summary = "، ".join(f"{n}×{k}" if n > 1 else k
+                                        for k, n in c.items())
+                    text = ("✅ نفّذت العملية عبر الأدوات: " + summary +
+                            ".\nراجع شاشة «الملفات» للنتيجة. "
+                            "(لم يكتب النموذج ملخّصاً نصياً — يمكنك طلب «لخّص ما فعلت».)")
+                else:
+                    text = ("(لم يُرجع النموذج نصاً ولم ينفّذ أدوات. غالباً السياق "
+                            "كبير جداً أو الطلب غامض — جرّب «محادثة جديدة» أو صياغة أوضح "
+                            "أو ارفع WEAVER_MAX_TOKENS.)")
+                    raw = (getattr(provider, "last_raw", "") or "").strip()
+                    if raw:
+                        text += f"\n\n🔎 تشخيص خام:\n{raw[:400]}"
             response_text = text
             await event_bus.emit(WeaverEvent(EventType.RESPONSE, text[:200], text))
 
