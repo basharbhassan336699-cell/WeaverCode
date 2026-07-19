@@ -267,19 +267,21 @@ def _default_integrations() -> list:
     gh = f"https://github.com/{slug}" if slug else "https://github.com"
     colab = (f"https://colab.research.google.com/github/{slug}"
              if slug else "https://colab.research.google.com")
+    # auth_url = صفحة إنشاء التوكن/الاعتماد مباشرةً (خطوة «السماح» الفعلية).
     return [
         {"id": "github", "name": "GitHub", "icon": "🐙", "url": gh,
+         "auth_url": "https://github.com/settings/tokens/new?description=WeaverCode&scopes=repo",
          "token": "", "enabled": True, "builtin": True},
         {"id": "colab", "name": "Google Colab", "icon": "📓", "url": colab,
-         "token": "", "enabled": True, "builtin": True},
+         "auth_url": colab, "token": "", "enabled": True, "builtin": True},
         {"id": "canva", "name": "Canva", "icon": "🎨", "url": "https://www.canva.com",
-         "token": "", "enabled": True, "builtin": True},
+         "auth_url": "https://www.canva.com/settings", "token": "", "enabled": True, "builtin": True},
         {"id": "vercel", "name": "Vercel", "icon": "▲", "url": "https://vercel.com/dashboard",
-         "token": "", "enabled": False, "builtin": True},
+         "auth_url": "https://vercel.com/account/tokens", "token": "", "enabled": False, "builtin": True},
         {"id": "huggingface", "name": "Hugging Face", "icon": "🤗", "url": "https://huggingface.co",
-         "token": "", "enabled": False, "builtin": True},
+         "auth_url": "https://huggingface.co/settings/tokens/new", "token": "", "enabled": False, "builtin": True},
         {"id": "replit", "name": "Replit", "icon": "🖥️", "url": "https://replit.com",
-         "token": "", "enabled": False, "builtin": True},
+         "auth_url": "https://replit.com/account#connected-services", "token": "", "enabled": False, "builtin": True},
     ]
 
 

@@ -444,12 +444,13 @@
     $$("#intgList [data-open]").forEach((b) => b.onclick = () => { const it = intg[+b.dataset.open]; if (it && it.url) window.open(it.url, "_blank", "noopener"); });
     $$("#intgList [data-disc]").forEach((b) => b.onclick = () => disconnectIntg(+b.dataset.disc));
   }
-  // تدفّق الاتصال الحقيقي: افتح موقع الخدمة (للدخول/التفويض) ثم أكمل بلصق الاعتماد
+  // تدفّق الاتصال الحقيقي: افتح صفحة إنشاء التوكن/التفويض ثم أكمل بلصق الاعتماد
   function connectIntg(i) {
     const it = intg[i];
-    if (!it || !it.url) return;
-    window.open(it.url, "_blank", "noopener");   // (1) اذهب للموقع لتسجيل الدخول/التفويض
-    openIntgModal(i, true);                        // (2) الصق الاعتماد لإتمام الربط فعلاً
+    if (!it) return;
+    const authUrl = it.auth_url || it.url;   // صفحة «السماح»/إنشاء التوكن مباشرةً
+    if (authUrl) window.open(authUrl, "_blank", "noopener");
+    openIntgModal(i, true);                   // الصق الاعتماد لإتمام الربط فعلاً
   }
   // قطع الاتصال: يمسح الاعتماد فيعود صادقاً «غير متصل»
   function disconnectIntg(i) {
@@ -477,7 +478,7 @@
     const hint = $("#mHint");
     if (hint) {
       hint.textContent = connecting
-        ? "فُتح موقع الخدمة في تبويب جديد. سجّل الدخول وانسخ المفتاح/التوكن ثم الصقه هنا لإتمام الاتصال."
+        ? "فُتحت صفحة الخدمة في تبويب جديد. أنشئ توكناً/مفتاحاً هناك (هذا هو «السماح» الفعلي) وانسخه ثم الصقه هنا لإتمام الاتصال."
         : "";
       hint.style.display = connecting ? "block" : "none";
     }
