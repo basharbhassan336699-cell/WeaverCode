@@ -763,6 +763,70 @@ def _test_connection() -> dict:
             "output": (r.stdout.strip() or r.stderr.strip())[:500]}
 
 
+def _discover_models() -> dict:
+    """اكتشاف النماذج المتاحة فعلاً من المزود الحالي عبر /models (بلا نماذج وهمية).
+
+    EN: Query the current provider's /models endpoint and return ONLY the real
+    model ids it reports. Uses the existing _http_get_json (urllib + curl
+    fallback for Termux). لا يمسّ مفاتيح/اتصال provider — قراءة فقط.
+    """
+    env = _read_env()
+    key = (env.get("WEAVER_API_KEY") or os.environ.get("WEAVER_API_KEY", "")).strip()
+    base = (env.get("WEAVER_BASE_URL") or os.environ.get("WEAVER_BASE_URL", "")).strip().rstrip("/")
+    if not key or not base:
+        return {"error": "لم يُحدَّد مفتاح أو رابط المزود", "models": []}
+    headers = {"Authorization": f"Bearer {key}",
+               "Content-Type": "application/json",
+               "User-Agent": "WeaverCode"}
+    # جرّب /models ثم /v1/models (بعض الروابط تنتهي بـ /v1 وبعضها لا)
+    tried = []
+    last_err = ""
+    for suffix in ("/models", "/v1/models"):
+        url = base + suffix
+        tried.append(url)
+        data, err = _http_get_json(url, headers, timeout=15)
+        if err or not isinstance(data, (dict, list)):
+            last_err = err or "استجابة غير متوقعة"
+            continue
+        items = data.get("data", data.get("models", [])) if isinstance(data, dict) else data
+        ids = []
+        for m in items or []:
+            if isinstance(m, str):
+                mid = m
+            elif isinstance(m, dict):
+                mid = m.get("id") or m.get("name") or m.get("model") or ""
+            else:
+                mid = ""
+            if mid:
+                ids.append(str(mid))
+        if ids:
+            return {"models": sorted(set(ids)), "source": url, "count": len(set(ids))}
+        # ربما رسالة خطأ في jsom
+        if isinstance(data, dict) and data.get("error"):
+            e = data["error"]
+            last_err = e.get("message") if isinstance(e, dict) else str(e)
+    return {"error": last_err or "لا يدعم المزوّد /models أو المفتاح خاطئ",
+            "models": [], "tried": tried}
+
+
+def _api_settings_save(body: dict) -> dict:
+    """حفظ الإعدادات في config/.env + تحديث os.environ فوراً (مزامنة).
+
+    قائمة مسموح بها تمنع كتابة مفاتيح عشوائية. القيم الفارغة تُتجاهَل (إبقاء
+    الحالي) — فلا يُمسح المفتاح/الرابط بالخطأ ولا يُكسَر اتصال المزوّد.
+    """
+    allowed = {"WEAVER_API_KEY", "WEAVER_BASE_URL", "WEAVER_MODEL",
+               "WEAVER_MAX_TOKENS", "WEAVER_TEMPERATURE", "WEAVER_TIMEOUT"}
+    updates = {k: str(v).strip() for k, v in (body or {}).items()
+               if k in allowed and str(v).strip()}
+    if not updates:
+        return {"updated": False, "error": "لا تحديثات صالحة"}
+    _write_env(updates)
+    for k, v in updates.items():
+        os.environ[k] = v  # مزامنة فورية داخل عملية الخادم
+    return {"updated": True, "saved": list(updates.keys())}
+
+
 def _run_command(cmd: str) -> dict:
     cmd = (cmd or "").strip()
     if cmd.startswith("/model "):
@@ -971,6 +1035,8 @@ class Handler(BaseHTTPRequestHandler):
             for k, v in _read_env().items():
                 s[k] = (v[:8] + "···") if "KEY" in k and len(v) > 8 else v
             return self._json({"settings": s})
+        if path == "/api/models":
+            return self._json(_discover_models())
         if path == "/api/github":
             return self._json(_api_github())
         if path == "/api/github/repos":
@@ -1007,8 +1073,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/command":
             return self._json(_run_command(body.get("command", "")))
         if path == "/api/settings":
-            _write_env(body)
-            return self._json({"updated": True})
+            return self._json(_api_settings_save(body))
+        if path == "/api/models/discover":
+            return self._json(_discover_models())
         if path == "/api/settings/test-connection":
             return self._json(_test_connection())
         if path == "/api/github/push":

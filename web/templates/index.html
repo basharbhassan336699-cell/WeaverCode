@@ -107,6 +107,10 @@
       <option value="anthropic">anthropic</option><option value="openai">openai</option>
     </select></label>
   <label class="field"><span>النموذج</span><input id="modelInput" type="text" placeholder="claude-fable-5"/></label>
+  <div class="row"><button id="discoverModels" class="chip-btn">🔍 اكتشاف النماذج المتاحة</button></div>
+  <div id="modelsList" class="models-list"></div>
+  <label class="field"><span>رابط المزود</span><input id="baseUrlInput" type="text" placeholder="https://…/v1" inputmode="url"/></label>
+  <label class="field"><span>الحد الأقصى للتوكنات</span><input id="maxTokensInput" type="number" placeholder="8192" inputmode="numeric"/></label>
   <label class="field"><span>المفتاح</span>
     <div class="key-row"><input id="keyInput" type="password" placeholder="WEAVER_API_KEY"/>
     <button id="keyToggle" class="ic">👁️</button></div></label>

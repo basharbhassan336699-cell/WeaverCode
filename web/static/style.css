@@ -267,6 +267,14 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .repo-tag.pub { color: #22c55e; }
 .repo-desc { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.5; }
 .repo-meta { color: var(--muted-2); font-size: 11px; margin-top: 5px; direction: ltr; text-align: right; }
+/* قائمة النماذج المكتشفة */
+.models-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column;
+  gap: 6px; margin: 4px 0 12px; }
+.model-item { text-align: left; direction: ltr; background: var(--card-2); border: 1px solid var(--line);
+  color: var(--text); border-radius: 8px; padding: 8px 10px; font-family: monospace; font-size: 12px;
+  cursor: pointer; width: 100%; }
+.model-item:hover { border-color: var(--orange); }
+.model-item.sel { border-color: var(--orange); color: var(--orange); }
 .repo-quick { display: flex; gap: 8px; margin-bottom: 10px; }
 .repo-quick-btn { flex: 1; background: var(--card-2); border: 1px solid var(--line); color: var(--text);
   border-radius: 12px; padding: 10px 8px; font-size: 13px; font-family: inherit; cursor: pointer; }

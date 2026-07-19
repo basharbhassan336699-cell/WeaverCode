@@ -20,6 +20,30 @@ from background.events import event_bus, WeaverEvent, EventType  # noqa: E402
 from background import status as st                      # noqa: E402
 
 
+def _reload_env() -> None:
+    """يعيد تحميل config/.env ويحدّث os.environ (مزامنة الويب ← الخادم الخلفي).
+
+    ما يُحفظ من واجهة الويب يُكتب في config/.env؛ هذا يجعل الـ daemon يلتقط
+    التغيير في المهمة التالية دون إعادة تشغيل. يقرأ نفس الملف المصدر — آمن،
+    ولا يمسّ منطق المصادقة (فقط يُحدِّث القيم من .env).
+    """
+    try:
+        f = Path(__file__).resolve().parent.parent / "config" / ".env"
+        if not f.exists():
+            return
+        for line in f.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k:
+                os.environ[k] = v
+    except Exception:
+        pass
+
+
 def _outputs_dir() -> str:
     """مجلد المخرجات — نفس منطق web/server._outputs_dir ليتطابق مع شاشة «الملفات».
 
@@ -68,6 +92,7 @@ class WeaverDaemon:
         st.save_status("working", prompt)
         await event_bus.emit(WeaverEvent(EventType.THINKING, "يعالج المهمة...", prompt))
 
+        _reload_env()  # مزامنة: التقاط تغييرات الإعدادات من الويب (config/.env)
         provider = get_provider()
         # مجلد العمل = مجلد المخرجات: يضمن ظهور الملفات المُنشأة في شاشة «الملفات»
         tools = ToolRegistry(work_dir=_outputs_dir())

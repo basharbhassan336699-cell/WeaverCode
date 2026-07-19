@@ -448,10 +448,12 @@
     });
   }
 
-  // ── الإعدادات ──
+  // ── الإعدادات (مزامنة مع config/.env) ──
   async function loadSettings() {
     const r = await api("/api/settings"); const s = r.settings || {};
     $("#modelInput").value = s.WEAVER_MODEL || "";
+    if ($("#baseUrlInput")) $("#baseUrlInput").value = s.WEAVER_BASE_URL || "";
+    if ($("#maxTokensInput")) $("#maxTokensInput").value = s.WEAVER_MAX_TOKENS || "";
     $("#keyInput").value = ""; $("#keyInput").placeholder = s.WEAVER_API_KEY || "WEAVER_API_KEY";
   }
   $("#keyToggle").onclick = () => { const k = $("#keyInput"); k.type = k.type === "password" ? "text" : "password"; };
@@ -459,10 +461,47 @@
   $("#saveSettings").onclick = async () => {
     const body = {};
     if ($("#modelInput").value.trim()) body.WEAVER_MODEL = $("#modelInput").value.trim();
+    if ($("#baseUrlInput") && $("#baseUrlInput").value.trim()) body.WEAVER_BASE_URL = $("#baseUrlInput").value.trim();
+    if ($("#maxTokensInput") && $("#maxTokensInput").value.trim()) body.WEAVER_MAX_TOKENS = $("#maxTokensInput").value.trim();
     if ($("#keyInput").value.trim()) body.WEAVER_API_KEY = $("#keyInput").value.trim();
-    await post("/api/settings", body); $("#settingsMsg").textContent = "✅ حُفظت."; refreshStatus();
+    const r = await post("/api/settings", body);
+    $("#settingsMsg").textContent = r.saved && r.saved.length
+      ? "✅ حُفظت: " + r.saved.join("، ") : (r.error ? "❌ " + r.error : "✅ حُفظت.");
+    refreshStatus(); loadSettings();
   };
   $("#testConn").onclick = async () => { $("#settingsMsg").textContent = "…جارٍ الاختبار"; const r = await post("/api/settings/test-connection", {}); $("#settingsMsg").textContent = (r.success ? "✅ " : "❌ ") + (r.output || ""); };
+
+  // ── اكتشاف النماذج المتاحة فعلاً من المزوّد (بلا نماذج وهمية) ──
+  function renderModelsList(models) {
+    const list = $("#modelsList");
+    const cur = ($("#modelInput").value || "").trim();
+    list.innerHTML = models.map((m) =>
+      '<button class="model-item' + (m === cur ? " sel" : "") + '" data-model="' +
+      escapeHtml(m) + '">' + escapeHtml(m) + "</button>").join("");
+    list.querySelectorAll("[data-model]").forEach((el) =>
+      el.onclick = () => selectModel(el.dataset.model));
+  }
+  function selectModel(name) {
+    $("#modelInput").value = name;
+    $("#modelsList").querySelectorAll(".model-item").forEach((el) =>
+      el.classList.toggle("sel", el.dataset.model === name));
+  }
+  async function discoverModels() {
+    const btn = $("#discoverModels"), list = $("#modelsList");
+    if (!btn || !list) return;
+    btn.disabled = true; const label = btn.textContent;
+    btn.textContent = "⏳ جارٍ الاكتشاف…"; list.innerHTML = "";
+    try {
+      const r = await post("/api/models/discover", {});
+      if (r.error) { list.innerHTML = '<div class="muted small">❌ ' + escapeHtml(r.error) + "</div>"; return; }
+      const models = r.models || [];
+      if (!models.length) { list.innerHTML = '<div class="muted small">لم يُعثَر على نماذج.</div>'; return; }
+      renderModelsList(models);
+    } catch (e) {
+      list.innerHTML = '<div class="muted small">❌ تعذّر الاكتشاف.</div>';
+    } finally { btn.disabled = false; btn.textContent = label; }
+  }
+  if ($("#discoverModels")) $("#discoverModels").onclick = discoverModels;
 
   // ── GitHub ──
   let ghRepo = "";
