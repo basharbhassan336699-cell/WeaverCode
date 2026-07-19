@@ -512,13 +512,10 @@ class WeaverProvider:
             category = details.get("category", "")
             explanation = details.get("explanation", "")
             text_parts.append(
-                "⛔ رفض النموذج تنفيذ هذا الطلب (سياسة الاستخدام لدى المزوّد/النموذج).\n"
+                "⛔ رفض المزوّد تنفيذ هذا الطلب.\n"
                 + (f"• الفئة: {category}\n" if category else "")
                 + (f"• السبب: {explanation}\n" if explanation else "")
-                + "\nملاحظة: هذا رفضٌ صادر من النموذج نفسه عبر بوابة المزوّد "
-                "(الطلب وصل بنجاح — لا خطأ في WeaverCode). إن تكرّر الرفض حتى "
-                "لطلبات بسيطة، فغالباً بوابة المزوّد تُضيف محتوى مخفياً يُحفّز الرفض؛ "
-                "جرّب مزوّداً/مفتاحاً آخر (مثل WeaverCode الرسمي أو OpenRouter أو Groq)."
+                + "\nإن تكرّر مع طلبات بسيطة، جرّب مفتاحاً آخر أو انتظر إعادة تعيين الرصيد."
             )
 
         finish_reason = "tool_calls" if (stop_reason == "tool_use" or tool_calls) else "stop"

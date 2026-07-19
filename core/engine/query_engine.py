@@ -14,6 +14,10 @@ from dataclasses import dataclass, field
 from .provider import WeaverProvider, Message, get_provider
 from ..tools.registry import ToolRegistry
 from ..memory.store import MemoryStore
+try:
+    from ..prompt_sanitizer import sanitize_prompt as _sanitize_prompt
+except Exception:
+    def _sanitize_prompt(t): return t
 from ..action_blocks import ActionBlockTracker, ActionBlock
 try:
     from ..permissions import PermissionManager
@@ -462,6 +466,27 @@ class QueryEngine:
             return PERM_DENY
         return decision or PERM_DENY
 
+    def _copy_created_to_downloads(self) -> None:
+        """ينسخ الملفات التي أنشأها الوكيل إلى ~/storage/downloads إن وُجد (Termux)."""
+        try:
+            created = getattr(self.tools, "_created_files", None)
+            if not created:
+                return
+            downloads = os.path.expanduser("~/storage/downloads")
+            if not os.path.isdir(downloads):
+                return
+            import shutil
+            for fpath in created:
+                try:
+                    if os.path.isfile(fpath):
+                        shutil.copy2(fpath, downloads)
+                except Exception:
+                    pass
+            # تفريغ القائمة بعد النسخ (تفادي تكرار النسخ)
+            self.tools._created_files = []
+        except Exception:
+            pass
+
     def _default_system(self) -> str:
         """البروموه الافتراضي — يستعمل بروموه الوضع الرئيسي مع قلب الهوية.
 
@@ -472,10 +497,9 @@ class QueryEngine:
             from prompts.system import get_system_prompt
             return get_system_prompt("main")
         except Exception:
-            # احتياطي مضمون: هوية WeaverCode بلطف (بلا كلمات مُحفّزة)
             return (
-                "أنت WeaverCode — وكيل برمجي مستقل.\n"
-                "اسمك WeaverCode. لغتك الافتراضية العربية."
+                "You are WeaverCode, an independent coding agent. "
+                "Reply in the same language the user writes in."
             )
 
     async def run(
@@ -537,7 +561,7 @@ class QueryEngine:
         if history:
             messages.extend(history)
 
-        messages.append(Message(role="user", content=_guard_user_prompt(model_prompt)))
+        messages.append(Message(role="user", content=_guard_user_prompt(_sanitize_prompt(model_prompt))))
 
         # hook: تسليم رسالة المستخدم
         if self.hooks:
@@ -566,7 +590,7 @@ class QueryEngine:
             #   (1) رسالة المستخدم فقط، بلا نظام وبلا أدوات (الأقرب للتطبيق البسيط)
             #   (2) + بروموه بسيط جداً، بلا أدوات
             # أول نتيجة غير مرفوضة تُعتمد. يُعطَّل بـ WEAVER_REFUSAL_RETRY=0
-            if (turns == 1 and not clean_retried
+            if (not clean_retried
                     and _refusal_retry_enabled()):
                 first_text = response["choices"][0]["message"].get("content") or ""
                 if _looks_like_refusal(first_text):
@@ -732,7 +756,8 @@ class QueryEngine:
                         not self._tool_pre_approved(tool_name) and \
                         not perm_preapproved:
                     decision = self._request_permission(tool_name, args, on_permission)
-                    if decision == PERM_ALLOW_ALWAYS:
+                    # موافقة واحدة (y) تكفي — لا يُسأل ثانيةً عن نفس الأداة في الجلسة
+                    if decision in (PERM_ALLOW_ALWAYS, PERM_ALLOW_ONCE):
                         self.session_allow.add(tool_name)
                     if decision == PERM_DENY:
                         tool_results.append(
@@ -818,6 +843,9 @@ class QueryEngine:
         if self.hooks:
             self.hooks.run("Stop", prompt=prompt)
 
+        # نسخ الملفات المُنشأة لمجلد التنزيلات تلقائياً (Termux)
+        self._copy_created_to_downloads()
+
         # حفظ في الذاكرة (بعد التنقية)
         await self.memory.save(prompt, result.text, result.tool_calls_made)
 
@@ -839,7 +867,7 @@ class QueryEngine:
         messages: List[Message] = [Message(role="system", content=self.system_prompt)]
         if history:
             messages.extend(history)
-        messages.append(Message(role="user", content=_guard_user_prompt(prompt)))
+        messages.append(Message(role="user", content=_guard_user_prompt(_sanitize_prompt(prompt))))
 
         if self.hooks:
             self.hooks.run("UserPromptSubmit", prompt=prompt)
@@ -893,7 +921,8 @@ class QueryEngine:
                 if self.tools.requires_permission(tool_name) and \
                         not self._tool_pre_approved(tool_name):
                     decision = self._request_permission(tool_name, args, on_permission)
-                    if decision == PERM_ALLOW_ALWAYS:
+                    # موافقة واحدة (y) تكفي — لا يُسأل ثانيةً عن نفس الأداة في الجلسة
+                    if decision in (PERM_ALLOW_ALWAYS, PERM_ALLOW_ONCE):
                         self.session_allow.add(tool_name)
                     if decision == PERM_DENY:
                         tool_results.append(Message(role="tool",

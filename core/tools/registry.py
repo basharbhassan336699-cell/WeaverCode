@@ -59,7 +59,16 @@ class ToolRegistry:
         self._bg_counter = 0
         # مجلدات عمل إضافية (multi-workspace / --add-dir)
         self.extra_dirs: List[str] = []
+        # الملفات التي أنشأها/عدّلها الوكيل (لنسخها لمجلد التنزيلات)
+        self._created_files: List[str] = []
         self._register_all()
+
+    def _resolve(self, path: str) -> Path:
+        """يحلّل المسار: المطلق كما هو، والنسبي بالنسبة لمجلد العمل (لا CWD)."""
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = Path(self.work_dir) / p
+        return p
 
     def _register_all(self):
         """تسجيل جميع الأدوات المدمجة"""
@@ -896,7 +905,7 @@ class ToolRegistry:
 
     def _read(self, path: str, offset: int = 0, limit: Optional[int] = None) -> str:
         try:
-            p = Path(path)
+            p = self._resolve(path)
             if not p.exists():
                 return f"الملف غير موجود: {path}"
             # وسائط متعددة (صورة/PDF): لا تُقرأ كنص — تُوصف بياناتها الوصفية
@@ -917,16 +926,20 @@ class ToolRegistry:
 
     def _write(self, path: str, content: str) -> str:
         try:
-            p = Path(path)
+            p = self._resolve(path)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding="utf-8")
-            return f"✅ تم الكتابة إلى {path} ({len(content)} حرف)"
+            # تتبّع الملف المُنشأ (لنسخه لمجلد التنزيلات لاحقاً)
+            sp = str(p)
+            if sp not in self._created_files:
+                self._created_files.append(sp)
+            return f"✅ تم الكتابة إلى {p} ({len(content)} حرف)"
         except Exception as e:
             return f"خطأ في الكتابة: {e}"
 
     def _edit(self, path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
         try:
-            p = Path(path)
+            p = self._resolve(path)
             content = p.read_text(encoding="utf-8")
             if old_string not in content:
                 return f"لم يُعثر على النص المطلوب في {path}"
@@ -942,7 +955,7 @@ class ToolRegistry:
     def _multi_edit(self, path: str, edits: List[Dict[str, Any]]) -> str:
         """تطبيق عدة استبدالات على ملف واحد بشكل ذرّي (كلها أو لا شيء)."""
         try:
-            p = Path(path)
+            p = self._resolve(path)
             content = p.read_text(encoding="utf-8")
         except Exception as e:
             return f"خطأ في قراءة {path}: {e}"

@@ -185,7 +185,7 @@ def test_refusal_is_surfaced_not_empty():
                              "explanation": "blocked under usage policy"}}
     conv = WeaverProvider._anthropic_to_openai_response(data)
     text = conv["choices"][0]["message"]["content"]
-    assert "رفض النموذج" in text and "cyber" in text
+    assert "رفض المزوّد" in text and "cyber" in text
     # مهم: ليس فارغاً ⇒ لا يُحفّز تبديل الصيغة العبثي
     assert WeaverProvider._response_is_empty(conv) is False
 
