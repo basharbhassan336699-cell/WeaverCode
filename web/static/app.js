@@ -446,16 +446,40 @@
     $$("#intgList [data-open]").forEach((b) => b.onclick = () => { const it = intg[+b.dataset.open]; if (it && it.url) window.open(it.url, "_blank", "noopener"); });
     $$("#intgList [data-disc]").forEach((b) => b.onclick = () => disconnectIntg(+b.dataset.disc));
   }
-  // تدفّق الاتصال: «Allow» حقيقي (device flow) لـ GitHub إن توفّر، وإلا توكن
-  function connectIntg(i) {
+  // تدفّق الاتصال: «Allow» بضغطة واحدة → device flow → توكن
+  async function connectIntg(i) {
     const it = intg[i];
     if (!it) return;
+    if (it.id === "github" && oauthStatus.github_oneclick) {
+      // زر «Authorize» واحد بلا رموز: افتح صفحة السماح، والباقي تلقائي
+      let r;
+      try { r = await api("/api/oauth/github/authorize"); } catch (e) { r = {}; }
+      if (r.authorize_url) {
+        // افتح صفحة «Authorize» في تبويب جديد؛ تبقى اللوحة تستطلع الحالة
+        window.open(r.authorize_url, "_blank");
+        pollConnectedAfterReturn("github");
+        return;
+      }
+    }
     if (it.id === "github" && oauthStatus.github) {
-      return startGithubDeviceFlow(i);   // زر «Allow» الحقيقي بلا توكن
+      return startGithubDeviceFlow(i);   // بديل: device flow (بلا secret)
     }
     const authUrl = it.auth_url || it.url;
     if (authUrl) window.open(authUrl, "_blank", "noopener");
     openIntgModal(i, true);
+  }
+  // بعد العودة من «Authorize» (callback حفظ التوكن) نُحدّث البطاقة
+  function pollConnectedAfterReturn(id) {
+    let tries = 0;
+    const t = setInterval(async () => {
+      tries++;
+      try {
+        const r = await api("/api/integrations");
+        const it = (r.integrations || []).find((x) => x.id === id);
+        if (it && it.connected) { clearInterval(t); intg = r.integrations; renderIntegrations(); }
+      } catch (e) {}
+      if (tries > 40) clearInterval(t);
+    }, 2000);
   }
 
   // ── تفويض GitHub الحقيقي عبر Device Flow (بلا توكن يدوي) ──

@@ -341,9 +341,60 @@ def _gh_client_id() -> str:
     return os.environ.get("GITHUB_OAUTH_CLIENT_ID", "").strip()
 
 
+def _gh_client_secret() -> str:
+    return os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "").strip()
+
+
+def _gh_redirect_uri() -> str:
+    return os.environ.get("GITHUB_OAUTH_REDIRECT",
+                          "http://localhost:8080/oauth/callback").strip()
+
+
+# حالات OAuth المؤقتة (CSRF) لتدفّق الضغطة الواحدة
+_oauth_states = set()
+
+
 def _api_oauth_status() -> dict:
-    """يخبر الواجهة أي خدمات تدعم «Allow» الحقيقي (device flow) الآن."""
-    return {"github": bool(_gh_client_id())}
+    """يخبر الواجهة أي طرق اتصال متاحة:
+    github_oneclick = زر «Allow» بضغطة واحدة (client_id + secret)
+    github          = device flow (client_id فقط)"""
+    cid, sec = _gh_client_id(), _gh_client_secret()
+    return {"github": bool(cid), "github_oneclick": bool(cid and sec)}
+
+
+def _api_oauth_github_authorize() -> dict:
+    """يبني رابط «Authorize» لتدفّق الضغطة الواحدة (authorization code)."""
+    cid = _gh_client_id()
+    if not cid or not _gh_client_secret():
+        return {"error": "يلزم GITHUB_OAUTH_CLIENT_ID و GITHUB_OAUTH_CLIENT_SECRET في config/.env"}
+    import secrets
+    state = secrets.token_urlsafe(16)
+    _oauth_states.add(state)
+    if len(_oauth_states) > 50:
+        _oauth_states.pop()
+    url = "https://github.com/login/oauth/authorize?" + _urlparse.urlencode({
+        "client_id": cid, "redirect_uri": _gh_redirect_uri(),
+        "scope": "repo", "state": state})
+    return {"authorize_url": url}
+
+
+def _oauth_github_exchange(code: str) -> bool:
+    """يبدّل رمز التفويض بتوكن ويحفظه في تكامل github. يُرجع True عند النجاح."""
+    if not code:
+        return False
+    r = _http_post_form("https://github.com/login/oauth/access_token", {
+        "client_id": _gh_client_id(), "client_secret": _gh_client_secret(),
+        "code": code, "redirect_uri": _gh_redirect_uri()})
+    token = r.get("access_token")
+    if not token:
+        return False
+    items = _load_integrations()
+    for it in items:
+        if it.get("id") == "github":
+            it["token"] = token
+            it["enabled"] = True
+    _save_integrations(items)
+    return True
 
 
 def _api_oauth_github_start() -> dict:
@@ -591,8 +642,34 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_api_session(qs.get("id", [""])[0]))
         if path == "/api/oauth/status":
             return self._json(_api_oauth_status())
+        if path == "/api/oauth/github/authorize":
+            return self._json(_api_oauth_github_authorize())
         if path == "/api/oauth/github/start":
             return self._json(_api_oauth_github_start())
+        if path == "/oauth/callback":
+            code = qs.get("code", [""])[0]
+            state = qs.get("state", [""])[0]
+            ok = False
+            if state in _oauth_states:
+                _oauth_states.discard(state)
+                ok = _oauth_github_exchange(code)
+            elif code:  # حالة غياب state (نسمح لكن نبدّل)
+                ok = _oauth_github_exchange(code)
+            if ok:
+                return self._html(
+                    "<div style='font-family:sans-serif;text-align:center;"
+                    "padding:60px 20px;color:#e6e6e6;background:#0F0F19;"
+                    "min-height:100vh'><div style='font-size:56px'>✅</div>"
+                    "<h2 style='color:#22c55e'>تم الاتصال بـ GitHub بنجاح!</h2>"
+                    "<p>ارجع إلى تبويب WeaverCode — ستظهر «متصل» تلقائياً.</p>"
+                    "<script>setTimeout(function(){window.close()},1200)</script>"
+                    "</div>")
+            return self._html(
+                "<div style='font-family:sans-serif;text-align:center;padding:60px 20px;"
+                "color:#e6e6e6;background:#0F0F19;min-height:100vh'>"
+                "<div style='font-size:56px'>❌</div>"
+                "<h2>تعذّر إتمام الاتصال</h2>"
+                "<p>تأكّد من GITHUB_OAUTH_CLIENT_SECRET في config/.env وأعد المحاولة.</p></div>")
         if path == "/api/settings":
             s = {}
             for k, v in _read_env().items():

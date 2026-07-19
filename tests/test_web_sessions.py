@@ -176,3 +176,35 @@ def test_oauth_poll_pending(monkeypatch):
                         lambda url, data, timeout=15: {"error": "authorization_pending"})
     r = server._api_oauth_github_poll("devcode")
     assert r.get("pending") is True
+
+
+# ── تفويض GitHub «Allow» بضغطة واحدة (authorization code flow) ────────────────
+
+def test_oauth_oneclick_status(monkeypatch):
+    from web import server
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "cid")
+    monkeypatch.delenv("GITHUB_OAUTH_CLIENT_SECRET", raising=False)
+    assert server._api_oauth_status()["github_oneclick"] is False
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_SECRET", "sec")
+    assert server._api_oauth_status()["github_oneclick"] is True
+
+
+def test_oauth_authorize_url(monkeypatch):
+    from web import server
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "cidX")
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_SECRET", "sec")
+    r = server._api_oauth_github_authorize()
+    assert "github.com/login/oauth/authorize" in r["authorize_url"]
+    assert "client_id=cidX" in r["authorize_url"]
+
+
+def test_oauth_exchange_saves_token(monkeypatch, tmp_path):
+    from web import server
+    monkeypatch.setattr(server, "_INTEGRATIONS_FILE", tmp_path / "i.json")
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("GITHUB_OAUTH_CLIENT_SECRET", "sec")
+    monkeypatch.setattr(server, "_http_post_form",
+                        lambda url, data, timeout=15: {"access_token": "gho_x"})
+    assert server._oauth_github_exchange("code123") is True
+    gh = next(i for i in server._load_integrations() if i["id"] == "github")
+    assert gh["token"] == "gho_x" and gh["connected"] is True
