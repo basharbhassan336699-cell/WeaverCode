@@ -105,6 +105,31 @@ def test_settings_save_allowlist_and_env(tmp_path, monkeypatch):
     assert os.environ.get("WEAVER_MODEL") == "m"
 
 
+def test_settings_save_nvidia_key_switches_base_url(tmp_path, monkeypatch):
+    """حفظ مفتاح NVIDIA (nvapi-) يضبط الرابط والنموذج تلقائياً (لا يبقى معلّقاً)."""
+    server = _fresh_server(
+        tmp_path, monkeypatch,
+        "WEAVER_BASE_URL=https://capi.aerolink.lat\nWEAVER_API_KEY=old\n")
+    for k in ("WEAVER_BASE_URL", "WEAVER_MODEL", "WEAVER_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    r = server._api_settings_save({"WEAVER_API_KEY": "nvapi-Cz123"})
+    assert r["detected_platform"] == "nvidia"
+    env = server._read_env()
+    assert "nvidia.com" in env["WEAVER_BASE_URL"]
+    assert env["WEAVER_MODEL"]
+
+
+def test_settings_save_ambiguous_key_keeps_base_url(tmp_path, monkeypatch):
+    """مفتاح غامض (sk-) لا يبدّل رابط بوابة قائمة مثل aerolink."""
+    server = _fresh_server(
+        tmp_path, monkeypatch,
+        "WEAVER_BASE_URL=https://capi.aerolink.lat\n")
+    monkeypatch.delenv("WEAVER_BASE_URL", raising=False)
+    r = server._api_settings_save({"WEAVER_API_KEY": "sk-plainkey123"})
+    assert "detected_platform" not in r
+    assert server._read_env()["WEAVER_BASE_URL"] == "https://capi.aerolink.lat"
+
+
 def test_settings_save_ignores_empty_no_wipe(tmp_path, monkeypatch):
     """قيمة فارغة لا تُكتب — فلا يُمحى المفتاح/الرابط بالخطأ."""
     server = _fresh_server(

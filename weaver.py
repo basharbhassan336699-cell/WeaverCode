@@ -127,14 +127,36 @@ _SYNC_KEYS = ("WEAVER_API_KEY", "WEAVER_BASE_URL", "WEAVER_MODEL",
 # خرائط المزوّدين (نفس منطق الويب) — لأمر /provider
 _PROVIDER_MAP = {
     "aerolink": ("https://capi.aerolink.lat/v1", "claude-fable-5"),
+    "nvidia": ("https://integrate.api.nvidia.com/v1", "meta/llama-3.1-70b-instruct"),
     "groq": ("https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
     "deepseek": ("https://api.deepseek.com/v1", "deepseek-chat"),
     "openrouter": ("https://openrouter.ai/api/v1", "anthropic/claude-sonnet-4-6"),
     "anthropic": ("https://api.anthropic.com/v1", "claude-opus-4-8"),
     "openai": ("https://api.openai.com/v1", "gpt-4o"),
     "together": ("https://api.together.xyz/v1", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+    "mistral": ("https://api.mistral.ai/v1", "mistral-large-latest"),
     "ollama": ("http://localhost:11434/v1", "llama3.2"),
 }
+
+# بادئات المفاتيح المميّزة لكل منصة (لا لبس فيها) → رابط المزوّد + الاسم.
+# تُمكّن «أعطِ مفتاحاً فقط فيتعرّف على المنصة» تلقائياً. البادئات الغامضة (sk- المجرّدة
+# تستخدمها بوابات كثيرة) لا تُدرَج حتى لا نكسر إعداداً قائماً مثل aerolink.
+_KEY_PREFIX_PLATFORM = [
+    ("nvapi-", "nvidia"),
+    ("sk-ant-", "anthropic"),
+    ("sk-or-", "openrouter"),
+    ("gsk_", "groq"),
+]
+
+
+def _platform_from_key(key: str):
+    """يكشف المنصة من بادئة المفتاح (nvapi-/sk-ant-/…) → (url, model, name) أو None."""
+    key = (key or "").strip()
+    for prefix, name in _KEY_PREFIX_PLATFORM:
+        if key.startswith(prefix):
+            url, model = _PROVIDER_MAP[name]
+            return url, model, name
+    return None
 
 
 def save_env(updates: dict) -> None:
@@ -709,15 +731,35 @@ async def interactive_mode(initial_history=None, session_id=None,
                 draw_info(f"أُبقي النموذج: {provider.config.model}")
             continue
 
-        # ── تغيير المفتاح (يُزامَن مع الويب) ──────────────────────────────────
+        # ── تغيير المفتاح (يُزامَن مع الويب) + كشف المنصة من البادئة تلقائياً ──
         if prompt.startswith("/key "):
             new_key = prompt[5:].strip()
-            if new_key:
-                provider.config.api_key = new_key
-                save_env({"WEAVER_API_KEY": new_key})
-                draw_success("حُدِّث المفتاح ✓ — اكتب /model لاكتشاف نماذج المنصة.")
-            else:
+            if not new_key:
                 draw_error("الاستخدام: /key <المفتاح>")
+                continue
+            provider.config.api_key = new_key
+            updates = {"WEAVER_API_KEY": new_key}
+            detected = _platform_from_key(new_key)
+            if detected and detected[0] != provider.config.base_url:
+                url, default_model, pname = detected
+                provider.config.base_url = url
+                provider.config.model = default_model
+                updates["WEAVER_BASE_URL"] = url
+                updates["WEAVER_MODEL"] = default_model
+                save_env(updates)
+                draw_success(f"كُشفت المنصة من المفتاح: {pname} → {url}")
+                # اكتشف نماذج المنصة الجديدة فوراً
+                chosen = await _pick_model(default_model)
+                if chosen and chosen != provider.config.model:
+                    provider.config.model = chosen
+                    save_env({"WEAVER_MODEL": chosen})
+                print("\033[2J\033[H", end="")
+                draw_welcome(provider.config.model, provider.config.base_url)
+                draw_success(f"جاهز: {provider.config.model} · {pname}")
+            else:
+                save_env(updates)
+                draw_success("حُدِّث المفتاح ✓ — إن كانت منصة مختلفة اكتب "
+                             "/provider <name> ثم /model.")
             continue
 
         # ── تبديل المزوّد/المنصة (يُزامَن مع الويب) + اكتشاف نماذجها ───────────

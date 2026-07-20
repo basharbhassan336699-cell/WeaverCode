@@ -89,8 +89,30 @@ _PROVIDER_MAP = {
     "openrouter": ("https://openrouter.ai/api/v1", "anthropic/claude-sonnet-4-6"),
     "anthropic": ("https://api.anthropic.com/v1", "claude-sonnet-4-6"),
     "openai": ("https://api.openai.com/v1", "gpt-4o"),
+    "nvidia": ("https://integrate.api.nvidia.com/v1", "meta/llama-3.1-70b-instruct"),
+    "together": ("https://api.together.xyz/v1", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+    "mistral": ("https://api.mistral.ai/v1", "mistral-large-latest"),
     "aerolink": ("https://capi.aerolink.lat", "claude-fable-5"),
 }
+
+# بادئات مفاتيح مميّزة لا لبس فيها → منصة (لكشف المنصة من المفتاح تلقائياً).
+# نتجنّب البادئات الغامضة (sk- المجرّدة) حتى لا نكسر بوابة قائمة مثل aerolink.
+_KEY_PREFIX_PLATFORM = [
+    ("nvapi-", "nvidia"),
+    ("sk-ant-", "anthropic"),
+    ("sk-or-", "openrouter"),
+    ("gsk_", "groq"),
+]
+
+
+def _platform_from_key(key: str):
+    """يكشف المنصة من بادئة المفتاح → (base_url, model, name) أو None."""
+    key = (key or "").strip()
+    for prefix, name in _KEY_PREFIX_PLATFORM:
+        if key.startswith(prefix):
+            url, model = _PROVIDER_MAP[name]
+            return url, model, name
+    return None
 
 
 # ── مساعدات البيانات ──────────────────────────────────────────────────────────
@@ -975,10 +997,24 @@ def _api_settings_save(body: dict) -> dict:
                if k in allowed and str(v).strip()}
     if not updates:
         return {"updated": False, "error": "لا تحديثات صالحة"}
+    # كشف المنصة من بادئة المفتاح تلقائياً (nvapi-/sk-ant-/…) إن لم يُحدَّد رابط
+    # صراحةً — فتغيير المفتاح لمنصة أخرى يضبط الرابط والنموذج معاً (لا يبقى معلّقاً).
+    detected = None
+    if "WEAVER_API_KEY" in updates and "WEAVER_BASE_URL" not in updates:
+        detected = _platform_from_key(updates["WEAVER_API_KEY"])
+        if detected:
+            url, model, pname = detected
+            cur_base = (_read_env().get("WEAVER_BASE_URL") or "").strip()
+            if url != cur_base:
+                updates["WEAVER_BASE_URL"] = url
+                updates.setdefault("WEAVER_MODEL", model)
     _write_env(updates)
     for k, v in updates.items():
         os.environ[k] = v  # مزامنة فورية داخل عملية الخادم
-    return {"updated": True, "saved": list(updates.keys())}
+    out = {"updated": True, "saved": list(updates.keys())}
+    if detected and "WEAVER_BASE_URL" in updates:
+        out["detected_platform"] = detected[2]
+    return out
 
 
 def _run_command(cmd: str) -> dict:

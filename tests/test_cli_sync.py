@@ -77,5 +77,25 @@ def test_sync_provider_from_env(weaver, monkeypatch):
 
 
 def test_provider_map_has_common_platforms(weaver):
-    for name in ("anthropic", "openai", "openrouter", "groq", "ollama", "aerolink"):
+    for name in ("anthropic", "openai", "openrouter", "groq", "ollama",
+                 "aerolink", "nvidia"):
         assert name in weaver._PROVIDER_MAP
+
+
+def test_platform_from_key_detects_nvidia(weaver):
+    d = weaver._platform_from_key("nvapi-CzABC123")
+    assert d is not None
+    url, model, name = d
+    assert name == "nvidia" and "nvidia.com" in url
+
+
+def test_platform_from_key_unambiguous_prefixes(weaver):
+    assert weaver._platform_from_key("sk-ant-x")[2] == "anthropic"
+    assert weaver._platform_from_key("sk-or-x")[2] == "openrouter"
+    assert weaver._platform_from_key("gsk_x")[2] == "groq"
+
+
+def test_platform_from_key_ambiguous_returns_none(weaver):
+    # sk- المجرّدة ومفاتيح البوابات لا تُبدّل الرابط (حماية aerolink)
+    assert weaver._platform_from_key("sk-plainopenai") is None
+    assert weaver._platform_from_key("aerolink-random-key") is None

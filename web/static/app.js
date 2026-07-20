@@ -485,8 +485,10 @@
     if ($("#maxTokensInput") && $("#maxTokensInput").value.trim()) body.WEAVER_MAX_TOKENS = $("#maxTokensInput").value.trim();
     if ($("#keyInput").value.trim()) body.WEAVER_API_KEY = $("#keyInput").value.trim();
     const r = await post("/api/settings", body);
-    $("#settingsMsg").textContent = r.saved && r.saved.length
+    let msg = r.saved && r.saved.length
       ? "✅ حُفظت: " + r.saved.join("، ") : (r.error ? "❌ " + r.error : "✅ حُفظت.");
+    if (r.detected_platform) msg += " · كُشفت المنصة: " + r.detected_platform + " (اضغط «اكتشاف النماذج»)";
+    $("#settingsMsg").textContent = msg;
     refreshStatus(); loadSettings();
   };
   $("#testConn").onclick = async () => { $("#settingsMsg").textContent = "…جارٍ الاختبار"; const r = await post("/api/settings/test-connection", {}); $("#settingsMsg").textContent = (r.success ? "✅ " : "❌ ") + (r.output || ""); };
