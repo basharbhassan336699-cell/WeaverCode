@@ -42,6 +42,80 @@ class Message:
 
 # ── بناء كتل الوسائط (رؤية) — يعتمد core.multimodal، لا يمسّ المصادقة ──────────
 
+# ── استخراج استدعاءات الأدوات المكتوبة كنصّ (<invoke name="...">) ─────────────
+# بعض النماذج/البوابات تُخرج استدعاء الأداة كنصّ بصيغة (antml/DSML) بدل كتلة
+# tool_use الأصلية، فتظهر كنصّ ميت ولا تُنفَّذ. نستخرجها هنا لتُنفَّذ فعلياً.
+_PARAM_ALIAS = {
+    "filepath": "path", "file_path": "path", "filename": "path", "file": "path",
+    "dir": "path", "directory": "path", "cmd": "command", "bash": "command",
+    "text": "content", "body": "content", "data": "content",
+}
+
+
+def _clean_param_value(v: str) -> str:
+    v = (v or "").strip()
+    # نزع بادئة نوعية غريبة مثل: string="true">...
+    m = re.match(r'^(?:string|str|text|number|int|bool|boolean)\s*=\s*"[^"]*"\s*>\s*',
+                 v, re.IGNORECASE)
+    if m:
+        v = v[m.end():].strip()
+    return v
+
+
+def _extract_text_tool_calls(text: str) -> List[Dict[str, Any]]:
+    """يستخرج استدعاءات أدوات مكتوبة كنصّ بصيغة <invoke name="X"><parameter…>.
+
+    مبني على حدود الوسوم (لا يعتمد على إغلاق سليم) ليتحمّل التشويه. يُرجع قائمة
+    tool_calls بصيغة OpenAI الموحّدة، أو [] إن لم يجد.
+    """
+    if not text or "invoke" not in text.lower():
+        return []
+    calls: List[Dict[str, Any]] = []
+    starts = [m.start() for m in re.finditer(
+        r'<\s*(?:antml:)?invoke\s+name\s*=\s*"', text, re.IGNORECASE)]
+    for i, s in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else len(text)
+        block = text[s:end]
+        nm = re.search(r'name\s*=\s*"([^"]+)"', block, re.IGNORECASE)
+        if not nm:
+            continue
+        name = nm.group(1).strip()
+        args: Dict[str, Any] = {}
+        pstarts = [m.start() for m in re.finditer(
+            r'<\s*(?:antml:)?parameter\s+name\s*=\s*"', block, re.IGNORECASE)]
+        for j, ps in enumerate(pstarts):
+            pend = pstarts[j + 1] if j + 1 < len(pstarts) else len(block)
+            pblock = block[ps:pend]
+            pm = re.search(r'name\s*=\s*"([^"]+)"\s*>', pblock, re.IGNORECASE)
+            if not pm:
+                continue
+            k = pm.group(1).strip()
+            k = _PARAM_ALIAS.get(k.lower(), k)
+            v = pblock[pm.end():]
+            v = re.split(r'<\s*/?\s*(?:antml:)?(?:parameter|invoke)',
+                         v, 1, flags=re.IGNORECASE)[0]
+            if k:
+                args[k] = _clean_param_value(v)
+        if name:
+            calls.append({
+                "id": f"txt_{i}", "type": "function",
+                "function": {"name": name,
+                             "arguments": json.dumps(args, ensure_ascii=False)},
+            })
+    return calls
+
+
+def _apply_text_tool_calls(content: str):
+    """يفصل النصّ عن استدعاءات الأدوات النصّية. يُرجع (النص_قبل_الاستدعاءات, tool_calls)."""
+    calls = _extract_text_tool_calls(content)
+    if not calls:
+        return content, None
+    cut = re.search(r'<\s*(?:antml:)?invoke|<\s*\|?\s*DSML', content or "",
+                    re.IGNORECASE)
+    head = (content[:cut.start()].strip() if cut else "")
+    return head, calls
+
+
 def _prompt_cache_enabled() -> bool:
     """هل نُفعّل تخزين الأدوات/النظام بالكاش (Anthropic prompt caching)؟
 
@@ -528,20 +602,31 @@ class WeaverProvider:
             ch0 = data["choices"][0] or {}
             msg = ch0.get("message") or ch0.get("delta") or {}
             if isinstance(msg, dict) and ("content" in msg or "tool_calls" in msg):
+                out_content = msg.get("content") or ""
+                out_tools = msg.get("tool_calls")
+                # النموذج كتب الاستدعاءات كنصّ (<invoke…>) بدل tool_calls الأصلية →
+                # استخرجها لتُنفَّذ فعلياً (سبب «يكتب الأدوات ككود ولا ينفّذها»).
+                if not out_tools and isinstance(out_content, str):
+                    head, extracted = _apply_text_tool_calls(out_content)
+                    if extracted:
+                        out_tools = extracted
+                        out_content = head
                 out_msg: Dict[str, Any] = {
                     "role": msg.get("role", "assistant"),
-                    "content": msg.get("content") or "",
+                    "content": out_content,
                 }
-                if msg.get("tool_calls"):
-                    out_msg["tool_calls"] = msg["tool_calls"]
+                if out_tools:
+                    out_msg["tool_calls"] = out_tools
                 return {
                     "id": data.get("id", ""),
                     "model": data.get("model", ""),
                     "choices": [{
                         "index": 0,
                         "message": out_msg,
-                        "finish_reason": ch0.get("finish_reason")
-                        or ("tool_calls" if out_msg.get("tool_calls") else "stop"),
+                        # عند وجود tool_calls (بما فيها المستخرَجة من نصّ) نُجبر
+                        # finish_reason=tool_calls حتى تُنفّذها الحلقة (لا تتوقف).
+                        "finish_reason": ("tool_calls" if out_msg.get("tool_calls")
+                                          else (ch0.get("finish_reason") or "stop")),
                     }],
                     "usage": data.get("usage", {}),
                 }
@@ -617,11 +702,20 @@ class WeaverProvider:
                 + "\nإن تكرّر مع طلبات بسيطة، جرّب مفتاحاً آخر أو انتظر إعادة تعيين الرصيد."
             )
 
+        # ── حالة (هـ): النموذج كتب الاستدعاءات كنصّ (<invoke…>) بدل tool_use ──
+        # نستخرجها لتُنفَّذ فعلياً بدل عرضها كنصّ ميت (سبب «يكتب الأدوات ولا ينفّذ»).
+        content_text = "".join(text_parts) if text_parts else ""
+        if not tool_calls and content_text:
+            head, extracted = _apply_text_tool_calls(content_text)
+            if extracted:
+                tool_calls = extracted
+                content_text = head
+
         finish_reason = "tool_calls" if (stop_reason == "tool_use" or tool_calls) else "stop"
 
         message: Dict[str, Any] = {
             "role": "assistant",
-            "content": "".join(text_parts) if text_parts else "",
+            "content": content_text,
         }
         if tool_calls:
             message["tool_calls"] = tool_calls
