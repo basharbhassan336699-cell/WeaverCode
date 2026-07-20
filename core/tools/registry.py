@@ -424,12 +424,14 @@ class ToolRegistry:
 
         self._add(Tool(
             name="GitPush",
-            description="رفع التغييرات لـ GitHub",
+            description=("رفع التغييرات إلى GitHub فعلياً. يعمل تلقائياً على المستودع "
+                         "المتصل/المستنسَخ الحالي ويستخدم التوكن المتصل للمصادقة — "
+                         "لا يلزم تمرير مسار أو فرع. استخدمه بعد GitCommit."),
             parameters={
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string"},
-                    "branch": {"type": "string", "default": "main"},
+                    "repo_path": {"type": "string", "description": "اختياري"},
+                    "branch": {"type": "string", "description": "اختياري (افتراضي: فرع المستودع)"},
                     "remote": {"type": "string", "default": "origin"},
                 },
                 "required": [],
@@ -1588,15 +1590,57 @@ class ToolRegistry:
             cmd += f" {destination}"
         return self._bash(cmd, timeout=300)
 
+    def _weaver_root(self) -> Path:
+        return Path(__file__).resolve().parents[2]
+
+    def _github_token(self) -> str:
+        """توكن GitHub المتصل (من config/integrations.json)."""
+        try:
+            f = self._weaver_root() / "config" / "integrations.json"
+            data = json.loads(f.read_text(encoding="utf-8"))
+            items = data if isinstance(data, list) else data.get("integrations", [])
+            for it in items:
+                if it.get("id") == "github":
+                    return str(it.get("token", "")).strip()
+        except Exception:
+            pass
+        return ""
+
+    def _active_workspace(self) -> dict:
+        """المستودع المستنسَخ النشِط (من config/workspace.json)."""
+        try:
+            f = self._weaver_root() / "config" / "workspace.json"
+            d = json.loads(f.read_text(encoding="utf-8"))
+            if d.get("work_dir") and os.path.isdir(d["work_dir"]):
+                return d
+        except Exception:
+            pass
+        return {}
+
     def _git_commit(self, message: str, repo_path: Optional[str] = None, add_all: bool = True) -> str:
+        # افتراضياً commit في المستودع المستنسَخ النشِط (أو مجلد العمل)
+        cwd = repo_path or self._active_workspace().get("work_dir") or self.work_dir
         cmds = []
         if add_all:
             cmds.append("git add -A")
-        cmds.append(f'git commit -m "{message}"')
-        return self._bash(" && ".join(cmds), work_dir=repo_path)
+        safe = message.replace('"', r'\"')
+        cmds.append(f'git commit -m "{safe}"')
+        return self._bash(" && ".join(cmds), work_dir=cwd)
 
-    def _git_push(self, repo_path: Optional[str] = None, branch: str = "main", remote: str = "origin") -> str:
-        return self._bash(f"git push {remote} {branch}", work_dir=repo_path, timeout=60)
+    def _git_push(self, repo_path: Optional[str] = None, branch: str = "",
+                  remote: str = "origin") -> str:
+        """رفع فعلي إلى GitHub. يحقن توكن الاتصال وقت الرفع (لا يُخزَّن) فيعمل
+        الوكيل مثل Claude Code — يبني في المستودع ثم يرفعه ذاتياً."""
+        ws = self._active_workspace()
+        cwd = repo_path or ws.get("work_dir") or self.work_dir
+        br = branch or ws.get("branch") or "main"
+        token = self._github_token()
+        clone_url = ws.get("clone_url", "")
+        if token and clone_url.startswith("https://"):
+            auth = "https://x-access-token:" + token + "@" + clone_url[len("https://"):]
+            out = self._bash(f"git push {auth} {br}", work_dir=cwd, timeout=90)
+            return out.replace(token, "***") if token else out
+        return self._bash(f"git push {remote} {br}", work_dir=cwd, timeout=90)
 
     def _pip_install(self, package: str, break_system: bool = True) -> str:
         flag = " --break-system-packages" if break_system else ""
