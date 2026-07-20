@@ -120,6 +120,89 @@ def load_env():
             os.environ.setdefault(key, val)
 
 
+# مفاتيح المزامنة بين الطرفية والويب (المصدر الوحيد للحقيقة = config/.env)
+_SYNC_KEYS = ("WEAVER_API_KEY", "WEAVER_BASE_URL", "WEAVER_MODEL",
+              "WEAVER_MAX_TOKENS", "WEAVER_TEMPERATURE")
+
+# خرائط المزوّدين (نفس منطق الويب) — لأمر /provider
+_PROVIDER_MAP = {
+    "aerolink": ("https://capi.aerolink.lat/v1", "claude-fable-5"),
+    "groq": ("https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+    "deepseek": ("https://api.deepseek.com/v1", "deepseek-chat"),
+    "openrouter": ("https://openrouter.ai/api/v1", "anthropic/claude-sonnet-4-6"),
+    "anthropic": ("https://api.anthropic.com/v1", "claude-opus-4-8"),
+    "openai": ("https://api.openai.com/v1", "gpt-4o"),
+    "together": ("https://api.together.xyz/v1", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+    "ollama": ("http://localhost:11434/v1", "llama3.2"),
+}
+
+
+def save_env(updates: dict) -> None:
+    """يكتب القيم في config/.env (تحديث أو إضافة) ويحدّث os.environ فوراً.
+
+    هذا يجعل ما يُغيَّر في الطرفية (مفتاح/مزوّد/نموذج) يظهر في الويب تلقائياً،
+    لأن الويب يقرأ نفس الملف. المصدر الوحيد للحقيقة = config/.env.
+    """
+    f = Path(__file__).parent / "config" / ".env"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    lines = f.read_text(encoding="utf-8").splitlines() if f.exists() else []
+    for key, value in updates.items():
+        value = str(value)
+        done = False
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}=") or line.startswith(f"# {key}="):
+                lines[i] = f"{key}={value}"
+                done = True
+                break
+        if not done:
+            lines.append(f"{key}={value}")
+        os.environ[key] = value
+    f.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def reload_env() -> dict:
+    """يعيد تحميل config/.env ويُحدِّث os.environ لمفاتيح المزامنة (يتجاوز القديم).
+
+    يجعل ما يُغيَّر في الويب (أو يدوياً في .env) يظهر في الطرفية فوراً بدل بقائها
+    معلّقة على المنصة السابقة. يُرجع القيم المحدّثة.
+    """
+    f = Path(__file__).parent / "config" / ".env"
+    changed = {}
+    if not f.exists():
+        return changed
+    try:
+        for raw in f.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line.startswith("export "):
+                line = line[len("export "):].strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip(); v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+                v = v[1:-1]
+            if k in _SYNC_KEYS and os.environ.get(k) != v:
+                os.environ[k] = v
+                changed[k] = v
+    except Exception:
+        pass
+    return changed
+
+
+def _sync_provider_from_env(provider) -> bool:
+    """يُحدِّث provider.config من os.environ الحالي (بعد reload_env). يُرجع هل تغيّر."""
+    cfg = provider.config
+    before = (cfg.api_key, cfg.base_url, cfg.model)
+    cfg.api_key = os.environ.get("WEAVER_API_KEY", cfg.api_key)
+    cfg.base_url = os.environ.get("WEAVER_BASE_URL", cfg.base_url)
+    cfg.model = os.environ.get("WEAVER_MODEL", cfg.model)
+    try:
+        cfg.max_tokens = int(os.environ.get("WEAVER_MAX_TOKENS", cfg.max_tokens))
+    except Exception:
+        pass
+    return before != (cfg.api_key, cfg.base_url, cfg.model)
+
+
 async def build_engine(mode: str = "main", plan_mode: bool = False):
     """
     تهيئة كاملة للمحرّك: المزوّد + الأدوات + الذاكرة + hooks + خوادم MCP.
@@ -366,6 +449,7 @@ async def _pick_model_arrows(current: str, models: list):
 
 async def _pick_model(current: str):
     """قائمة نماذج تفاعلية بثيم WeaverCode (أسهم)، وإلا قائمة مرقّمة."""
+    reload_env()  # التقط أي تغيير للمفتاح/المزوّد (من الويب أو .env) قبل الجلب
     draw_info("جاري جلب النماذج المتاحة على مفتاحك…")
     models = _load_models(current, live=True)
     if not models:
@@ -464,6 +548,9 @@ _INIT_PROMPT = (
 # ── أوامر مدمجة تفاعلية تظهر في الإكمال التلقائي ──
 _BUILTIN_CMDS = [
     {"name": "model", "description": "اختيار النموذج من قائمة تفاعلية"},
+    {"name": "models", "description": "اكتشاف نماذج المنصة الحالية على مفتاحك"},
+    {"name": "key", "description": "تغيير مفتاح API (يُزامَن مع الويب): /key <k>"},
+    {"name": "provider", "description": "تبديل المنصة واكتشاف نماذجها: /provider <name>"},
     {"name": "mcp", "description": "عرض حالة خوادم MCP (أدوات/موارد/برومبتات)"},
     {"name": "mode", "description": "تبديل وضع الوكيل (coding/project/...)"},
     {"name": "plan", "description": "تفعيل/إيقاف وضع التخطيط"},
@@ -548,8 +635,8 @@ async def interactive_mode(initial_history=None, session_id=None,
     commands = SlashCommands()
 
     draw_welcome(provider.config.model, provider.config.base_url)
-    print(f"{GRAY}اكتب 'خروج' للإنهاء | '/model' اختيار النموذج | '/mcp' حالة MCP | "
-          f"'/mode <mode>' | '/plan' التخطيط | '/' لكل الأوامر{RESET}")
+    print(f"{GRAY}اكتب 'خروج' للإنهاء | '/model' النماذج | '/key <k>' المفتاح | "
+          f"'/provider <name>' المنصة | '/mcp' | '/' لكل الأوامر{RESET}")
     draw_separator()
 
     from core.engine.provider import Message
@@ -585,6 +672,13 @@ async def interactive_mode(initial_history=None, session_id=None,
         if not prompt:
             continue
 
+        # مزامنة الويب ← الطرفية: التقط أي تغيير للمفتاح/المزوّد/النموذج من الويب
+        # (أو تعديل .env يدوياً) قبل تنفيذ الطلب، فلا تبقى معلّقة على المنصة السابقة.
+        if reload_env():
+            if _sync_provider_from_env(provider):
+                draw_info(f"⟳ تحديث من الإعدادات: {provider.config.model} · "
+                          f"{provider.config.base_url}")
+
         if prompt.lower() in ("خروج", "exit", "quit"):
             print(f"{ORANGE}🕸️  إلى اللقاء!{RESET}")
             break
@@ -598,21 +692,63 @@ async def interactive_mode(initial_history=None, session_id=None,
         if prompt.startswith("/model "):
             model = prompt[7:].strip()
             provider.config.model = model
-            os.environ["WEAVER_MODEL"] = model
+            save_env({"WEAVER_MODEL": model})  # يُزامَن مع الويب تلقائياً
             draw_success(f"النموذج: {model}")
             continue
 
-        if prompt.strip() == "/model":
+        if prompt.strip() in ("/model", "/models"):
             chosen = await _pick_model(provider.config.model)
             if chosen and chosen != provider.config.model:
                 provider.config.model = chosen
-                os.environ["WEAVER_MODEL"] = chosen
+                save_env({"WEAVER_MODEL": chosen})  # يُزامَن مع الويب تلقائياً
                 # امسح الشاشة المرئية (والقائمة معها) وأعِد رسم الشعار بالنموذج الجديد فوق
                 print("\033[2J\033[H", end="")
                 draw_welcome(provider.config.model, provider.config.base_url)
                 draw_success(f"النموذج الآن: {chosen}")
             else:
                 draw_info(f"أُبقي النموذج: {provider.config.model}")
+            continue
+
+        # ── تغيير المفتاح (يُزامَن مع الويب) ──────────────────────────────────
+        if prompt.startswith("/key "):
+            new_key = prompt[5:].strip()
+            if new_key:
+                provider.config.api_key = new_key
+                save_env({"WEAVER_API_KEY": new_key})
+                draw_success("حُدِّث المفتاح ✓ — اكتب /model لاكتشاف نماذج المنصة.")
+            else:
+                draw_error("الاستخدام: /key <المفتاح>")
+            continue
+
+        # ── تبديل المزوّد/المنصة (يُزامَن مع الويب) + اكتشاف نماذجها ───────────
+        if prompt.startswith("/provider"):
+            name = prompt[len("/provider"):].strip().lower()
+            if not name:
+                draw_info("المزوّدون: " + "، ".join(_PROVIDER_MAP.keys()))
+                draw_info("الاستخدام: /provider <name> [مفتاح]")
+                continue
+            parts = name.split()
+            pname = parts[0]
+            if pname not in _PROVIDER_MAP:
+                draw_error(f"مزوّد غير معروف: {pname}")
+                continue
+            url, default_model = _PROVIDER_MAP[pname]
+            updates = {"WEAVER_BASE_URL": url, "WEAVER_MODEL": default_model}
+            if len(parts) > 1:  # مفتاح اختياري بعد الاسم
+                updates["WEAVER_API_KEY"] = parts[1]
+                provider.config.api_key = parts[1]
+            provider.config.base_url = url
+            provider.config.model = default_model
+            save_env(updates)  # يُزامَن مع الويب تلقائياً
+            draw_success(f"المزوّد الآن: {pname} · {url}")
+            # اكتشف نماذج المنصة الجديدة فوراً
+            chosen = await _pick_model(default_model)
+            if chosen and chosen != provider.config.model:
+                provider.config.model = chosen
+                save_env({"WEAVER_MODEL": chosen})
+                draw_success(f"النموذج الآن: {chosen}")
+            print("\033[2J\033[H", end="")
+            draw_welcome(provider.config.model, provider.config.base_url)
             continue
 
         if prompt.strip() == "/mcp":
