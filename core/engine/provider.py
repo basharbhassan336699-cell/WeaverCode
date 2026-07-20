@@ -42,6 +42,17 @@ class Message:
 
 # ── بناء كتل الوسائط (رؤية) — يعتمد core.multimodal، لا يمسّ المصادقة ──────────
 
+def _prompt_cache_enabled() -> bool:
+    """هل نُفعّل تخزين الأدوات/النظام بالكاش (Anthropic prompt caching)؟
+
+    مُفعّل افتراضياً — يجعل الأدوات وبروموه النظام تُرسَل مرة وتُقرأ من الكاش
+    (أرخص/أسرع) بدل إعادة معالجتها كل طلب، تماماً كـ Claude Code. للتعطيل الفوري
+    عند أي مشكلة مع بوابة لا تدعمه: WEAVER_PROMPT_CACHE=0.
+    """
+    return os.environ.get("WEAVER_PROMPT_CACHE", "1").strip().lower() not in (
+        "0", "false", "no", "off")
+
+
 def _media_blocks_anthropic(paths: List[str]) -> List[Dict[str, Any]]:
     """كتل صورة/مستند بصيغة Anthropic لمسارات وسائط موجودة (يتجاهل الفاشل)."""
     out: List[Dict[str, Any]] = []
@@ -389,8 +400,13 @@ class WeaverProvider:
     # ── تحويل الرسائل/الأدوات إلى صيغة Anthropic ──────────────────────────────
 
     @staticmethod
-    def _tools_to_anthropic(tools: List[Dict]) -> List[Dict]:
-        """تحويل مخطط أدوات OpenAI إلى مخطط Anthropic"""
+    def _tools_to_anthropic(tools: List[Dict], cache: bool = False) -> List[Dict]:
+        """تحويل مخطط أدوات OpenAI إلى مخطط Anthropic.
+
+        عند cache=True نضع cache_control على آخر أداة → تُخزَّن كل الأدوات مرة
+        واحدة وتُقرأ من الكاش في الطلبات التالية (مثل Claude Code). الأدوات تبقى
+        تُرسَل في كل دورة (النموذج يحتاجها ليستدعيها) لكنها لا تُعاد معالجتها.
+        """
         converted = []
         for t in tools:
             fn = t.get("function", t)
@@ -399,6 +415,8 @@ class WeaverProvider:
                 "description": fn.get("description", ""),
                 "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
             })
+        if cache and converted:
+            converted[-1]["cache_control"] = {"type": "ephemeral"}
         return converted
 
     def _build_anthropic_payload(
@@ -479,10 +497,19 @@ class WeaverProvider:
             "temperature": self.config.temperature,
             "messages": conv,
         }
+        cache = _prompt_cache_enabled()
         if system_parts:
-            payload["system"] = "\n\n".join(system_parts)
+            system_text = "\n\n".join(system_parts)
+            if cache:
+                # نظام ككتلة واحدة مع cache_control → يُخزَّن ويُقرأ من الكاش
+                payload["system"] = [{
+                    "type": "text", "text": system_text,
+                    "cache_control": {"type": "ephemeral"},
+                }]
+            else:
+                payload["system"] = system_text
         if tools:
-            payload["tools"] = self._tools_to_anthropic(tools)
+            payload["tools"] = self._tools_to_anthropic(tools, cache=cache)
         if stream:
             payload["stream"] = True
         return payload

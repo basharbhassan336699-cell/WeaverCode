@@ -72,7 +72,9 @@ def test_anthropic_payload_build_with_tools_and_system():
     tools = [{"type": "function", "function": {"name": "Read", "description": "d",
               "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}}]
     payload = p._build_anthropic_payload(msgs, tools)
-    assert payload["system"] == "أنت WeaverCode"
+    # النظام صار كتلة مخزّنة بالكاش افتراضياً (prompt caching مثل Claude Code)
+    assert payload["system"][0]["text"] == "أنت WeaverCode"
+    assert payload["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert payload["messages"][0] == {"role": "user", "content": "مرحبا"}
     assert payload["messages"][1]["content"][0]["type"] == "tool_use"
     assert payload["messages"][2]["content"][0]["type"] == "tool_result"
