@@ -518,6 +518,13 @@
       if (r.error) { list.innerHTML = '<div class="muted small">❌ ' + escapeHtml(r.error) + "</div>"; return; }
       const models = r.models || [];
       if (!models.length) { list.innerHTML = '<div class="muted small">لم يُعثَر على نماذج.</div>'; return; }
+      if (r.switched_to) {  // اكتُشفت المنصة من المفتاح وتبدّل الرابط تلقائياً
+        const note = document.createElement("div");
+        note.className = "muted small"; note.style.color = "var(--orange)";
+        note.textContent = "⟳ كُشفت المنصة تلقائياً: " + r.switched_to + " · " + (r.base_url || "");
+        list.appendChild(note);
+        loadSettings();  // حدّث حقل الرابط
+      }
       renderModelsList(models);
     } catch (e) {
       list.innerHTML = '<div class="muted small">❌ تعذّر الاكتشاف.</div>';

@@ -95,23 +95,19 @@ _PROVIDER_MAP = {
     "aerolink": ("https://capi.aerolink.lat", "claude-fable-5"),
 }
 
-# بادئات مفاتيح مميّزة لا لبس فيها → منصة (لكشف المنصة من المفتاح تلقائياً).
-# نتجنّب البادئات الغامضة (sk- المجرّدة) حتى لا نكسر بوابة قائمة مثل aerolink.
-_KEY_PREFIX_PLATFORM = [
-    ("nvapi-", "nvidia"),
-    ("sk-ant-", "anthropic"),
-    ("sk-or-", "openrouter"),
-    ("gsk_", "groq"),
-]
-
-
 def _platform_from_key(key: str):
-    """يكشف المنصة من بادئة المفتاح → (base_url, model, name) أو None."""
-    key = (key or "").strip()
-    for prefix, name in _KEY_PREFIX_PLATFORM:
-        if key.startswith(prefix):
-            url, model = _PROVIDER_MAP[name]
-            return url, model, name
+    """يكشف المنصة من بادئة المفتاح عبر سجل المزوّدين المدفوع بالبيانات.
+
+    → (base_url, model, name) أو None. مصدر البادئات = core/providers (قابل
+    للتوسيع عبر config/providers.json)، لا تخصيص لمنصة في المنطق.
+    """
+    try:
+        from core import providers as _prov
+        entry = _prov.detect_by_prefix(key)
+        if entry:
+            return entry["base_url"], entry.get("model", ""), entry["name"]
+    except Exception:
+        pass
     return None
 
 
@@ -981,6 +977,22 @@ def _discover_models() -> dict:
             if isinstance(data, dict) and data.get("error"):
                 e = data["error"]
                 last_err = e.get("message") if isinstance(e, dict) else str(e)
+
+    # الرابط الحالي لم يُرجع نماذج بالمفتاح → اكتشف المنصة الصحيحة من السجل
+    # (بادئة ثم سبر) واضبط الرابط والنموذج تلقائياً. حل عام لأي منصة.
+    try:
+        from core import providers as _prov
+        entry = _prov.resolve_platform(
+            key, lambda u, h, t=8: _http_get_json(u, h, t), current_base=base)
+        if entry and entry.get("models"):
+            _write_env({"WEAVER_BASE_URL": entry["base_url"],
+                        "WEAVER_MODEL": entry.get("model") or entry["models"][0]})
+            os.environ["WEAVER_BASE_URL"] = entry["base_url"]
+            return {"models": entry["models"], "source": entry.get("source", ""),
+                    "count": len(entry["models"]), "switched_to": entry["name"],
+                    "base_url": entry["base_url"]}
+    except Exception:
+        pass
     return {"error": last_err or "لا يدعم المزوّد /models أو المفتاح خاطئ",
             "models": [], "tried": sorted(set(tried))}
 

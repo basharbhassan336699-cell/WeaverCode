@@ -124,39 +124,35 @@ def load_env():
 _SYNC_KEYS = ("WEAVER_API_KEY", "WEAVER_BASE_URL", "WEAVER_MODEL",
               "WEAVER_MAX_TOKENS", "WEAVER_TEMPERATURE")
 
-# خرائط المزوّدين (نفس منطق الويب) — لأمر /provider
-_PROVIDER_MAP = {
-    "aerolink": ("https://capi.aerolink.lat/v1", "claude-fable-5"),
-    "nvidia": ("https://integrate.api.nvidia.com/v1", "meta/llama-3.1-70b-instruct"),
-    "groq": ("https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
-    "deepseek": ("https://api.deepseek.com/v1", "deepseek-chat"),
-    "openrouter": ("https://openrouter.ai/api/v1", "anthropic/claude-sonnet-4-6"),
-    "anthropic": ("https://api.anthropic.com/v1", "claude-opus-4-8"),
-    "openai": ("https://api.openai.com/v1", "gpt-4o"),
-    "together": ("https://api.together.xyz/v1", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
-    "mistral": ("https://api.mistral.ai/v1", "mistral-large-latest"),
-    "ollama": ("http://localhost:11434/v1", "llama3.2"),
-}
+# المزوّدون وكشف المنصة = سجل مدفوع بالبيانات مشترك (core/providers.py)،
+# قابل للتوسيع عبر config/providers.json — لا تخصيص لمنصة في المنطق.
+from core import providers as _providers   # noqa: E402
 
-# بادئات المفاتيح المميّزة لكل منصة (لا لبس فيها) → رابط المزوّد + الاسم.
-# تُمكّن «أعطِ مفتاحاً فقط فيتعرّف على المنصة» تلقائياً. البادئات الغامضة (sk- المجرّدة
-# تستخدمها بوابات كثيرة) لا تُدرَج حتى لا نكسر إعداداً قائماً مثل aerolink.
-_KEY_PREFIX_PLATFORM = [
-    ("nvapi-", "nvidia"),
-    ("sk-ant-", "anthropic"),
-    ("sk-or-", "openrouter"),
-    ("gsk_", "groq"),
-]
+
+def _provider_entry(name: str):
+    """مدخل مزوّد من السجل بالاسم → (url, model) أو None."""
+    e = _providers.get_provider(name)
+    return (e["base_url"], e.get("model", "")) if e else None
 
 
 def _platform_from_key(key: str):
-    """يكشف المنصة من بادئة المفتاح (nvapi-/sk-ant-/…) → (url, model, name) أو None."""
-    key = (key or "").strip()
-    for prefix, name in _KEY_PREFIX_PLATFORM:
-        if key.startswith(prefix):
-            url, model = _PROVIDER_MAP[name]
-            return url, model, name
-    return None
+    """يكشف المنصة من بادئة المفتاح عبر السجل → (url, model, name) أو None."""
+    e = _providers.detect_by_prefix(key)
+    return (e["base_url"], e.get("model", ""), e["name"]) if e else None
+
+
+def _http_get_json_curl(url: str, headers: dict, timeout: int = 8):
+    """GET يُرجع (data, error) عبر curl — لسبر /models في الطرفية (Termux)."""
+    import subprocess
+    args = ["curl", "-sS", "-L", "--max-time", str(timeout)]
+    for k, v in (headers or {}).items():
+        args += ["-H", f"{k}: {v}"]
+    args.append(url)
+    try:
+        r = subprocess.run(args, capture_output=True, timeout=timeout + 5)
+        return json.loads(r.stdout.decode("utf-8", "replace")), None
+    except Exception as e:
+        return None, str(e)
 
 
 def save_env(updates: dict) -> None:
@@ -469,11 +465,29 @@ async def _pick_model_arrows(current: str, models: list):
     return await app.run_async()
 
 
-async def _pick_model(current: str):
-    """قائمة نماذج تفاعلية بثيم WeaverCode (أسهم)، وإلا قائمة مرقّمة."""
+async def _pick_model(current: str, provider=None):
+    """قائمة نماذج تفاعلية بثيم WeaverCode (أسهم)، وإلا قائمة مرقّمة.
+
+    إن لم يُرجع الرابط الحالي نماذج، يكتشف المنصة الصحيحة من المفتاح (بادئة ثم
+    سبر نقاط /models للسجل) ويبدّل الرابط تلقائياً — فيعمل مع أي منصة.
+    """
     reload_env()  # التقط أي تغيير للمفتاح/المزوّد (من الويب أو .env) قبل الجلب
     draw_info("جاري جلب النماذج المتاحة على مفتاحك…")
     models = _load_models(current, live=True)
+    if not models:
+        # حل عام: اكتشف المنصة من المفتاح (بادئة + سبر) وبدّل الرابط
+        key = os.environ.get("WEAVER_API_KEY", "").strip()
+        base = os.environ.get("WEAVER_BASE_URL", "").strip()
+        draw_info("لم يُرجع الرابط الحالي نماذج — أكتشف المنصة من مفتاحك…")
+        entry = _providers.resolve_platform(key, _http_get_json_curl, current_base=base)
+        if entry and entry.get("models"):
+            new_model = entry.get("model") or entry["models"][0]
+            save_env({"WEAVER_BASE_URL": entry["base_url"], "WEAVER_MODEL": new_model})
+            if provider is not None:
+                provider.config.base_url = entry["base_url"]
+            draw_success(f"⟳ كُشفت المنصة: {entry['name']} · {entry['base_url']}")
+            models = [{"name": m, "desc": f"على {entry['name']}"} for m in entry["models"]]
+            current = new_model
     if not models:
         draw_error("تعذّر جلب النماذج. اكتب اسم النموذج مباشرةً: /model <name>")
         return None
@@ -719,7 +733,7 @@ async def interactive_mode(initial_history=None, session_id=None,
             continue
 
         if prompt.strip() in ("/model", "/models"):
-            chosen = await _pick_model(provider.config.model)
+            chosen = await _pick_model(provider.config.model, provider)
             if chosen and chosen != provider.config.model:
                 provider.config.model = chosen
                 save_env({"WEAVER_MODEL": chosen})  # يُزامَن مع الويب تلقائياً
@@ -749,7 +763,7 @@ async def interactive_mode(initial_history=None, session_id=None,
                 save_env(updates)
                 draw_success(f"كُشفت المنصة من المفتاح: {pname} → {url}")
                 # اكتشف نماذج المنصة الجديدة فوراً
-                chosen = await _pick_model(default_model)
+                chosen = await _pick_model(default_model, provider)
                 if chosen and chosen != provider.config.model:
                     provider.config.model = chosen
                     save_env({"WEAVER_MODEL": chosen})
@@ -764,17 +778,28 @@ async def interactive_mode(initial_history=None, session_id=None,
 
         # ── تبديل المزوّد/المنصة (يُزامَن مع الويب) + اكتشاف نماذجها ───────────
         if prompt.startswith("/provider"):
-            name = prompt[len("/provider"):].strip().lower()
+            name = prompt[len("/provider"):].strip()
             if not name:
-                draw_info("المزوّدون: " + "، ".join(_PROVIDER_MAP.keys()))
-                draw_info("الاستخدام: /provider <name> [مفتاح]")
+                draw_info("المزوّدون: " + "، ".join(_providers.provider_names()))
+                draw_info("الاستخدام: /provider <name> [مفتاح]  |  "
+                          "/provider add <name> <base_url> [prefix]")
                 continue
             parts = name.split()
-            pname = parts[0]
-            if pname not in _PROVIDER_MAP:
-                draw_error(f"مزوّد غير معروف: {pname}")
+            # إضافة مزوّد مخصّص لأي منصة (يُحفَظ في config/providers.json)
+            if parts[0].lower() == "add" and len(parts) >= 3:
+                ok = _providers.add_provider(
+                    parts[1], parts[2],
+                    prefixes=[parts[3]] if len(parts) > 3 else [])
+                draw_success(f"أُضيف المزوّد: {parts[1]} ✓" if ok
+                             else "تعذّرت الإضافة") if ok else draw_error("تعذّرت الإضافة")
                 continue
-            url, default_model = _PROVIDER_MAP[pname]
+            pname = parts[0].lower()
+            entry = _provider_entry(pname)
+            if not entry:
+                draw_error(f"مزوّد غير معروف: {pname} "
+                           f"(أضِفه: /provider add {pname} <base_url>)")
+                continue
+            url, default_model = entry
             updates = {"WEAVER_BASE_URL": url, "WEAVER_MODEL": default_model}
             if len(parts) > 1:  # مفتاح اختياري بعد الاسم
                 updates["WEAVER_API_KEY"] = parts[1]
@@ -784,7 +809,7 @@ async def interactive_mode(initial_history=None, session_id=None,
             save_env(updates)  # يُزامَن مع الويب تلقائياً
             draw_success(f"المزوّد الآن: {pname} · {url}")
             # اكتشف نماذج المنصة الجديدة فوراً
-            chosen = await _pick_model(default_model)
+            chosen = await _pick_model(default_model, provider)
             if chosen and chosen != provider.config.model:
                 provider.config.model = chosen
                 save_env({"WEAVER_MODEL": chosen})

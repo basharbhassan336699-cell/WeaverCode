@@ -76,10 +76,12 @@ def test_sync_provider_from_env(weaver, monkeypatch):
     assert weaver._sync_provider_from_env(p) is False
 
 
-def test_provider_map_has_common_platforms(weaver):
+def test_provider_registry_has_common_platforms(weaver):
+    from core import providers
+    names = providers.provider_names()
     for name in ("anthropic", "openai", "openrouter", "groq", "ollama",
                  "aerolink", "nvidia"):
-        assert name in weaver._PROVIDER_MAP
+        assert name in names
 
 
 def test_platform_from_key_detects_nvidia(weaver):
