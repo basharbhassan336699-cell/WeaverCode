@@ -141,6 +141,32 @@ def _materialize_attachments(paths: List[str], per_cap: int = 30000,
     return "".join(chunks)
 
 
+def _bound_context(messages: List["Message"], max_chars: int = 120000,
+                   keep_recent: int = 6) -> List["Message"]:
+    """يمنع انفجار السياق داخل حلقة الأدوات: يقلّص محتوى أقدم الرسائل الطويلة
+    (غالباً نتائج أدوات ضخمة) إن تجاوز المجموع الحدّ، مع إبقاء النظام وآخر الرسائل.
+
+    EN: Bound in-loop context growth. When accumulated tool results blow past the
+    budget, truncate the oldest long messages (keeping system + the latest few),
+    so one big Read or a long tool loop can't starve the model's output budget.
+    """
+    total = sum(len(m.content or "") for m in messages)
+    if total <= max_chars:
+        return messages
+    n = len(messages)
+    for i, m in enumerate(messages):
+        if total <= max_chars:
+            break
+        if m.role == "system" or i >= n - keep_recent:
+            continue
+        c = m.content or ""
+        if len(c) > 2000:
+            new = c[:1500] + f"\n… [اقتُطع {len(c) - 1500} حرف لتوفير السياق]"
+            total -= (len(c) - len(new))
+            m.content = new
+    return messages
+
+
 # ── التعافي من الرفض الزائف ──────────────────────────────────────────────────
 # بعض النماذج/البوابات تُفسّر غلاف إخفاء الهوية (بروموه نظامي صارم + تذكير صامت)
 # كمحاولة اختراق، فترفض حتى الطلبات البريئة (فئة "cyber"). عند اكتشاف رفض،
@@ -682,6 +708,9 @@ class QueryEngine:
         while turns < self.max_turns:
             turns += 1
 
+            # حدّ للسياق داخل الحلقة: نتائج أدوات ضخمة (قراءة ملف كبير) لا تبتلع
+            # ميزانية النموذج فيرجع فارغاً — سبب الرد الفارغ من أول رسالة.
+            messages = _bound_context(messages)
             try:
                 response = await self.provider.complete(messages, tools=tools_schema)
             except Exception as e:
@@ -1000,6 +1029,7 @@ class QueryEngine:
 
         while turns < self.max_turns:
             turns += 1
+            messages = _bound_context(messages)  # حدّ السياق داخل الحلقة
 
             # بثّ حقيقي على مستوى التوكِن + تجميع استدعاءات الأدوات
             text_buf = ""

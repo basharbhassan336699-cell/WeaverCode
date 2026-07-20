@@ -37,8 +37,14 @@ _TEXT_EXT = {
 _ARCHIVE_TAR = {".tar", ".gz", ".tgz", ".bz2", ".tbz", ".xz", ".txz"}
 _OFFICE_ZIP = {".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp"}
 
-# حد أقصى للنص المُعاد (تفادي إغراق سياق النموذج)
-_MAX_TEXT = 200_000
+# حد أقصى للنص المُعاد من قراءة واحدة (تفادي إغراق سياق النموذج).
+# قراءة واحدة يجب ألا تبتلع السياق كله؛ ~24k حرف ≈ 6k توكن. للمزيد استخدم
+# offset/limit. قابل للضبط عبر WEAVER_READ_MAX_CHARS.
+import os as _os
+try:
+    _MAX_TEXT = int(_os.environ.get("WEAVER_READ_MAX_CHARS", "24000"))
+except Exception:
+    _MAX_TEXT = 24000
 
 
 def _clip(text: str) -> str:
