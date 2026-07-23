@@ -71,6 +71,44 @@ def test_clean_param_strips_type_prefix():
     assert args["command"] == "ls -la"  # نُزعت بادئة string="true">
 
 
+def test_param_with_extra_attributes_string_true():
+    """صيغة اللقطات الفعلية: <parameter name="command" string="true">…</parameter>."""
+    import json
+    text = ('<|DSML|>\n<invoke name="Bash">\n'
+            '<parameter name="command" string="true">find /x -type f | head -5</parameter>\n'
+            '<parameter name="description" string="true">عرض الملفات</parameter>\n'
+            '</invoke>\n<|DSML|>')
+    calls = _extract_text_tool_calls(text)
+    assert len(calls) == 1
+    args = json.loads(calls[0]["function"]["arguments"])
+    assert args["command"] == "find /x -type f | head -5"
+    assert args["description"] == "عرض الملفات"
+
+
+def test_write_with_multiline_yaml_content():
+    """Write بمحتوى YAML متعدد الأسطر (لقطة config.yaml) — يُستخرج كاملاً."""
+    import json
+    text = ('<invoke name="Write">\n'
+            '<parameter name="file_path" string="true">/w/config/config.yaml</parameter>\n'
+            '<parameter name="content" string="true"># Config\n'
+            'project:\n  name: "Weaver-Write"\n  version: "0.1.0"</parameter>\n'
+            '</invoke>')
+    calls = _extract_text_tool_calls(text)
+    args = json.loads(calls[0]["function"]["arguments"])
+    assert args["path"] == "/w/config/config.yaml"
+    assert 'name: "Weaver-Write"' in args["content"]
+    assert len(args["content"].splitlines()) == 4
+
+
+def test_think_tag_stripped_from_head():
+    head, calls = _apply_text_tool_calls(
+        'سأبدأ الآن.<think/>\n<invoke name="Bash">'
+        '<parameter name="command" string="true">ls</parameter></invoke>')
+    assert calls is not None
+    assert head == "سأبدأ الآن."
+    assert "<think" not in head
+
+
 def test_native_tool_calls_not_overridden():
     """إن كانت هناك tool_calls أصلية، لا نلمسها."""
     resp = WeaverProvider._anthropic_to_openai_response({

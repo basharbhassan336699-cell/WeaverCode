@@ -82,16 +82,20 @@ def _extract_text_tool_calls(text: str) -> List[Dict[str, Any]]:
         name = nm.group(1).strip()
         args: Dict[str, Any] = {}
         pstarts = [m.start() for m in re.finditer(
-            r'<\s*(?:antml:)?parameter\s+name\s*=\s*"', block, re.IGNORECASE)]
+            r'<\s*(?:antml:)?parameter\b', block, re.IGNORECASE)]
         for j, ps in enumerate(pstarts):
             pend = pstarts[j + 1] if j + 1 < len(pstarts) else len(block)
             pblock = block[ps:pend]
-            pm = re.search(r'name\s*=\s*"([^"]+)"\s*>', pblock, re.IGNORECASE)
+            # اسم الوسيط في أي مكان داخل وسم الفتح (يتحمّل خصائص إضافية مثل
+            # string="true" التي تُخرجها بعض النماذج/البوابات)
+            pm = re.search(r'name\s*=\s*"([^"]+)"', pblock, re.IGNORECASE)
             if not pm:
                 continue
             k = pm.group(1).strip()
             k = _PARAM_ALIAS.get(k.lower(), k)
-            v = pblock[pm.end():]
+            # القيمة تبدأ بعد نهاية وسم الفتح (أول '>' بعد الاسم)
+            gt = pblock.find(">", pm.end())
+            v = pblock[gt + 1:] if gt != -1 else pblock[pm.end():]
             v = re.split(r'<\s*/?\s*(?:antml:)?(?:parameter|invoke)',
                          v, 1, flags=re.IGNORECASE)[0]
             if k:
@@ -113,6 +117,8 @@ def _apply_text_tool_calls(content: str):
     cut = re.search(r'<\s*(?:antml:)?invoke|<\s*\|?\s*DSML', content or "",
                     re.IGNORECASE)
     head = (content[:cut.start()].strip() if cut else "")
+    # تنظيف وسوم تفكير نصية دخيلة (<think/> …) من النص المعروض
+    head = re.sub(r'<\s*/?\s*think\s*/?\s*>', '', head, flags=re.IGNORECASE).strip()
     return head, calls
 
 
