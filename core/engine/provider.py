@@ -338,12 +338,13 @@ class WeaverProvider:
             q = data.get(self.config.base_url.rstrip("/"))
             if not isinstance(q, dict):
                 return
-            if q.get("bare_mode"):
-                self._bare_mode = True
+            # drop_tools/bare_mode لا يُورَّثان من الكاش — يُكتشفان من جديد في كل
+            # جلسة، لأن المفتاح/النموذج/البوابة قد تكون تغيّرت. وراثتهما كانت
+            # تجعل فشلاً عابراً واحداً يمنع إرسال الأدوات في كل الجلسات اللاحقة
+            # (فيكتب النموذج الاستدعاءات نصاً DSML بدل تنفيذها).
+            # (مبدأ Claude Code: الأدوات تُرسَل دائماً ما لم تفشل صراحةً الآن.)
             if isinstance(q.get("format_override"), bool):
                 self._format_override = q["format_override"]
-            if q.get("drop_tools"):
-                self._drop_tools = True
             if isinstance(q.get("max_tokens"), int) and q["max_tokens"] > 0:
                 self.config.max_tokens = min(self.config.max_tokens, q["max_tokens"])
         except Exception:
@@ -362,10 +363,11 @@ class WeaverProvider:
                     data = json.loads(path.read_text(encoding="utf-8"))
                 except Exception:
                     data = {}
+            # drop_tools/bare_mode لا يُحفَظان — قيود لحظية للجلسة الحالية فقط.
+            # حفظهما الدائم كان يجعل كل الجلسات اللاحقة ترث القيد حتى بعد تغيير
+            # المفتاح/النموذج (السبب الجذري لكتابة الأدوات نصاً بدل تنفيذها).
             data[self.config.base_url.rstrip("/")] = {
-                "bare_mode": self._bare_mode,
                 "format_override": self._format_override,
-                "drop_tools": self._drop_tools,
                 "max_tokens": self.config.max_tokens,
             }
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2),
