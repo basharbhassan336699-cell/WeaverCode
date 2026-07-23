@@ -66,10 +66,10 @@
     <span class="ic-spacer"></span>
   </div>
   <div id="chatMsgs" class="chat-msgs"></div>
-  <!-- مؤشر الحالة الحيّ (كما في Claude Code: «يفكّر… ✻») -->
-  <div id="liveStatus" class="live-status" style="display:none">
-    <span id="liveWord">يفكّر</span><span class="live-dots"></span>
-    <span class="spinner-star">✻</span>
+  <!-- مؤشر الحالة الحيّ: شبكة WeaverCode المتحركة أثناء العمل، الثابتة عند التوقف -->
+  <div id="liveStatus" class="live-status">
+    <span id="liveWord" style="display:none">يفكّر</span><span id="liveDots" class="live-dots" style="display:none"></span>
+    <img id="liveIcon" class="live-icon" src="/static/weaver-idle.png?v=__CACHEBUST__" alt="WeaverCode"/>
   </div>
   <div id="chatAttachList" class="attach-list chat-attach"></div>
   <div class="chat-composer">

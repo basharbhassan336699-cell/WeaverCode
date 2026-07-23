@@ -460,16 +460,20 @@
   const EV_ICON = { thinking: "⟳", tool_start: "🔧", file_view: "📄", file_edit: "✏️", file_create: "📄", bash_run: "💻", error: "❌", done: "✅" };
   const LIVE_WORD = { thinking: "يفكّر", tool_start: "يستخدم أداة", file_view: "يقرأ",
                       file_edit: "يعدّل", file_create: "ينشئ", bash_run: "ينفّذ" };
+  // أثناء العمل: شبكة WeaverCode «المتحركة» (GIF بكامل حركتها) + كلمة الحالة.
+  // عند التوقف: الشبكة «الثابتة» (PNG) وحدها — كما طلب المستخدم.
+  const LIVE_GIF = "/static/weaver-live.gif", IDLE_PNG = "/static/weaver-idle.png";
   function setLive(word) {
-    const el = $("#liveStatus");
-    if (!el) return;
-    if (word) { $("#liveWord").textContent = word; el.style.display = "flex"; }
-    else el.style.display = "none";
+    const icon = $("#liveIcon");
+    if (icon) icon.src = word ? LIVE_GIF : IDLE_PNG;
+    const w = $("#liveWord"), d = $("#liveDots");
+    if (w) { w.textContent = word || ""; w.style.display = word ? "inline" : "none"; }
+    if (d) d.style.display = word ? "inline" : "none";
     // مرآة الحالة في اللوحة (إن كانت مفتوحة)
     const dl = $("#dashLive");
     if (dl) dl.innerHTML = word
-      ? '<span class="spinner-star">✻</span> ' + escapeHtml(word) + "…"
-      : '<span class="muted small">لا مهمة قيد التنفيذ.</span>';
+      ? '<img class="live-icon" src="' + LIVE_GIF + '"/> ' + escapeHtml(word) + "…"
+      : '<img class="live-icon" src="' + IDLE_PNG + '"/> <span class="muted small">لا مهمة قيد التنفيذ.</span>';
   }
   function connectSSE() {
     const es = new EventSource("/events");

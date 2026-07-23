@@ -276,16 +276,10 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .model-item:hover { border-color: var(--orange); }
 .model-item.sel { border-color: var(--orange); color: var(--orange); }
 
-/* مؤشر الحالة الحيّ «يفكّر… ✻» (كما في Claude Code) */
-.live-status { display: flex; align-items: center; gap: 6px; padding: 6px 18px;
+/* مؤشر الحالة الحيّ: شبكة WeaverCode (GIF متحرك عند العمل، PNG ثابت عند التوقف) */
+.live-status { display: flex; align-items: center; gap: 8px; padding: 6px 18px;
   color: var(--orange); font-size: 14px; }
-.spinner-star { display: inline-block; color: var(--orange); font-size: 16px;
-  animation: star-spin 1.6s linear infinite; transform-origin: center; }
-@keyframes star-spin {
-  0%   { transform: rotate(0deg)   scale(1); opacity: 1; }
-  50%  { transform: rotate(180deg) scale(1.25); opacity: .6; }
-  100% { transform: rotate(360deg) scale(1); opacity: 1; }
-}
+.live-icon { width: 34px; height: 34px; object-fit: contain; vertical-align: middle; }
 .live-dots::after { content: ""; animation: live-dots 1.5s steps(4, end) infinite; }
 @keyframes live-dots { 0% { content: ""; } 25% { content: "."; }
   50% { content: ".."; } 75% { content: "…"; } }
