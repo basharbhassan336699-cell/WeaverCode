@@ -31,14 +31,42 @@ class Tool:
         self.fn = fn
         self.requires_permission = requires_permission
 
-    def to_schema(self) -> Dict:
-        """تحويل لصيغة OpenAI tool schema"""
+    def to_schema(self, compact: bool = False) -> Dict:
+        """تحويل لصيغة OpenAI tool schema.
+
+        compact=True: وصف مختصر (السطر الأول ≤100 حرف) ووصف وسائط ≤40 حرفاً —
+        يوفّر ~نصف توكنات الأدوات لكل طلب دون إسقاط أي أداة أو وسيط.
+        """
+        if not compact:
+            return {
+                "type": "function",
+                "function": {
+                    "name": self.name,
+                    "description": self.description,
+                    "parameters": self.parameters,
+                },
+            }
+        desc = (self.description or "").strip().splitlines()[0][:100]
+
+        def _trim(node):
+            if isinstance(node, dict):
+                out = {}
+                for k, v in node.items():
+                    if k == "description" and isinstance(v, str):
+                        out[k] = v[:40]
+                    else:
+                        out[k] = _trim(v)
+                return out
+            if isinstance(node, list):
+                return [_trim(x) for x in node]
+            return node
+
         return {
             "type": "function",
             "function": {
                 "name": self.name,
-                "description": self.description,
-                "parameters": self.parameters,
+                "description": desc,
+                "parameters": _trim(self.parameters),
             },
         }
 
@@ -742,7 +770,9 @@ class ToolRegistry:
             name="TodoWrite",
             description=("إدارة قائمة مهام حيّة للمهمة الحالية. مرّر قائمة كاملة "
                          "من العناصر، كل عنصر {content, status, activeForm}. "
-                         "الحالات: pending | in_progress | completed."),
+                         "الحالات: pending | in_progress | completed. "
+                         "استخدمه باعتدال: مرة عند بداية مهمة كبيرة ومرة عند "
+                         "الاكتمال — لا تحدّثه بعد كل خطوة صغيرة."),
             parameters={
                 "type": "object",
                 "properties": {
@@ -811,8 +841,13 @@ class ToolRegistry:
     def names(self) -> List[str]:
         return list(self._tools.keys())
 
-    def get_schema(self) -> List[Dict]:
-        return [t.to_schema() for t in self._tools.values()]
+    def get_schema(self, compact: Optional[bool] = None) -> List[Dict]:
+        """مخطط الأدوات. compact=True يختصر الأوصاف (~نصف التوكنات).
+        الافتراضي None → يقرأ WEAVER_COMPACT_TOOLS (0/1)."""
+        if compact is None:
+            compact = os.environ.get(
+                "WEAVER_COMPACT_TOOLS", "0").strip().lower() in ("1", "true", "yes", "on")
+        return [t.to_schema(compact=compact) for t in self._tools.values()]
 
     def get_tool(self, name: str) -> Optional[Tool]:
         """إرجاع تعريف الأداة (أو None إن لم توجد)"""

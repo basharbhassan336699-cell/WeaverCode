@@ -337,7 +337,11 @@ class QueryEngine:
     prompt → think → tool_call → result → think → ... → final_answer
     """
 
-    MAX_TURNS = 20
+    # قابل للضبط عبر WEAVER_MAX_TURNS (افتراضي 20 — كافٍ للمهام العادية)
+    try:
+        MAX_TURNS = int(os.environ.get("WEAVER_MAX_TURNS", "20"))
+    except Exception:
+        MAX_TURNS = 20
 
     def __init__(
         self,
@@ -345,7 +349,7 @@ class QueryEngine:
         tool_registry: Optional[ToolRegistry] = None,
         memory: Optional[MemoryStore] = None,
         system_prompt: Optional[str] = None,
-        max_turns: int = MAX_TURNS,
+        max_turns: Optional[int] = None,
         hooks: Optional[Any] = None,
         depth: int = 0,
         plan_mode: bool = False,
@@ -354,7 +358,15 @@ class QueryEngine:
         self.tools = tool_registry or ToolRegistry()
         self.memory = memory or MemoryStore()
         self.system_prompt = system_prompt or self._default_system()
-        self.max_turns = max_turns
+        # max_turns: صريح > WEAVER_MAX_TURNS > الافتراضي — يُقرأ لحظياً فيلتقط
+        # تغيير .env (المزامنة) دون إعادة تشغيل.
+        if max_turns is not None:
+            self.max_turns = max_turns
+        else:
+            try:
+                self.max_turns = int(os.environ.get("WEAVER_MAX_TURNS", str(self.MAX_TURNS)))
+            except Exception:
+                self.max_turns = self.MAX_TURNS
         # صلاحيات: قائمة سماح للجلسة + وضع الموافقة التلقائية
         self.auto_approve = _auto_approve_enabled()
         self.session_allow: set = set()
