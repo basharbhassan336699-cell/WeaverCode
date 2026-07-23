@@ -109,6 +109,50 @@ def test_think_tag_stripped_from_head():
     assert "<think" not in head
 
 
+def test_json_tool_calls_extracted():
+    """صيغ JSON المضمّنة: {"tool": ...} و {"name": ..., "arguments": {...}}."""
+    import json as _j
+    from core.engine.provider import _extract_json_tool_calls
+    r = _extract_json_tool_calls('سأنفذ: {"tool": "Bash", "args": {"command": "ls"}}')
+    assert r and r[0]["function"]["name"] == "Bash"
+    assert _j.loads(r[0]["function"]["arguments"])["command"] == "ls"
+    r2 = _extract_json_tool_calls(
+        '{"name": "Write", "arguments": {"path": "t.py", "content": "hi"}}')
+    assert r2 and r2[0]["function"]["name"] == "Write"
+
+
+def test_json_plain_object_not_captured():
+    """تحصين: JSON عادي في الشرح (name بلا مفتاح وسائط) لا يُلتقط كأداة."""
+    from core.engine.provider import _extract_json_tool_calls
+    assert _extract_json_tool_calls(
+        'المشروع: {"name": "Weaver-Write", "version": "0.1.0"}') == []
+
+
+def test_text_extractor_falls_back_to_json():
+    calls = _extract_text_tool_calls(
+        'تنفيذ: {"tool": "Read", "args": {"path": "a.md"}}')
+    assert calls and calls[0]["function"]["name"] == "Read"
+
+
+def test_stop_finish_with_native_tool_calls_still_executes():
+    """نماذج تُرجع finish_reason=stop مع tool_calls أصلية → تُنفَّذ لا تُتجاهَل."""
+    resp = WeaverProvider._anthropic_to_openai_response({
+        "choices": [{"message": {"role": "assistant", "content": "",
+                                 "tool_calls": [{"id": "t1", "type": "function",
+                                                 "function": {"name": "Bash",
+                                                              "arguments": "{}"}}]},
+                     "finish_reason": "stop"}]})
+    assert resp["choices"][0]["finish_reason"] == "tool_calls"
+
+
+def test_json_head_preserves_prose():
+    from core.engine.provider import _apply_text_tool_calls
+    head, calls = _apply_text_tool_calls(
+        'سأنفّذ الأمر الآن: {"tool": "Bash", "args": {"command": "pwd"}}')
+    assert calls is not None
+    assert head == "سأنفّذ الأمر الآن:"
+
+
 def test_native_tool_calls_not_overridden():
     """إن كانت هناك tool_calls أصلية، لا نلمسها."""
     resp = WeaverProvider._anthropic_to_openai_response({

@@ -62,15 +62,59 @@ def _clean_param_value(v: str) -> str:
     return v
 
 
+def _extract_json_tool_calls(text: str) -> List[Dict[str, Any]]:
+    """يستخرج استدعاءات أدوات مكتوبة كـ JSON مضمّن في النص.
+
+    يدعم: {"tool": "Bash", "args": {...}} و {"name": "Read", "arguments": {...}}.
+    تحصين ضد الالتقاط الخاطئ: لا يُقبل الكائن إلا إذا حوى مفتاح وسائط صريحاً
+    (args/arguments/parameters) قيمتُه dict، واسمُ أداةٍ معرِّفاً صالحاً — فلا
+    يُلتقط JSON عادي داخل الشرح (مثل {"name": "مشروع", "version": ...}).
+    """
+    if not text or "{" not in text:
+        return []
+    calls: List[Dict[str, Any]] = []
+    # كائنات بمستوى تعشيش واحد (يكفي لصيغ الاستدعاء الشائعة)
+    for m in re.finditer(r'\{(?:[^{}]|\{[^{}]*\})*\}', text):
+        try:
+            obj = json.loads(m.group())
+        except Exception:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        fn = obj.get("function", {})
+        name = (obj.get("tool") or obj.get("name")
+                or (fn.get("name") if isinstance(fn, dict) else "") or "")
+        args = None
+        for k in ("args", "arguments", "parameters", "input"):
+            if isinstance(obj.get(k), dict):
+                args = obj[k]
+                break
+        if args is None and isinstance(fn, dict) and isinstance(
+                fn.get("arguments"), dict):
+            args = fn["arguments"]
+        if (args is None or not isinstance(name, str)
+                or not re.fullmatch(r"[A-Za-z][\w-]{0,40}", name)):
+            continue
+        calls.append({
+            "id": f"json_{len(calls)}", "type": "function",
+            "function": {"name": name,
+                         "arguments": json.dumps(args, ensure_ascii=False)},
+        })
+    return calls
+
+
 def _extract_text_tool_calls(text: str) -> List[Dict[str, Any]]:
     """يستخرج استدعاءات أدوات مكتوبة كنصّ بصيغة <invoke name="X"><parameter…>.
 
     مبني على حدود الوسوم (لا يعتمد على إغلاق سليم) ليتحمّل التشويه. يُرجع قائمة
     tool_calls بصيغة OpenAI الموحّدة، أو [] إن لم يجد.
     """
-    if not text or "invoke" not in text.lower():
+    if not text:
         return []
     calls: List[Dict[str, Any]] = []
+    if "invoke" not in text.lower():
+        # لا DSML → جرّب صيغة JSON المضمّنة ({"tool": ..., "args": {...}})
+        return _extract_json_tool_calls(text)
     starts = [m.start() for m in re.finditer(
         r'<\s*(?:antml:)?invoke\s+name\s*=\s*"', text, re.IGNORECASE)]
     for i, s in enumerate(starts):
@@ -106,6 +150,9 @@ def _extract_text_tool_calls(text: str) -> List[Dict[str, Any]]:
                 "function": {"name": name,
                              "arguments": json.dumps(args, ensure_ascii=False)},
             })
+    # احتياطي: جرّب JSON إن وُجدت كلمة invoke لكن لم يُستخرج شيء صالح
+    if not calls:
+        calls = _extract_json_tool_calls(text)
     return calls
 
 
@@ -116,7 +163,14 @@ def _apply_text_tool_calls(content: str):
         return content, None
     cut = re.search(r'<\s*(?:antml:)?invoke|<\s*\|?\s*DSML', content or "",
                     re.IGNORECASE)
-    head = (content[:cut.start()].strip() if cut else "")
+    if cut:
+        head = content[:cut.start()].strip()
+    elif calls and calls[0]["id"].startswith("json_"):
+        # حالة JSON: اقطع عند أول كائن JSON (النص قبله يبقى معروضاً)
+        brace = content.find("{")
+        head = (content[:brace].strip() if brace > 0 else "")
+    else:
+        head = ""
     # تنظيف وسوم تفكير نصية دخيلة (<think/> …) من النص المعروض
     head = re.sub(r'<\s*/?\s*think\s*/?\s*>', '', head, flags=re.IGNORECASE).strip()
     return head, calls
@@ -1102,6 +1156,7 @@ class WeaverProvider:
 
         tool_acc: Dict[int, Dict[str, Any]] = {}   # index -> {id,name,arguments}
         finish = "stop"
+        accumulated_text: str = ""   # لتجميع النص لاستخراج DSML بعد انتهاء البث
 
         async for raw_line in proc.stdout:
             line = raw_line.decode("utf-8", "replace").strip()
@@ -1119,6 +1174,7 @@ class WeaverProvider:
                 finish = choice["finish_reason"]
             delta = choice.get("delta", {})
             if delta.get("content"):
+                accumulated_text += delta["content"]
                 yield {"type": "text", "text": delta["content"]}
             for tcd in delta.get("tool_calls", []) or []:
                 idx = tcd.get("index", 0)
@@ -1132,6 +1188,16 @@ class WeaverProvider:
                     slot["arguments"] += fn["arguments"]
 
         await proc.wait()
+
+        # إن لم تُجمَّع tool_calls عبر البث — استخرجها من النص المتراكم (DSML/JSON)
+        if not tool_acc and accumulated_text:
+            _, extracted = _apply_text_tool_calls(accumulated_text)
+            if extracted:
+                tool_acc = {i: {"id": tc["id"],
+                                "name": tc["function"]["name"],
+                                "arguments": tc["function"]["arguments"]}
+                            for i, tc in enumerate(extracted)}
+                finish = "tool_calls"
 
         if tool_acc:
             tool_calls = [{

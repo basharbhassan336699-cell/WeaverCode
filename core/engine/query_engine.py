@@ -867,9 +867,34 @@ class QueryEngine:
             if msg.get("content") and on_text:
                 on_text(msg["content"])
 
-            # لا توجد أدوات للتنفيذ؟
-            if finish_reason == "stop" or not msg.get("tool_calls"):
-                result.text = msg.get("content") or ""
+            # tool_calls تتقدّم على finish_reason دائماً: بعض النماذج
+            # (DeepSeek/NVIDIA/GLM) تُرجع finish_reason="stop" رغم وجود
+            # tool_calls — ننفّذها بدل التوقف. نتوقف فقط عند غياب الأدوات.
+            has_tools = bool(msg.get("tool_calls"))
+            if not has_tools:
+                content = msg.get("content") or ""
+                # رد فارغ تماماً: أعد المحاولة مرة واحدة بطلب مبسّط (بلا أدوات)
+                if (not content.strip() and not clean_retried
+                        and _refusal_retry_enabled()):
+                    clean_retried = True
+                    try:
+                        _r = await self.provider.complete(
+                            [Message(role="system", content=_MINIMAL_SYSTEM),
+                             Message(role="user",
+                                     content=_sanitize_prompt(model_prompt))])
+                        _t = _r["choices"][0]["message"].get("content") or ""
+                        if _t.strip():
+                            content = _t
+                            if on_text:
+                                on_text(content)
+                    except Exception:
+                        pass
+                # لا نص ولا أدوات نُفِّذت في هذه المهمة → رسالة إرشادية بدل الفراغ
+                # (إن نُفِّذت أدوات نترك النص فارغاً ليُلخّصها daemon بدقة)
+                if not content.strip() and not result.tool_calls_made:
+                    content = ("(النموذج لم يُولّد نصاً — جرّب رفع WEAVER_MAX_TOKENS "
+                               "أو تبسيط الطلب أو نموذجاً آخر.)")
+                result.text = content
                 break
 
             # تنفيذ الأدوات
@@ -1097,11 +1122,21 @@ class QueryEngine:
                 yield _sanitize_identity(f"\n❌ خطأ: {e}")
                 break
 
+            # استخراج DSML من النص المتدفق إن لم تصل tool_calls منفصلة
+            # (بعض النماذج تكتب الاستدعاءات كنصّ حتى في البثّ)
+            if not tool_calls and text_buf:
+                from core.engine.provider import _apply_text_tool_calls
+                head, extracted = _apply_text_tool_calls(text_buf)
+                if extracted:
+                    tool_calls = extracted
+                    text_buf = head
+
             messages.append(Message(role="assistant", content=text_buf,
                                     tool_calls=tool_calls or None))
 
-            # لا أدوات → انتهى الرد النهائي (بُثّ فعلاً أعلاه)
-            if finish_reason == "stop" or not tool_calls:
+            # لا أدوات → انتهى الرد النهائي (بُثّ فعلاً أعلاه).
+            # tool_calls تتقدّم على finish_reason (بعض النماذج تُرجع "stop" معها).
+            if not tool_calls:
                 final_text = text_buf
                 break
 
