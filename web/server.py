@@ -881,6 +881,63 @@ def _api_workspace_clear() -> dict:
     return {"ok": True}
 
 
+# ── وضع التخطيط + سجل العمليات (لوحة الويب) ──────────────────────────────────
+
+def _plan_mode_on() -> bool:
+    v = (_read_env().get("WEAVER_PLAN_MODE")
+         or os.environ.get("WEAVER_PLAN_MODE", "0"))
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _api_plan_get() -> dict:
+    """حالة وضع التخطيط + الخطة المعلّقة (إن وُجدت)."""
+    try:
+        from core.engine.query_engine import load_pending_plan
+        pending = load_pending_plan()
+    except Exception:
+        pending = ""
+    return {"plan_mode": _plan_mode_on(), "pending_plan": pending}
+
+
+def _api_plan_toggle(body: dict) -> dict:
+    """تفعيل/تعطيل وضع التخطيط (يُكتب في .env فيلتقطه daemon والطرفية)."""
+    on = bool(body.get("on", not _plan_mode_on()))
+    _write_env({"WEAVER_PLAN_MODE": "1" if on else "0"})
+    os.environ["WEAVER_PLAN_MODE"] = "1" if on else "0"
+    return {"ok": True, "plan_mode": on,
+            "message": ("✅ وضع التخطيط مُفعّل — سيولّد النموذج خطة دون تنفيذ."
+                        if on else "⏹️ وضع التخطيط معطّل — عاد التنفيذ الطبيعي.")}
+
+
+def _api_plan_approve() -> dict:
+    """اعتماد الخطة المعلّقة: يعطّل وضع التخطيط ويضع تنفيذها في طابور المهام."""
+    try:
+        from core.engine.query_engine import load_pending_plan, clear_pending_plan
+        plan = load_pending_plan()
+        if not plan:
+            return {"ok": False, "error": "لا توجد خطة معلّقة."}
+        _write_env({"WEAVER_PLAN_MODE": "0"})
+        os.environ["WEAVER_PLAN_MODE"] = "0"
+        clear_pending_plan()
+        pos = st.queue_task("نفّذ الآن الخطة المعتمدة التالية خطوةً خطوة "
+                            "بالأدوات الفعلية:\n\n" + plan, "main")
+        return {"ok": True, "queued": True, "position": pos,
+                "message": "🚀 جارٍ تنفيذ الخطة المعتمدة…"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def _api_operations() -> dict:
+    """سجل التعديلات (+أسطر/-أسطر لكل ملف) للوحة الويب."""
+    try:
+        from core.oplog import read_operations, stat_label
+        ops = read_operations(100)
+        return {"operations": [dict(o, label=stat_label(o)) for o in ops],
+                "count": len(ops)}
+    except Exception as e:
+        return {"operations": [], "error": str(e)[:200]}
+
+
 def _github_push(msg: str) -> dict:
     # يعمل على مساحة العمل النشِطة (المستودع المستنسَخ) إن وُجدت، وإلا مستودع WeaverCode.
     ws = _active_workspace()
@@ -1246,6 +1303,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_api_github_repos())
         if path == "/api/workspace":
             return self._json(_api_workspace_get())
+        if path == "/api/plan":
+            return self._json(_api_plan_get())
+        if path == "/api/operations":
+            return self._json(_api_operations())
         if path == "/api/integrations":
             return self._json({"integrations": _load_integrations()})
         if path == "/api/files/download-zip":
@@ -1291,6 +1352,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_api_github_select_repo(body))
         if path == "/api/workspace/clear":
             return self._json(_api_workspace_clear())
+        if path == "/api/plan/toggle":
+            return self._json(_api_plan_toggle(body))
+        if path == "/api/plan/approve":
+            return self._json(_api_plan_approve())
         if path == "/api/integrations":
             items = body.get("integrations", [])
             if isinstance(items, list):

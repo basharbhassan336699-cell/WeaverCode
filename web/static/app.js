@@ -27,6 +27,7 @@
     if (id === "v-github") loadGithub();
     if (id === "v-compose") loadCompose();
     if (id === "v-integrations") loadIntegrations();
+    if (id === "v-dashboard") loadDashboard();
     window.scrollTo(0, 0);
   }
   function go(id) {
@@ -415,14 +416,70 @@
   attachSlashAutocomplete($("#chatInput"));
   attachSlashAutocomplete($("#buildInput"));
 
+  // ── اللوحة (Dashboard): وضع التخطيط + سجل التعديلات ──
+  async function loadDashboard() {
+    try {
+      const p = await api("/api/plan");
+      const st = $("#planState");
+      st.textContent = p.plan_mode ? "مفعّل ✅" : "معطّل ⏹️";
+      st.className = "intg-state " + (p.plan_mode ? "on" : "off");
+      const box = $("#pendingPlanBox");
+      if (p.pending_plan) {
+        box.style.display = "block";
+        $("#pendingPlanText").textContent = p.pending_plan;
+      } else box.style.display = "none";
+    } catch (e) {}
+    try {
+      const r = await api("/api/operations");
+      const ops = r.operations || [];
+      $("#opsList").innerHTML = ops.length
+        ? ops.map((o) =>
+            '<div class="op-row"><span class="op-label">' + escapeHtml(o.file) + "</span>" +
+            '<span class="op-verb">' + (o.action === "created" ? "Created" : "Edited") + "</span>" +
+            '<span class="ab-added">+' + o.added + "</span>" +
+            '<span class="ab-removed">-' + o.removed + "</span></div>").join("")
+        : '<span class="muted small">لا تعديلات مسجّلة بعد.</span>';
+    } catch (e) {}
+  }
+  $("#planToggle") && ($("#planToggle").onclick = async () => {
+    const cur = $("#planState").classList.contains("on");
+    const r = await post("/api/plan/toggle", { on: !cur });
+    $("#planMsg").textContent = r.message || "";
+    loadDashboard();
+  });
+  $("#planApprove") && ($("#planApprove").onclick = async () => {
+    const r = await post("/api/plan/approve", {});
+    $("#planMsg").textContent = r.message || r.error || "";
+    if (r.ok) { loadDashboard(); go("v-chat"); }
+  });
+
   // ── البثّ الحيّ (SSE) → يظهر داخل شاشة المحادثة ──
+  // ملاحظة (streaming): المزوّد عبر daemon لا يبثّ توكِناً بتوكِن، لكن أحداث
+  // التفكير/الأدوات تصل لحظياً عبر SSE — فنعرض مؤشراً حيّاً «✻ يفكّر…» كما في
+  // Claude Code، ويختفي عند اكتمال الرد (بديل صادق عن انتظار صامت).
   const EV_ICON = { thinking: "⟳", tool_start: "🔧", file_view: "📄", file_edit: "✏️", file_create: "📄", bash_run: "💻", error: "❌", done: "✅" };
+  const LIVE_WORD = { thinking: "يفكّر", tool_start: "يستخدم أداة", file_view: "يقرأ",
+                      file_edit: "يعدّل", file_create: "ينشئ", bash_run: "ينفّذ" };
+  function setLive(word) {
+    const el = $("#liveStatus");
+    if (!el) return;
+    if (word) { $("#liveWord").textContent = word; el.style.display = "flex"; }
+    else el.style.display = "none";
+    // مرآة الحالة في اللوحة (إن كانت مفتوحة)
+    const dl = $("#dashLive");
+    if (dl) dl.innerHTML = word
+      ? '<span class="spinner-star">✻</span> ' + escapeHtml(word) + "…"
+      : '<span class="muted small">لا مهمة قيد التنفيذ.</span>';
+  }
   function connectSSE() {
     const es = new EventSource("/events");
     es.onmessage = (ev) => {
       let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+      // مؤشر الحالة الحيّ: يظهر مع أحداث العمل ويختفي عند الاكتمال/الخطأ
+      if (LIVE_WORD[d.type]) setLive(LIVE_WORD[d.type]);
+      else if (d.type === "response" || d.type === "done" || d.type === "error") setLive(null);
       // عند اكتمال مهمة، حدّث قائمة الجلسات إن كانت ظاهرة
-      if (d.type === "done") { refreshStatus(); if ($("#v-sessions").classList.contains("active")) loadSessions(); }
+      if (d.type === "done") { refreshStatus(); if ($("#v-sessions").classList.contains("active")) loadSessions(); if ($("#v-dashboard").classList.contains("active")) loadDashboard(); }
       const chat = $("#v-chat");
       if (!chat.classList.contains("active")) { return; }
       if (d.type === "response") {

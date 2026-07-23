@@ -66,6 +66,11 @@
     <span class="ic-spacer"></span>
   </div>
   <div id="chatMsgs" class="chat-msgs"></div>
+  <!-- مؤشر الحالة الحيّ (كما في Claude Code: «يفكّر… ✻») -->
+  <div id="liveStatus" class="live-status" style="display:none">
+    <span id="liveWord">يفكّر</span><span class="live-dots"></span>
+    <span class="spinner-star">✻</span>
+  </div>
   <div id="chatAttachList" class="attach-list chat-attach"></div>
   <div class="chat-composer">
     <button id="chatAttachBtn" class="ic" title="إرفاق">📎</button>
@@ -79,6 +84,7 @@
 <div id="menu" class="menu">
   <div class="menu-panel">
     <div class="menu-head"><span>WeaverCode</span><button class="ic" data-close="menu">✕</button></div>
+    <button class="menu-item" data-view="dashboard">📊 اللوحة</button>
     <button class="menu-item" data-view="files">📁 الملفات</button>
     <button class="menu-item" data-view="integrations">🔌 الارتباطات</button>
     <button class="menu-item" data-view="settings">⚙️ الإعدادات</button>
@@ -87,6 +93,37 @@
     <div id="menuStatus" class="muted small"></div>
   </div>
 </div>
+
+<!-- اللوحة (Dashboard): وضع التخطيط + سجل التعديلات + الحالة الحيّة -->
+<section id="v-dashboard" class="view">
+  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">اللوحة</div><span class="ic-spacer"></span></div>
+
+  <div class="dash-card">
+    <div class="dash-title">🗺️ وضع التخطيط</div>
+    <div class="row" style="align-items:center">
+      <span id="planState" class="intg-state off">…</span>
+      <button id="planToggle" class="chip-btn">تبديل</button>
+    </div>
+    <div id="pendingPlanBox" style="display:none">
+      <div class="dash-sub">خطة معلّقة بانتظار الاعتماد:</div>
+      <pre id="pendingPlanText" class="output"></pre>
+      <button id="planApprove" class="accept">🚀 اعتماد وتنفيذ</button>
+    </div>
+    <div id="planMsg" class="muted small"></div>
+  </div>
+
+  <div class="dash-card">
+    <div class="dash-title">📈 الحالة الحيّة</div>
+    <div id="dashLive" class="dash-live">
+      <span class="muted small">لا مهمة قيد التنفيذ.</span>
+    </div>
+  </div>
+
+  <div class="dash-card">
+    <div class="dash-title">✏️ سجل التعديلات</div>
+    <div id="opsList" class="ops-list"><span class="muted small">…جارٍ التحميل</span></div>
+  </div>
+</section>
 
 <!-- ملفات -->
 <section id="v-files" class="view">

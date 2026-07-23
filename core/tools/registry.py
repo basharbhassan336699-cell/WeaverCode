@@ -1005,17 +1005,35 @@ class ToolRegistry:
         except Exception as e:
             return f"خطأ في فكّ الأرشيف: {e}"
 
+    def _diff_and_log(self, path, old: str, new: str, is_new: bool) -> str:
+        """يحسب +/- عبر difflib ويسجّل العملية في سجل العمليات. يُرجع سطر الإحصاء."""
+        try:
+            import difflib
+            diff = list(difflib.unified_diff(
+                old.splitlines(), new.splitlines(), lineterm=""))
+            added = sum(1 for l in diff if l.startswith("+") and not l.startswith("+++"))
+            removed = sum(1 for l in diff if l.startswith("-") and not l.startswith("---"))
+            from core.oplog import log_operation, stat_label
+            entry = log_operation(str(path), "created" if is_new else "edited",
+                                  added, removed)
+            return stat_label(entry)
+        except Exception:
+            return ""
+
     def _write(self, path: str, content: str) -> str:
         try:
             p = self._resolve(path)
+            is_new = not p.exists()
+            old = "" if is_new else p.read_text(encoding="utf-8", errors="replace")
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding="utf-8")
             # تتبّع الملف المُنشأ (لنسخه لمجلد التنزيلات لاحقاً)
             sp = str(p)
             if sp not in self._created_files:
                 self._created_files.append(sp)
-            return (f"✅ تم إنشاء/تحديث {p} ({len(content)} حرف) — "
-                    f"متاح في شاشة «الملفات» للتنزيل.")
+            stat = self._diff_and_log(p, old, content, is_new)
+            return (f"✅ {stat or f'تم إنشاء/تحديث {p.name}'} — "
+                    f"متاح في شاشة «الملفات» للتنزيل. ({p})")
         except Exception as e:
             return f"خطأ في الكتابة: {e}"
 
@@ -1030,7 +1048,8 @@ class ToolRegistry:
                 return f"النص موجود {count} مرات. استخدم replace_all=true أو أضف سياقاً أكثر."
             new_content = content.replace(old_string, new_string)
             p.write_text(new_content, encoding="utf-8")
-            return f"✅ تم التعديل في {path}"
+            stat = self._diff_and_log(p, content, new_content, False)
+            return f"✅ {stat or f'تم التعديل في {p.name}'}"
         except Exception as e:
             return f"خطأ في التعديل: {e}"
 
@@ -1041,6 +1060,7 @@ class ToolRegistry:
             content = p.read_text(encoding="utf-8")
         except Exception as e:
             return f"خطأ في قراءة {path}: {e}"
+        original = content
         applied = 0
         for i, ed in enumerate(edits, 1):
             old = ed.get("old_string", "")
@@ -1058,7 +1078,8 @@ class ToolRegistry:
             p.write_text(content, encoding="utf-8")
         except Exception as e:
             return f"خطأ في الكتابة: {e}"
-        return f"✅ طُبّقت {applied} تعديلات على {path}"
+        stat = self._diff_and_log(p, original, content, False)
+        return f"✅ طُبّقت {applied} تعديلات — {stat or p.name}"
 
     # ── قائمة المهام الحيّة (TodoWrite) ──────────────────────────────────────
 

@@ -141,6 +141,44 @@ def _materialize_attachments(paths: List[str], per_cap: int = 30000,
     return "".join(chunks)
 
 
+# ── الخطة المعلّقة (Plan Mode) ────────────────────────────────────────────────
+# تُحفَظ الخطة المولّدة في ملف مشترك حتى يستطيع /approve (طرفية) أو زر الاعتماد
+# (ويب) تنفيذها لاحقاً — ولو في عملية/جلسة مختلفة.
+
+def _pending_plan_file() -> str:
+    base = os.path.dirname(os.path.expanduser(
+        os.environ.get("WEAVER_DB_PATH", "~/.weaver/memory.db")))
+    return os.path.join(base, "pending_plan.json")
+
+
+def save_pending_plan(plan: str) -> None:
+    """حفظ الخطة المعلّقة (تنتظر الاعتماد)."""
+    try:
+        path = _pending_plan_file()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"plan": plan, "created_at": __import__("time").time()}, f,
+                      ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def load_pending_plan() -> str:
+    """الخطة المعلّقة الحالية أو '' إن لا شيء."""
+    try:
+        with open(_pending_plan_file(), "r", encoding="utf-8") as f:
+            return str(json.load(f).get("plan", ""))
+    except Exception:
+        return ""
+
+
+def clear_pending_plan() -> None:
+    try:
+        os.remove(_pending_plan_file())
+    except Exception:
+        pass
+
+
 def _bound_context(messages: List["Message"], max_chars: int = 120000,
                    keep_recent: int = 6) -> List["Message"]:
     """يمنع انفجار السياق داخل حلقة الأدوات: يقلّص محتوى أقدم الرسائل الطويلة
@@ -332,6 +370,8 @@ class QueryEngine:
         # وضع التخطيط: لا تُنفَّذ أدوات التعديل حتى تُعتمد الخطة
         self.plan_mode = plan_mode or os.environ.get(
             "WEAVER_PLAN_MODE", "0").strip().lower() in ("1", "true", "yes", "on")
+        # الخطة المولّدة المعلّقة (تنتظر /approve أو زر الاعتماد في الويب)
+        self.pending_plan: str = ""
         # hooks دورة الحياة (اختياري)
         self.hooks = hooks
         # الوكلاء الفرعيون: عمق الاستدعاء الحالي وحدّه الأقصى
@@ -856,11 +896,20 @@ class QueryEngine:
                     continue
                 if tool_name == "ExitPlanMode":
                     plan_text = args.get("plan", "") if isinstance(args, dict) else ""
-                    approved = True
-                    if on_plan:
-                        approved = bool(on_plan(plan_text))
+                    # احفظ الخطة معلّقةً دائماً (للاطلاع/الاعتماد من الطرفية أو الويب)
+                    self.pending_plan = plan_text
+                    save_pending_plan(plan_text)
+                    if on_plan is None:
+                        # سياق غير تفاعلي (daemon/ويب): لا اعتماد تلقائي —
+                        # تبقى الخطة معلّقة حتى /approve أو زر «اعتماد وتنفيذ».
+                        result.text = ("📋 الخطة المقترحة (معلّقة — اعتمدها بـ "
+                                       "/approve أو من لوحة الويب):\n\n" + plan_text)
+                        return result
+                    approved = bool(on_plan(plan_text))
                     if approved:
                         self.plan_mode = False
+                        self.pending_plan = ""
+                        clear_pending_plan()
                         tool_results.append(Message(role="tool",
                             content="✅ اعتمد المستخدم الخطة. نفّذها الآن خطوةً خطوة.",
                             tool_call_id=tool_id, name=tool_name))

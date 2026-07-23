@@ -121,7 +121,23 @@ python3 weaver.py --init          # analyze project → CLAUDE.md
 weaver -i
 weaver --status
 weaver --key groq
+
+# Plan Mode: generate a step-by-step plan first, execute only after approval
+python3 weaver.py --plan --interactive
+#   /plan on   → تفعيل وضع التخطيط   /plan off → تعطيله
+#   /approve   → اعتماد الخطة المعلّقة وتنفيذها فعلياً (/execute مرادف)
 ```
+
+### Live features (terminal + web dashboard)
+
+- **Plan Mode**: `/plan` يولّد خطة دون تنفيذ؛ الخطة تُحفَظ معلّقة حتى `/approve`
+  (أو زر «اعتماد وتنفيذ» في لوحة الويب 📊).
+- **Diff tracking**: كل تعديل ملف يُعرض بصيغة `Edited file  +N -N` ويُسجَّل في
+  سجل عمليات يُسترجَع من `/api/operations` أو لوحة الويب.
+- **Live status**: مؤشر «✻ يفكّر…» متحرك (كما في Claude Code) في صفحة الويب
+  أثناء العمل، مبني على أحداث SSE اللحظية (تفكير/أداة/نص).
+- **Slash commands**: محلّل أوامر قابل للتوسيع (`core/commands.parse`) —
+  `/plan on|off|status`, `/approve`, `/execute` برسائل تأكيد عربية.
 
 ---
 

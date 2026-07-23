@@ -17,6 +17,44 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 
+# ── محلّل الأوامر التفاعلية المدمجة ──────────────────────────────────────────
+# يتعرّف على أوامر التحكّم (/plan, /approve, …) ويُرجع فعلاً منظّماً + رسالة
+# تأكيد عربية. قابل للتوسيع: أضف مدخلاً في _PARSE_TABLE فقط.
+
+_PARSE_TABLE = [
+    # (أنماط النص, الفعل, رسالة التأكيد)
+    (("/plan", "/plan on"), "plan_on",
+     "✅ وضع التخطيط مُفعّل — سيولّد النموذج خطة دون تنفيذ أي تعديل."),
+    (("/plan off",), "plan_off",
+     "⏹️ وضع التخطيط معطّل — عاد التنفيذ الطبيعي."),
+    (("/approve", "/execute"), "approve",
+     "🚀 جارٍ تنفيذ الخطة المعتمدة…"),
+    (("/plan status",), "plan_status",
+     "📋 حالة وضع التخطيط."),
+]
+
+
+def parse(text: str) -> Optional[Dict[str, str]]:
+    """يحلّل أمر سلاش تفاعلياً معروفاً.
+
+    يُرجع {"action": ..., "message": ..., "args": ...} أو None إن لم يكن أمراً
+    معروفاً (فيُعامل النص كبروموه عادي أو أمر ملفّي من SlashCommands).
+    """
+    t = (text or "").strip()
+    if not t.startswith("/"):
+        return None
+    low = t.lower()
+    best = None  # الأطول نمطاً يفوز (فلا يبتلع /plan النمطَ /plan off)
+    for patterns, action, message in _PARSE_TABLE:
+        for p in patterns:
+            if (low == p or low.startswith(p + " ")) and \
+                    (best is None or len(p) > best[0]):
+                best = (len(p), action, message, t[len(p):].strip())
+    if best:
+        return {"action": best[1], "message": best[2], "args": best[3]}
+    return None
+
+
 class SlashCommands:
     """محمّل ومشغّل أوامر السلاش من مجلد .claude/commands"""
 

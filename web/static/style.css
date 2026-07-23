@@ -275,6 +275,34 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
   cursor: pointer; width: 100%; }
 .model-item:hover { border-color: var(--orange); }
 .model-item.sel { border-color: var(--orange); color: var(--orange); }
+
+/* مؤشر الحالة الحيّ «يفكّر… ✻» (كما في Claude Code) */
+.live-status { display: flex; align-items: center; gap: 6px; padding: 6px 18px;
+  color: var(--orange); font-size: 14px; }
+.spinner-star { display: inline-block; color: var(--orange); font-size: 16px;
+  animation: star-spin 1.6s linear infinite; transform-origin: center; }
+@keyframes star-spin {
+  0%   { transform: rotate(0deg)   scale(1); opacity: 1; }
+  50%  { transform: rotate(180deg) scale(1.25); opacity: .6; }
+  100% { transform: rotate(360deg) scale(1); opacity: 1; }
+}
+.live-dots::after { content: ""; animation: live-dots 1.5s steps(4, end) infinite; }
+@keyframes live-dots { 0% { content: ""; } 25% { content: "."; }
+  50% { content: ".."; } 75% { content: "…"; } }
+
+/* اللوحة (Dashboard) */
+.dash-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 14px 16px; margin: 0 18px 14px; }
+.dash-title { font-weight: 700; margin-bottom: 10px; color: var(--text); }
+.dash-sub { color: var(--muted); font-size: 13px; margin: 8px 0 6px; }
+.dash-live { display: flex; align-items: center; gap: 8px; color: var(--orange);
+  font-size: 14px; min-height: 24px; }
+.ops-list { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
+.op-row { display: flex; align-items: center; gap: 10px; background: var(--card-2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; }
+.op-row .op-label { flex: 1; direction: ltr; text-align: left; font-family: monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-row .op-verb { color: var(--muted); font-size: 12px; }
 .repo-quick { display: flex; gap: 8px; margin-bottom: 10px; }
 .repo-quick-btn { flex: 1; background: var(--card-2); border: 1px solid var(--line); color: var(--text);
   border-radius: 12px; padding: 10px 8px; font-size: 13px; font-family: inherit; cursor: pointer; }

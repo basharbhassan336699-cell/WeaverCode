@@ -589,7 +589,9 @@ _BUILTIN_CMDS = [
     {"name": "provider", "description": "تبديل المنصة واكتشاف نماذجها: /provider <name>"},
     {"name": "mcp", "description": "عرض حالة خوادم MCP (أدوات/موارد/برومبتات)"},
     {"name": "mode", "description": "تبديل وضع الوكيل (coding/project/...)"},
-    {"name": "plan", "description": "تفعيل/إيقاف وضع التخطيط"},
+    {"name": "plan", "description": "تفعيل/إيقاف وضع التخطيط (/plan on|off|status)"},
+    {"name": "approve", "description": "اعتماد الخطة المعلّقة وتنفيذها فعلياً"},
+    {"name": "execute", "description": "تنفيذ الخطة المعلّقة (مرادف /approve)"},
     {"name": "stats", "description": "إحصاءات الذاكرة"},
     {"name": "commands", "description": "عرض كل أوامر السلاش"},
     {"name": "add-dir", "description": "إضافة مجلد عمل إضافي (multi-workspace)"},
@@ -956,14 +958,41 @@ async def interactive_mode(initial_history=None, session_id=None,
             draw_info("أوامر السلاش المتاحة: " + ", ".join("/" + n for n in names))
             continue
 
-        if prompt.strip() in ("/plan", "/plan on"):
-            engine.plan_mode = True
-            draw_success("وضع التخطيط مُفعّل — سأخطّط قبل التنفيذ حتى تعتمد الخطة.")
-            continue
-        if prompt.strip() == "/plan off":
-            engine.plan_mode = False
-            draw_success("وضع التخطيط مُعطّل.")
-            continue
+        # ── أوامر التحكّم (commands.parse): /plan، /approve، /execute … ────────
+        from core.commands import parse as _parse_control
+        _ctl = _parse_control(prompt)
+        if _ctl:
+            from core.engine.query_engine import (load_pending_plan,
+                                                  clear_pending_plan)
+            if _ctl["action"] == "plan_on":
+                engine.plan_mode = True
+                save_env({"WEAVER_PLAN_MODE": "1"})   # يُزامَن مع الويب
+                draw_success(_ctl["message"])
+                continue
+            if _ctl["action"] == "plan_off":
+                engine.plan_mode = False
+                save_env({"WEAVER_PLAN_MODE": "0"})
+                draw_success(_ctl["message"])
+                continue
+            if _ctl["action"] == "plan_status":
+                pp = load_pending_plan()
+                draw_info("وضع التخطيط: " + ("مفعّل ✅" if engine.plan_mode else "معطّل ⏹️"))
+                if pp:
+                    draw_info("خطة معلّقة بانتظار الاعتماد:\n" + pp[:800])
+                continue
+            if _ctl["action"] == "approve":
+                pp = engine.pending_plan or load_pending_plan()
+                if not pp:
+                    draw_error("لا توجد خطة معلّقة. فعّل /plan ثم اطلب مهمة لتوليد خطة.")
+                    continue
+                draw_success(_ctl["message"])
+                engine.plan_mode = False
+                engine.pending_plan = ""
+                clear_pending_plan()
+                save_env({"WEAVER_PLAN_MODE": "0"})
+                prompt = ("نفّذ الآن الخطة المعتمدة التالية خطوةً خطوة "
+                          "بالأدوات الفعلية:\n\n" + pp)
+                # يسقط للأسفل فيُنفَّذ كبروموه عادي
 
         # ── أوامر السلاش من .claude/commands/ ────────────────────────────────
         parsed = commands.parse(prompt)
