@@ -929,7 +929,12 @@ class QueryEngine:
                 result.text = content
                 break
 
-            # تنفيذ الأدوات
+            # تنفيذ الأدوات — دفعة عمليات واحدة لهذا الرد (للعرض الهرمي)
+            try:
+                from core.oplog import start_batch
+                start_batch()
+            except Exception:
+                pass
             tool_results = []
             for tc in msg["tool_calls"]:
                 tool_name = tc["function"]["name"]
@@ -1172,7 +1177,12 @@ class QueryEngine:
                 final_text = text_buf
                 break
 
-            # تنفيذ الأدوات (مع الصلاحيات وhooks)
+            # تنفيذ الأدوات (مع الصلاحيات وhooks) — دفعة عمليات واحدة لهذا الرد
+            try:
+                from core.oplog import start_batch
+                start_batch()
+            except Exception:
+                pass
             tool_results = []
             for tc in tool_calls:
                 tool_name = tc["function"]["name"]

@@ -120,10 +120,23 @@
   </div>
 
   <div class="dash-card">
-    <div class="dash-title">✏️ سجل التعديلات</div>
-    <div id="opsList" class="ops-list"><span class="muted small">…جارٍ التحميل</span></div>
+    <div class="dash-title">✏️ سجل العمليات</div>
+    <!-- المستوى 1: ملخّصات الدفعات القابلة للطي -->
+    <div id="opsBatches" class="ops-batches"><span class="muted small">…جارٍ التحميل</span></div>
   </div>
 </section>
+
+<!-- المستوى 3: نافذة تفاصيل عملية واحدة -->
+<div id="opDetailModal" class="modal">
+  <div class="modal-box op-detail-box">
+    <div class="modal-head">
+      <button class="ic" id="opDetailBack" title="رجوع">‹</button>
+      <span id="opDetailTitle">تفاصيل العملية</span>
+      <button class="ic" data-opclose>✕</button>
+    </div>
+    <div id="opDetailBody" class="op-detail-body"></div>
+  </div>
+</div>
 
 <!-- ملفات -->
 <section id="v-files" class="view">

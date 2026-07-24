@@ -928,14 +928,29 @@ def _api_plan_approve() -> dict:
 
 
 def _api_operations() -> dict:
-    """سجل التعديلات (+أسطر/-أسطر لكل ملف) للوحة الويب."""
+    """سجل العمليات الهرمي للوحة الويب:
+       - batches: المستوى 1 (ملخّص كل دفعة) + المستوى 2 (قائمة عملياتها).
+       - operations: قائمة مسطّحة (توافق للخلف مع العرض القديم)."""
     try:
-        from core.oplog import read_operations, stat_label
+        from core.oplog import read_batches, read_operations, stat_label
+        batches = read_batches(50)
         ops = read_operations(100)
-        return {"operations": [dict(o, label=stat_label(o)) for o in ops],
-                "count": len(ops)}
+        return {"batches": batches, "count": len(batches),
+                "operations": [dict(o, label=stat_label(o)) for o in ops]}
     except Exception as e:
-        return {"operations": [], "error": str(e)[:200]}
+        return {"batches": [], "operations": [], "error": str(e)[:200]}
+
+
+def _api_operation_detail(op_id: str) -> dict:
+    """المستوى 3: تفاصيل عملية واحدة بمعرّفها (diff/أمر+مخرجات/محتوى)."""
+    try:
+        from core.oplog import read_operation
+        o = read_operation(op_id)
+        if not o:
+            return {"ok": False, "error": "العملية غير موجودة"}
+        return {"ok": True, "operation": o}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
 
 
 def _github_push(msg: str) -> dict:
@@ -1307,6 +1322,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_api_plan_get())
         if path == "/api/operations":
             return self._json(_api_operations())
+        if path == "/api/operations/detail":
+            return self._json(_api_operation_detail((qs.get("id", [""]) or [""])[0]))
         if path == "/api/integrations":
             return self._json({"integrations": _load_integrations()})
         if path == "/api/files/download-zip":

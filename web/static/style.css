@@ -291,12 +291,48 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .dash-sub { color: var(--muted); font-size: 13px; margin: 8px 0 6px; }
 .dash-live { display: flex; align-items: center; gap: 8px; color: var(--orange);
   font-size: 14px; min-height: 24px; }
-.ops-list { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
-.op-row { display: flex; align-items: center; gap: 10px; background: var(--card-2);
-  border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px; }
-.op-row .op-label { flex: 1; direction: ltr; text-align: left; font-family: monospace;
+/* سجل العمليات الهرمي — 3 مستويات */
+.ops-batches { display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto; }
+.op-batch { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--card-2); }
+/* المستوى 1: ملخّص قابل للطي */
+.op-summary { width: 100%; display: flex; align-items: center; gap: 8px; background: none;
+  border: none; color: var(--text); padding: 10px 12px; cursor: pointer; text-align: right; font-family: inherit; }
+.op-summary:hover { background: var(--card); }
+.op-caret { color: var(--orange); font-size: 11px; width: 12px; }
+.op-sum-text { flex: 1; font-size: 13px; direction: ltr; text-align: left; }
+.op-sum-meta { white-space: nowrap; }
+/* المستوى 2: قائمة العمليات */
+.op-list { padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 4px; }
+.op-item { display: flex; align-items: center; gap: 8px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; cursor: pointer;
+  color: var(--text); font-family: inherit; font-size: 13px; width: 100%; text-align: right; }
+.op-item:hover { border-color: var(--orange); }
+.op-item .op-ic { font-size: 14px; }
+.op-item .op-verb { color: var(--muted); font-size: 12px; min-width: 52px; }
+.op-item .op-name { flex: 1; direction: ltr; text-align: left; font-family: monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.op-row .op-verb { color: var(--muted); font-size: 12px; }
+/* المستوى 3: نافذة التفاصيل */
+.op-detail-box { max-width: 680px; width: 96%; }
+.op-detail-body { max-height: 66vh; overflow: auto; margin-top: 8px; }
+.op-path { direction: ltr; text-align: left; font-family: monospace; font-size: 12px;
+  color: var(--muted); margin-bottom: 8px; word-break: break-all; }
+.op-sec-label { color: var(--orange); font-size: 12px; font-weight: 700; margin: 10px 0 4px; }
+.op-code { direction: ltr; text-align: left; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px; font-family: monospace; font-size: 12px; line-height: 1.6;
+  overflow-x: auto; white-space: pre; color: var(--text); }
+.op-code .ln { display: inline-block; min-width: 34px; color: var(--muted-2); user-select: none;
+  text-align: right; padding-inline-end: 10px; }
+.op-out { color: #b9c7b9; }
+.op-cmd { color: var(--orange); }
+/* diff view */
+.op-diff { direction: ltr; text-align: left; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; font-family: monospace; font-size: 12px; overflow-x: auto; }
+.op-diff .dl { padding: 1px 8px; white-space: pre; line-height: 1.6; }
+.op-diff .dl .ln { display: inline-block; min-width: 42px; color: var(--muted-2);
+  user-select: none; text-align: right; padding-inline-end: 10px; }
+.op-diff .add { background: #1c3a1c; color: #9be89b; }
+.op-diff .del { background: #3a1c1c; color: #e89b9b; }
+.op-diff .ctx { color: var(--muted); }
 .repo-quick { display: flex; gap: 8px; margin-bottom: 10px; }
 .repo-quick-btn { flex: 1; background: var(--card-2); border: 1px solid var(--line); color: var(--text);
   border-radius: 12px; padding: 10px 8px; font-size: 13px; font-family: inherit; cursor: pointer; }

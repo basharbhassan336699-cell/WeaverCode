@@ -990,18 +990,27 @@ class ToolRegistry:
             except Exception:
                 pass
             # قراءة ذكية لكل الأنواع (نص/CSV/zip/tar/office/ثنائي)
+            out = None
             try:
                 from core.filetypes import read_any
-                return read_any(str(p), offset or 0, limit)
+                out = read_any(str(p), offset or 0, limit)
+            except Exception:
+                out = None
+            if out is None:
+                # احتياط: نص خام
+                lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+                if offset:
+                    lines = lines[offset:]
+                if limit:
+                    lines = lines[:limit]
+                out = "\n".join(f"{i+offset+1}\t{l}" for i, l in enumerate(lines))
+            # سجّل عملية القراءة للعرض الهرمي (المستوى 3 = المحتوى المقروء)
+            try:
+                from core.oplog import log_operation
+                log_operation(str(p), "read", op_type="read", content=out)
             except Exception:
                 pass
-            # احتياط: نص خام
-            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-            if offset:
-                lines = lines[offset:]
-            if limit:
-                lines = lines[:limit]
-            return "\n".join(f"{i+offset+1}\t{l}" for i, l in enumerate(lines))
+            return out
         except Exception as e:
             return f"خطأ في قراءة {path}: {e}"
 
@@ -1016,6 +1025,12 @@ class ToolRegistry:
             sp = str(p)
             if sp not in self._created_files:
                 self._created_files.append(sp)
+            try:
+                from core.oplog import log_operation
+                log_operation(str(p), "created", op_type="create",
+                              content=f"(ملف ثنائي — {len(raw)} بايت)")
+            except Exception:
+                pass
             return (f"✅ تم إنشاء ملف ثنائي {p} ({len(raw)} بايت) — "
                     f"متاح في شاشة «الملفات» للتنزيل.")
         except Exception as e:
@@ -1041,7 +1056,8 @@ class ToolRegistry:
             return f"خطأ في فكّ الأرشيف: {e}"
 
     def _diff_and_log(self, path, old: str, new: str, is_new: bool) -> str:
-        """يحسب +/- عبر difflib ويسجّل العملية في سجل العمليات. يُرجع سطر الإحصاء."""
+        """يحسب +/- عبر difflib ويسجّل العملية بمحتواها الكامل (للمستوى 3).
+        يُرجع سطر الإحصاء."""
         try:
             import difflib
             diff = list(difflib.unified_diff(
@@ -1049,8 +1065,12 @@ class ToolRegistry:
             added = sum(1 for l in diff if l.startswith("+") and not l.startswith("+++"))
             removed = sum(1 for l in diff if l.startswith("-") and not l.startswith("---"))
             from core.oplog import log_operation, stat_label
-            entry = log_operation(str(path), "created" if is_new else "edited",
-                                  added, removed)
+            if is_new:
+                entry = log_operation(str(path), "created", added, removed,
+                                      op_type="create", content=new)
+            else:
+                entry = log_operation(str(path), "edited", added, removed,
+                                      op_type="edit", before=old, after=new)
             return stat_label(entry)
         except Exception:
             return ""
@@ -1368,7 +1388,15 @@ class ToolRegistry:
                 output += f"\n[STDERR]: {result.stderr}"
             if result.returncode != 0:
                 output += f"\n[EXIT CODE]: {result.returncode}"
-            return output[:30000] if output else "(لا يوجد إخراج)"
+            output = output[:30000] if output else "(لا يوجد إخراج)"
+            # سجّل التنفيذ للعرض الهرمي (المستوى 3 = الأمر + المخرجات)
+            try:
+                from core.oplog import log_operation
+                log_operation("", "run", op_type="run",
+                              command=command, output=output)
+            except Exception:
+                pass
+            return output
         except subprocess.TimeoutExpired:
             return f"انتهت المهلة ({timeout}ث)"
         except Exception as e:

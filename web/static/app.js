@@ -431,16 +431,111 @@
     } catch (e) {}
     try {
       const r = await api("/api/operations");
-      const ops = r.operations || [];
-      $("#opsList").innerHTML = ops.length
-        ? ops.map((o) =>
-            '<div class="op-row"><span class="op-label">' + escapeHtml(o.file) + "</span>" +
-            '<span class="op-verb">' + (o.action === "created" ? "Created" : "Edited") + "</span>" +
-            '<span class="ab-added">+' + o.added + "</span>" +
-            '<span class="ab-removed">-' + o.removed + "</span></div>").join("")
-        : '<span class="muted small">لا تعديلات مسجّلة بعد.</span>';
+      renderOpsBatches(r.batches || []);
     } catch (e) {}
   }
+
+  // ── سجل العمليات الهرمي (3 مستويات كواجهة Claude Code) ──
+  // المستوى 1: ملخّص دفعة قابل للطي · المستوى 2: قائمة العمليات · المستوى 3: تفاصيل
+  const OP_TIME = (ts) => { try { return new Date(ts * 1000).toLocaleTimeString("ar"); } catch (e) { return ""; } };
+  function renderOpsBatches(batches) {
+    const box = $("#opsBatches");
+    if (!batches.length) { box.innerHTML = '<span class="muted small">لا عمليات مسجّلة بعد.</span>'; return; }
+    box.innerHTML = batches.map((b, bi) =>
+      '<div class="op-batch">' +
+      '<button class="op-summary" data-bi="' + bi + '">' +
+        '<span class="op-caret">▸</span>' +
+        '<span class="op-sum-text">' + escapeHtml(b.summary) + "</span>" +
+        '<span class="op-sum-meta muted small">' + b.count + " · " + OP_TIME(b.ts) + "</span>" +
+      "</button>" +
+      '<div class="op-list" data-list="' + bi + '" style="display:none"></div>' +
+      "</div>").join("");
+    // المستوى 2: يُبنى عند فتح الملخّص (طي/فتح)
+    box.querySelectorAll(".op-summary").forEach((btn) => btn.onclick = () => {
+      const bi = +btn.dataset.bi, list = box.querySelector('[data-list="' + bi + '"]');
+      const caret = btn.querySelector(".op-caret");
+      const open = list.style.display !== "none";
+      if (open) { list.style.display = "none"; caret.textContent = "▸"; return; }
+      caret.textContent = "▾";
+      list.style.display = "block";
+      list.innerHTML = batches[bi].operations.map((o) =>
+        '<button class="op-item" data-opid="' + escapeHtml(o.id) + '">' +
+        '<span class="op-ic">' + o.icon + "</span>" +
+        '<span class="op-verb">' + escapeHtml(o.verb) + "</span>" +
+        '<span class="op-name">' + escapeHtml(o.label || o.file || "—") + "</span>" +
+        ((o.added || o.removed)
+          ? '<span class="ab-added">+' + o.added + '</span><span class="ab-removed">-' + o.removed + "</span>"
+          : "") +
+        "</button>").join("");
+      // المستوى 3: نقر عملية → تفاصيلها
+      list.querySelectorAll(".op-item").forEach((el) =>
+        el.onclick = () => openOpDetail(el.dataset.opid));
+    });
+  }
+
+  async function openOpDetail(opId) {
+    const modal = $("#opDetailModal"), body = $("#opDetailBody");
+    modal.classList.add("open");
+    body.innerHTML = '<div class="muted small">…جارٍ التحميل</div>';
+    try {
+      const r = await api("/api/operations/detail?id=" + encodeURIComponent(opId));
+      if (!r.ok) { body.innerHTML = '<div class="muted small">' + escapeHtml(r.error || "تعذّر") + "</div>"; return; }
+      const o = r.operation;
+      $("#opDetailTitle").textContent =
+        (({ edit: "تعديل", create: "إنشاء", read: "قراءة", run: "تنفيذ" })[o.type] || o.type) +
+        " · " + (o.file || (o.command || "").slice(0, 30));
+      body.innerHTML = renderOpDetail(o);
+    } catch (e) {
+      body.innerHTML = '<div class="muted small">تعذّر جلب التفاصيل.</div>';
+    }
+  }
+
+  function renderOpDetail(o) {
+    if (o.type === "edit") {
+      return '<div class="op-path">' + escapeHtml(o.path) + "</div>" + renderDiff(o.before || "", o.after || "");
+    }
+    if (o.type === "create") {
+      return '<div class="op-path">' + escapeHtml(o.path) + "</div>" +
+        '<pre class="op-code">' + numberLines(o.content || "") + "</pre>";
+    }
+    if (o.type === "read") {
+      return '<div class="op-path">' + escapeHtml(o.path) + "</div>" +
+        '<pre class="op-code">' + escapeHtml(o.content || "") + "</pre>";
+    }
+    if (o.type === "run") {
+      return '<div class="op-sec-label">الأمر (Command)</div>' +
+        '<pre class="op-code op-cmd">' + escapeHtml(o.command || "") + "</pre>" +
+        '<div class="op-sec-label">المخرجات (Output)</div>' +
+        '<pre class="op-code op-out">' + escapeHtml(o.output || "") + "</pre>";
+    }
+    return '<pre class="op-code">' + escapeHtml(JSON.stringify(o, null, 2)) + "</pre>";
+  }
+
+  // diff view: تمييز الأسطر المضافة/المحذوفة بألوان + أرقام
+  function renderDiff(before, after) {
+    const a = before.split("\n"), b = after.split("\n");
+    const rows = [];
+    let i = 0, j = 0;
+    // مقارنة بسيطة سطراً بسطر (LCS خفيف عبر difflib-like)
+    const setB = new Set(b);
+    const setA = new Set(a);
+    // نعرض المحذوف ثم المضاف بأسلوب موحّد مقروء
+    a.forEach((ln, idx) => {
+      if (!setB.has(ln)) rows.push('<div class="dl del"><span class="ln">-' + (idx + 1) + '</span>' + escapeHtml(ln) + "</div>");
+      else rows.push('<div class="dl ctx"><span class="ln">' + (idx + 1) + "</span>" + escapeHtml(ln) + "</div>");
+    });
+    b.forEach((ln, idx) => {
+      if (!setA.has(ln)) rows.push('<div class="dl add"><span class="ln">+' + (idx + 1) + '</span>' + escapeHtml(ln) + "</div>");
+    });
+    return '<div class="op-diff">' + rows.join("") + "</div>";
+  }
+  function numberLines(s) {
+    return s.split("\n").map((l, i) =>
+      '<span class="ln">' + (i + 1) + "</span>" + escapeHtml(l)).join("\n");
+  }
+  $$("[data-opclose]").forEach((b) => b.onclick = () => $("#opDetailModal").classList.remove("open"));
+  $("#opDetailModal").addEventListener("click", (e) => { if (e.target.id === "opDetailModal") $("#opDetailModal").classList.remove("open"); });
+  $("#opDetailBack") && ($("#opDetailBack").onclick = () => $("#opDetailModal").classList.remove("open"));
   $("#planToggle") && ($("#planToggle").onclick = async () => {
     const cur = $("#planState").classList.contains("on");
     const r = await post("/api/plan/toggle", { on: !cur });
