@@ -629,22 +629,42 @@ class QueryEngine:
         return decision or PERM_DENY
 
     def _copy_created_to_downloads(self) -> None:
-        """ينسخ الملفات التي أنشأها الوكيل إلى ~/storage/downloads إن وُجد (Termux)."""
+        """ينسخ الملفات التي أنشأها الوكيل إلى ~/storage/downloads (Termux) —
+        **إلا** ما كان داخل مستودع Git، فتلك تُدار بـ GitPush وتبقى في المستودع
+        لتُرفَع إلى GitHub (لا تُنسَخ لـ Downloads تفادياً للّبس)."""
         try:
             created = getattr(self.tools, "_created_files", None)
             if not created:
                 return
             downloads = os.path.expanduser("~/storage/downloads")
             if not os.path.isdir(downloads):
+                self.tools._created_files = []
                 return
             import shutil
+            import subprocess
+            git_cache: Dict[str, bool] = {}  # مجلد → هل داخل مستودع Git (لتفادي التكرار)
+
+            def _in_git(d: str) -> bool:
+                if d not in git_cache:
+                    try:
+                        r = subprocess.run(
+                            ["git", "rev-parse", "--is-inside-work-tree"],
+                            capture_output=True, text=True, cwd=d, timeout=5)
+                        git_cache[d] = (r.returncode == 0 and r.stdout.strip() == "true")
+                    except Exception:
+                        git_cache[d] = False
+                return git_cache[d]
+
             for fpath in created:
                 try:
-                    if os.path.isfile(fpath):
-                        shutil.copy2(fpath, downloads)
+                    if not os.path.isfile(fpath):
+                        continue
+                    if _in_git(os.path.dirname(os.path.abspath(fpath))):
+                        continue  # داخل مستودع → GitPush يتولّاه، لا تنسخ
+                    shutil.copy2(fpath, downloads)
                 except Exception:
                     pass
-            # تفريغ القائمة بعد النسخ (تفادي تكرار النسخ)
+            # تفريغ القائمة بعد المعالجة (تفادي تكرار النسخ)
             self.tools._created_files = []
         except Exception:
             pass

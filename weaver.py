@@ -221,14 +221,19 @@ def _sync_provider_from_env(provider) -> bool:
     return before != (cfg.api_key, cfg.base_url, cfg.model)
 
 
-async def build_engine(mode: str = "main", plan_mode: bool = False):
+async def build_engine(mode: str = "main", plan_mode: bool = False,
+                       work_dir=None):
     """
     تهيئة كاملة للمحرّك: المزوّد + الأدوات + الذاكرة + hooks + خوادم MCP.
     يُرجع (engine, provider, mcp) — على المتصل استدعاء mcp.stop_all() في النهاية.
+
+    work_dir: مجلد عمل الوكيل (المستودع المطلوب). الأولوية: الوسيط > بيئة
+    WEAVER_WORK_DIR > المجلد الحالي — فتُنشأ الملفات في المستودع لا في WeaverCode.
     """
     provider = get_provider()
     memory = MemoryStore()
-    tools = ToolRegistry()
+    wd = work_dir or os.environ.get("WEAVER_WORK_DIR") or None
+    tools = ToolRegistry(work_dir=wd) if wd else ToolRegistry()
     hooks = HookManager()
 
     # مجلدات عمل إضافية (--add-dir / multi-workspace)
@@ -278,11 +283,12 @@ async def build_engine(mode: str = "main", plan_mode: bool = False):
 
 
 async def run_once(prompt: str, mode: str = "main", stream: bool = False,
-                   plan_mode: bool = False):
+                   plan_mode: bool = False, work_dir=None):
     """تشغيل مهمة واحدة"""
     load_env()
 
-    engine, provider, mcp = await build_engine(mode, plan_mode=plan_mode)
+    engine, provider, mcp = await build_engine(mode, plan_mode=plan_mode,
+                                               work_dir=work_dir)
 
     draw_welcome(provider.config.model, provider.config.base_url)
     draw_split_header(provider.config.model,
@@ -324,7 +330,40 @@ async def run_once(prompt: str, mode: str = "main", stream: bool = False,
 
         await mcp.stop_all()
 
+    _maybe_auto_push(engine.tools.work_dir)
     await provider.close()
+
+
+def _maybe_auto_push(work_dir: str) -> None:
+    """رفع تلقائي إلى GitHub عند الانتهاء إن كان WEAVER_AUTO_PUSH=1 (معطّل افتراضياً).
+
+    آمن: يرفع فقط إن وُجدت تغييرات فعلية داخل مستودع Git، ويستخدم اعتماد git
+    المحلي. لا يُنفَّذ ما لم يفعّله المستخدم صراحةً.
+    """
+    if os.environ.get("WEAVER_AUTO_PUSH", "0").strip() not in ("1", "true", "yes", "on"):
+        return
+    import subprocess
+    try:
+        inside = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"],
+                                capture_output=True, text=True, cwd=work_dir, timeout=10)
+        if inside.returncode != 0 or inside.stdout.strip() != "true":
+            return
+        status = subprocess.run(["git", "status", "--porcelain"],
+                                capture_output=True, text=True, cwd=work_dir, timeout=10)
+        if not status.stdout.strip():
+            draw_info("لا تغييرات للرفع.")
+            return
+        subprocess.run(["git", "add", "-A"], capture_output=True, cwd=work_dir, timeout=30)
+        subprocess.run(["git", "commit", "-m", "🕸️ WeaverCode: auto-commit"],
+                       capture_output=True, cwd=work_dir, timeout=30)
+        push = subprocess.run(["git", "push"], capture_output=True, text=True,
+                              cwd=work_dir, timeout=90)
+        if push.returncode == 0:
+            draw_success("رُفعت التغييرات إلى GitHub ✓")
+        else:
+            draw_error("تعذّر الرفع التلقائي: " + (push.stderr or "").strip()[:200])
+    except Exception as e:
+        draw_error(f"تعذّر الرفع التلقائي: {e}")
 
 
 def _show_empty_diagnostic(provider) -> None:
@@ -1149,6 +1188,8 @@ def main():
                         help="عرض قائمة الجلسات المحفوظة")
     parser.add_argument("--add-dir", action="append", metavar="DIR", default=[],
                         help="إضافة مجلد عمل إضافي (يمكن تكراره) — multi-workspace")
+    parser.add_argument("--work-dir", "-C", metavar="DIR", default=None,
+                        help="مجلد عمل الوكيل (المستودع المطلوب). الافتراضي: المجلد الحالي")
     parser.add_argument("--init", action="store_true",
                         help="تحليل المشروع وتوليد ملف CLAUDE.md")
 
@@ -1168,6 +1209,9 @@ def main():
         os.environ["WEAVER_AUTO_APPROVE"] = "1"
     if args.add_dir:
         os.environ["WEAVER_ADD_DIRS"] = os.pathsep.join(args.add_dir)
+    if args.work_dir:
+        # مجلد عمل الوكيل (المستودع المطلوب) — يُلتقط في build_engine
+        os.environ["WEAVER_WORK_DIR"] = os.path.abspath(os.path.expanduser(args.work_dir))
 
     # ── تشخيص: عرض الإصدار ──────────────────────────────────────────────────
     if args.version:
