@@ -12,7 +12,7 @@ Bash مراراً) فيبقى «يفكّر» دقائق دون ردّ مفيد. 
 import asyncio
 import json
 
-from core.engine.query_engine import QueryEngine
+from core.engine.query_engine import QueryEngine, _looks_like_guard_verdict
 
 
 class _FakeConfig:
@@ -87,6 +87,40 @@ def test_time_budget_stops_slow_task(monkeypatch):
     assert res.timed_out is True
     assert eng.provider.calls < 50            # توقّف قبل استنفاد الدورات
     assert "الحدّ الزمني" in res.text
+
+
+class _GuardModelProvider:
+    """يحاكي نموذج فحص أمان (NemoGuard) يردّ بحكم سلامة بدل الإجابة."""
+
+    def __init__(self, verdict='{"User Safety": "safe", "Response Safety": "safe"}'):
+        self.config = _FakeConfig()
+        self._verdict = verdict
+
+    async def complete(self, messages, tools=None):
+        return {"choices": [{"message": {"content": self._verdict, "role": "assistant"}}]}
+
+    async def close(self):
+        pass
+
+
+def test_detects_guard_verdict():
+    assert _looks_like_guard_verdict('{"User Safety": "safe", "Response Safety": "safe"}')
+    assert _looks_like_guard_verdict('{"Response Safety": "unsafe"}')
+    assert _looks_like_guard_verdict("safe")
+    assert _looks_like_guard_verdict("unsafe\nS1")
+    # لا إيجابيات كاذبة: ردود دردشة عادية
+    assert not _looks_like_guard_verdict("أهلاً! كيف أساعدك اليوم؟")
+    assert not _looks_like_guard_verdict("الكود آمن ولا يحوي ثغرات — إليك الشرح المفصّل ...")
+    assert not _looks_like_guard_verdict("")
+
+
+def test_guard_model_gets_clear_hint(monkeypatch):
+    """رد نموذج Guard يُستبدل برسالة إرشادية لاختيار نموذج دردشة."""
+    monkeypatch.setenv("WEAVER_AUTO_APPROVE", "1")
+    eng = QueryEngine(provider=_GuardModelProvider())
+    res = asyncio.run(eng.run("هلا"))
+    assert "فحص أمان" in res.text
+    assert "User Safety" not in res.text or "بدل الإجابة" in res.text
 
 
 def test_guards_disabled_runs_to_max_turns(monkeypatch):

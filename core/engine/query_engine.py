@@ -254,6 +254,40 @@ def _looks_like_refusal(text: str) -> bool:
     return False
 
 
+def _looks_like_guard_verdict(text: str) -> bool:
+    """يكشف أنّ النموذج المختار نموذج «فحص أمان» (Guard) لا نموذج محادثة.
+
+    نماذج مثل NVIDIA NemoGuard / Aegis / Llama-Guard تُعيد حكم أمان بدل الإجابة:
+      {"User Safety": "safe", "Response Safety": "safe"}   ← NemoGuard/Aegis
+      safe                                                 ← Llama Guard (آمن)
+      unsafe\nS1                                            ← Llama Guard (فئة خطر)
+    فيظهر للمستخدم ردّ غير مفهوم على «هلا». نكشفه لنوجّهه لاختيار نموذج دردشة.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    low = t.lower()
+    # NemoGuard / Aegis: JSON بمفاتيح السلامة الصريحة (أقوى إشارة، بلا لبس)
+    if '"user safety"' in low or '"response safety"' in low:
+        return True
+    # Llama Guard: «safe» وحدها، أو «unsafe» + رمز فئة (S1..S14) — نصّ قصير فقط
+    if len(t) <= 40:
+        if low == "safe":
+            return True
+        if low.startswith("unsafe") and re.search(r"\bs\d{1,2}\b", low):
+            return True
+    return False
+
+
+# رسالة إرشادية موحّدة عند اكتشاف نموذج Guard (طرفية + ويب)
+_GUARD_MODEL_HINT = (
+    "⚠️ النموذج المختار نموذج «فحص أمان» (Guard/Content-Safety) وليس نموذج محادثة —\n"
+    "   لذلك يردّ بحكم أمان مثل {\"User Safety\": \"safe\"} بدل الإجابة على رسالتك.\n"
+    "   الحلّ: اختر نموذج دردشة (instruct/chat) عبر /model أو من لوحة الويب.\n"
+    "   أمثلة على NVIDIA: meta/llama-3.1-8b-instruct أو meta/llama-3.3-70b-instruct."
+)
+
+
 # ── منقّي الهوية على مستوى المخرجات (شبكة أمان أخيرة) ─────────────────────────
 # إذا كان الخادم/الوسيط يحقن هوية «Claude Code» ويتجاهل بروموهنا (كما في بعض
 # وسطاء aerolink)، فهذه الطبقة تضمن ألّا يرى المستخدم الهوية الخاطئة إطلاقاً.
@@ -1148,6 +1182,11 @@ class QueryEngine:
 
         result.turns = turns
         result.blocks = list(self._completed_blocks)
+
+        # نموذج «فحص أمان» (Guard) بدل نموذج محادثة → وجّه المستخدم بوضوح بدل
+        # عرض حكم أمان غير مفهوم مثل {"User Safety": "safe"} على «هلا».
+        if not result.error and _looks_like_guard_verdict(result.text):
+            result.text = _GUARD_MODEL_HINT
 
         # شبكة الأمان الأخيرة: تنقية أي تسريب لهوية أخرى من الرد
         result.text = _sanitize_identity(result.text)
