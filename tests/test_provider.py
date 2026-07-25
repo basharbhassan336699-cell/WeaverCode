@@ -24,6 +24,17 @@ def test_endpoint_url_building():
         "https://api.groq.com/openai/v1/chat/completions"
 
 
+def test_nvidia_url_normalized_to_v1():
+    """NVIDIA يتطلّب /v1 — نطبّع الرابط الناقص لمنع 404 «page not found»."""
+    nv = "https://integrate.api.nvidia.com/v1/chat/completions"
+    assert _p("https://integrate.api.nvidia.com/v1")._openai_url() == nv   # سليم
+    assert _p("https://integrate.api.nvidia.com")._openai_url() == nv      # نقص /v1
+    assert _p("integrate.api.nvidia.com")._openai_url() == nv              # نقص المخطّط+/v1
+    # مزودون آخرون لا يُمَسّون (لا نُضيف /v1 لهم)
+    assert _p("https://openrouter.ai/api/v1")._openai_url() == \
+        "https://openrouter.ai/api/v1/chat/completions"
+
+
 def test_headers_per_format():
     # بوابة متوافقة (aerolink): Bearer فقط بلا x-api-key (نطابق ما يعمل يدوياً)
     a = _p("https://capi.aerolink.lat")._headers()

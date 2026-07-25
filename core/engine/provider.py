@@ -462,10 +462,25 @@ class WeaverProvider:
         return b + "/v1/messages"
 
     def _openai_url(self) -> str:
-        b = self.config.base_url.rstrip("/")
+        b = self._norm_base()
         if b.endswith("/chat/completions"):
             return b
         return b + "/chat/completions"
+
+    def _norm_base(self) -> str:
+        """تطبيع رابط المزود — يمنع 404 «page not found» من روابط ناقصة.
+
+        - يُضيف المخطّط https:// إن نقص (مستخدم كتب المضيف فقط).
+        - NVIDIA integrate يتطلّب المقطع /v1 — يُضيفه إن نقص (سبب 404 شائع).
+        لا يمسّ الروابط السليمة (تبقى كما هي) ولا المفتاح/الترويسات.
+        """
+        b = self.config.base_url.strip().rstrip("/")
+        if b and "://" not in b:
+            b = "https://" + b
+        low = b.lower()
+        if "integrate.api.nvidia.com" in low and "/v1" not in low:
+            b = b + "/v1"
+        return b
 
     # ── ترويسات الطلب ─────────────────────────────────────────────────────────
 
@@ -932,7 +947,10 @@ class WeaverProvider:
         hints = {
             401: "المفتاح WEAVER_API_KEY غير صحيح أو منتهي.",
             403: "المفتاح لا يملك صلاحية للوصول إلى هذا النموذج.",
-            404: "المسار أو النموذج غير موجود — تحقق من WEAVER_BASE_URL و WEAVER_MODEL.",
+            404: ("الوصول للخادم نجح (المفتاح سليم) لكن اسم النموذج غير موجود على "
+                  "هذا المزوّد. الأرجح: WEAVER_MODEL خاطئ — اختر نموذجاً من قائمة "
+                  "«اكتشاف النماذج» (مثلاً على NVIDIA: meta/llama-3.1-8b-instruct). "
+                  "إن استمرّ فتأكّد أنّ WEAVER_BASE_URL ينتهي بـ /v1."),
             305: "المزود يطلب استخدام بروكسي (Use Proxy) — اضبط WEAVER_PROXY.",
             307: "إعادة توجيه — تأكد أن follow_redirects مفعّل (WEAVER_FOLLOW_REDIRECTS=true).",
             308: "إعادة توجيه دائمة — تحقق من صحة عنوان الـ URL.",
