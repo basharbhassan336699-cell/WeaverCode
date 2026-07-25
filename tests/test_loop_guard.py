@@ -115,12 +115,47 @@ def test_detects_guard_verdict():
 
 
 def test_guard_model_gets_clear_hint(monkeypatch):
-    """رد نموذج Guard يُستبدل برسالة إرشادية لاختيار نموذج دردشة."""
+    """نموذج Guard حقيقي: يبقى يردّ حكماً حتى بلا نظام/أدوات → رسالة إرشادية."""
     monkeypatch.setenv("WEAVER_AUTO_APPROVE", "1")
+    monkeypatch.setenv("WEAVER_REFUSAL_RETRY", "1")
     eng = QueryEngine(provider=_GuardModelProvider())
     res = asyncio.run(eng.run("هلا"))
     assert "فحص أمان" in res.text
     assert "User Safety" not in res.text or "بدل الإجابة" in res.text
+
+
+class _GatewayGuardsHeavyProvider:
+    """بوابة تحجب الطلب الثقيل (نظام/أدوات) بحكم Guard لكنها تردّ بطلاقة على
+    الطلب العاري (مثل اختبار curl على Termux بنفس المفتاح)."""
+
+    def __init__(self):
+        self.config = _FakeConfig()
+        self.calls = []
+
+    async def complete(self, messages, tools=None):
+        has_system = any(m.role == "system" for m in messages)
+        self.calls.append((has_system, bool(tools)))
+        if has_system or tools:
+            return {"choices": [{"message": {
+                "content": '{"User Safety": "safe", "Response Safety": "safe"}',
+                "role": "assistant"}}]}
+        return {"choices": [{"message": {
+            "content": "أهلاً! كيف أساعدك؟", "role": "assistant"}}]}
+
+    async def close(self):
+        pass
+
+
+def test_guard_verdict_triggers_bare_retry(monkeypatch):
+    """حكم Guard على الطلب الثقيل → تراجع تلقائي لطلب عارٍ يحاكي curl → ردّ حقيقي."""
+    monkeypatch.setenv("WEAVER_AUTO_APPROVE", "1")
+    monkeypatch.setenv("WEAVER_REFUSAL_RETRY", "1")
+    eng = QueryEngine(provider=_GatewayGuardsHeavyProvider())
+    res = asyncio.run(eng.run("هلا"))
+    assert "أهلاً" in res.text                       # حصلنا على ردّ حقيقي
+    assert "User Safety" not in res.text
+    # أُعيدت المحاولة بطلب بلا نظام وبلا أدوات (عارٍ)
+    assert any((not has_sys and not has_tools) for has_sys, has_tools in eng.provider.calls)
 
 
 def test_guards_disabled_runs_to_max_turns(monkeypatch):

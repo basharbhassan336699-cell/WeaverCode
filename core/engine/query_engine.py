@@ -856,14 +856,18 @@ class QueryEngine:
             if (not clean_retried
                     and _refusal_retry_enabled()):
                 first_text = response["choices"][0]["message"].get("content") or ""
-                if _looks_like_refusal(first_text):
+                # يُطلق التعافي رفضٌ صريح، أو حكم نموذج «فحص أمان» (Guard verdict):
+                # كلاهما يعني أنّ الطلب الثقيل (نظام + أدوات) حُجب، بينما ينجح طلبٌ
+                # بسيط بنفس المفتاح (كاختبار curl على Termux). فنعيد المحاولة بطلب
+                # «عارٍ» يحاكي ذلك الاختبار تماماً (بلا نظام/أدوات) للحصول على ردّ حقيقي.
+                if _looks_like_refusal(first_text) or _looks_like_guard_verdict(first_text):
                     clean_retried = True
-                    # إشعار مرئي أن التحايل على الرفض جارٍ (تشخيص + طمأنة)
+                    # إشعار مرئي أن التحايل على الحجب جارٍ (تشخيص + طمأنة)
                     try:
                         from background.events import event_bus, WeaverEvent, EventType
                         await event_bus.emit(WeaverEvent(
                             EventType.THINKING,
-                            "رُفض الطلب — أعيد المحاولة بطلب مبسّط بلا أدوات..."))
+                            "حُجب الطلب الكامل — أعيد المحاولة بطلب مبسّط بلا أدوات..."))
                     except Exception:
                         pass
                     # سلّم إعادة المحاولة: (بروموه النظام, أدوات, تحويل رسالة المستخدم)
@@ -893,7 +897,8 @@ class QueryEngine:
                         except Exception:
                             continue
                         retry_text = retry["choices"][0]["message"].get("content") or ""
-                        if retry_text and not _looks_like_refusal(retry_text):
+                        if (retry_text and not _looks_like_refusal(retry_text)
+                                and not _looks_like_guard_verdict(retry_text)):
                             response = retry
                             messages = _msgs
                             break
