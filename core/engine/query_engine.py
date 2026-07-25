@@ -5,6 +5,7 @@ query_engine.py — محرك الحلقة الوكيلية الرئيسية لـ
 
 import os
 import re
+import time
 import asyncio
 import json
 import uuid
@@ -329,6 +330,8 @@ class QueryResult:
     session_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     error: Optional[str] = None
     blocks: List[Any] = field(default_factory=list)   # Action Blocks للجولات
+    timed_out: bool = False                            # تجاوزت المهمة الحدّ الزمني
+    looped: bool = False                               # النموذج كرّر الأداة نفسها بلا تقدّم
 
 
 class QueryEngine:
@@ -777,8 +780,29 @@ class QueryEngine:
         turns = 0
         clean_retried = False   # تعافٍ لمرّة واحدة من الرفض الزائف
 
+        # ── حارس ضدّ «يفكّر بلا رد»: ميزانية زمنية + كشف الدوران ────────────────
+        # نموذج ضعيف مع أدوات كثيرة قد يدور على الأدوات كل الدورات (مثلاً «هلا»
+        # فيستدعي Bash مراراً) فيبقى «يفكّر» دقائق دون ردّ مفيد. هذان الحدّان
+        # يضمنان ردّاً سريعاً وواضحاً بدل التعليق. (0 = تعطيل الميزانية الزمنية.)
+        _budget = float(os.environ.get("WEAVER_TASK_BUDGET", "150") or 0)
+        _loop_limit = int(os.environ.get("WEAVER_LOOP_LIMIT", "4") or 0)
+        _loop_guard: Dict[str, int] = {}   # توقيع (أداة+وسائط) → عدد التنفيذ
+        _t0 = time.monotonic()
+
         while turns < self.max_turns:
             turns += 1
+
+            # ميزانية زمنية: أوقف قبل استدعاء المزوّد مجدداً إن تجاوزنا الحدّ.
+            if _budget and (time.monotonic() - _t0) > _budget:
+                result.timed_out = True
+                if not (result.text or "").strip():
+                    result.text = (
+                        f"⏱️ تجاوزت المهمة الحدّ الزمني ({int(_budget)} ثانية) — "
+                        f"أوقفت التنفيذ لتفادي تعليق «يفكّر» طويلاً.\n"
+                        f"   الأرجح: نموذج بطيء أو يدور على الأدوات لطلب بسيط.\n"
+                        f"   جرّب: نموذجاً أسرع (/model)، أو WEAVER_COMPACT_TOOLS=1، "
+                        f"أو صياغة أوضح. (لرفع الحدّ: WEAVER_TASK_BUDGET بالثواني.)")
+                break
 
             # حدّ للسياق داخل الحلقة: نتائج أدوات ضخمة (قراءة ملف كبير) لا تبتلع
             # ميزانية النموذج فيرجع فارغاً — سبب الرد الفارغ من أول رسالة.
@@ -936,6 +960,7 @@ class QueryEngine:
             except Exception:
                 pass
             tool_results = []
+            _break_task = False   # كشف الدوران: أوقف المهمة بعد هذه الجولة
             for tc in msg["tool_calls"]:
                 tool_name = tc["function"]["name"]
                 tool_id = tc["id"]
@@ -945,6 +970,27 @@ class QueryEngine:
                     args = {}
 
                 result.tool_calls_made.append(tool_name)
+
+                # ── كشف الدوران: نفس (الأداة+الوسائط) يتكرّر بلا تقدّم ──────────
+                # نموذج ضعيف قد يعيد الاستدعاء ذاته مراراً (echo hi ×20) فيعلّق
+                # «يفكّر». نوقفه بوضوح بدل استنزاف الدورات. (0 = تعطيل.)
+                if _loop_limit:
+                    try:
+                        _sig = tool_name + ":" + json.dumps(
+                            args, ensure_ascii=False, sort_keys=True)[:200]
+                    except Exception:
+                        _sig = tool_name
+                    _loop_guard[_sig] = _loop_guard.get(_sig, 0) + 1
+                    if _loop_guard[_sig] > _loop_limit:
+                        result.looped = True
+                        if not (result.text or "").strip():
+                            result.text = (
+                                f"🔁 أوقفت التنفيذ: كرّر النموذج الأداة نفسها "
+                                f"({tool_name}) {_loop_guard[_sig]} مرّات دون تقدّم.\n"
+                                f"   غالباً نموذج ضعيف مع أدوات كثيرة يدور بلا هدف.\n"
+                                f"   جرّب نموذجاً أقوى (/model) أو WEAVER_COMPACT_TOOLS=1.")
+                        _break_task = True
+                        break
 
                 if on_tool:
                     on_tool(tool_name, args)
@@ -1088,6 +1134,10 @@ class QueryEngine:
             if block.ops:
                 self._completed_blocks.append(block)
                 self._emit_action_block(block)
+
+            # كشف الدوران رفع الراية → أوقف المهمة بردٍّ واضح (لا مزيد من الدورات)
+            if _break_task:
+                break
 
             # asyncRewake: إن أرجع hook (مثل security-guidance) رسالة إعادة تنبيه،
             # نحقنها كرسالة مستخدم في الجولة التالية ليعالجها الوكيل.

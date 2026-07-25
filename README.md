@@ -310,7 +310,15 @@ WEAVER_PRICE_INPUT=3.0           # Override $/1M input tokens
 WEAVER_PRICE_OUTPUT=15.0         # Override $/1M output tokens
 WEAVER_ADD_DIRS=/path/a:/path/b  # Extra workspace dirs (colon-separated)
 WEAVER_CONTEXT_WINDOW=200000     # Context window size for /context
+
+# Anti-«thinking-forever» guards (weak models that loop on tools)
+WEAVER_TASK_BUDGET=150           # Wall-clock budget per task in seconds (0=off)
+WEAVER_LOOP_LIMIT=4              # Max repeats of the same tool+args before stopping (0=off)
 ```
+
+> **«يفكّر بلا رد»؟** لو بقيت المهمة معلّقة على «يفكّر»، فغالباً النموذج ضعيف
+> ويدور على الأدوات. الحارسان أعلاه يوقفانه سريعاً برسالة واضحة؛ جرّب أيضاً
+> نموذجاً أقوى (`/model`) أو `WEAVER_COMPACT_TOOLS=1`.
 
 ---
 
