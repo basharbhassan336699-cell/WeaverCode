@@ -232,7 +232,7 @@ class ProviderConfig:
     temperature: float = 0.7
     proxy: Optional[str] = None
     follow_redirects: bool = True
-    timeout: int = 180
+    timeout: int = 120   # ثانية — بوابة لا تستجيب خلالها تفشل بوضوح (WEAVER_TIMEOUT)
     retries: int = 2
     retry_base: float = 1.0
     extra_headers: Dict[str, str] = field(default_factory=dict)
@@ -258,7 +258,7 @@ class ProviderConfig:
                    or os.environ.get("HTTP_PROXY")
                    or None),
             follow_redirects=_bool("WEAVER_FOLLOW_REDIRECTS", True),
-            timeout=int(os.environ.get("WEAVER_TIMEOUT", "180")),
+            timeout=int(os.environ.get("WEAVER_TIMEOUT", "120")),
             retries=int(os.environ.get("WEAVER_RETRIES", "2")),
             retry_base=float(os.environ.get("WEAVER_RETRY_BASE", "1.0")),
         )
@@ -266,10 +266,11 @@ class ProviderConfig:
 
 class ProviderError(RuntimeError):
     """خطأ اتصال أو استجابة من المزود — رسالته عربية واضحة"""
+    is_timeout: bool = False
 
 
 class TransientProviderError(ProviderError):
-    """خطأ عابر (شبكة/DNS/مهلة/429/5xx) — يستحق إعادة المحاولة."""
+    """خطأ عابر (شبكة/DNS/429/5xx) — يستحق إعادة المحاولة."""
 
 
 class RequestTooLargeError(ProviderError):
@@ -283,8 +284,11 @@ class RequestTooLargeError(ProviderError):
         self.requested = requested
 
 
-# أكواد خروج curl العابرة: 6 resolve, 7 connect, 28 timeout, 35 ssl, 52 empty, 56 recv
-_CURL_TRANSIENT_CODES = {6, 7, 28, 35, 52, 55, 56}
+# أكواد خروج curl العابرة: 6 resolve, 7 connect, 35 ssl, 52 empty, 56 recv
+# ملاحظة: 28 (المهلة) ليس ضمنها — إعادة محاولته تضاعف الانتظار (3×المهلة) فيعلّق
+# «يفكّر» دقائق. المهلة تعني بوابة لا تستجيب → افشل سريعاً برسالة واضحة.
+_CURL_TRANSIENT_CODES = {6, 7, 35, 52, 55, 56}
+_CURL_TIMEOUT_CODE = 28
 # حالات HTTP العابرة (تُعاد المحاولة)؛ ما عداها (401/403/404/رصيد) دائم
 _HTTP_TRANSIENT = {408, 425, 429, 500, 502, 503, 504}
 
@@ -845,13 +849,24 @@ class WeaverProvider:
 
         if proc.returncode != 0:
             detail = err.decode("utf-8", "replace").strip() or f"رمز الخروج {proc.returncode}"
+            # مهلة (28): البوابة لم تستجب خلال المهلة → افشل فوراً بلا إعادة محاولة
+            # (تفادي تعليق «يفكّر» دقائق طويلة). رسالة واضحة قابلة للتصرّف.
+            if proc.returncode == _CURL_TIMEOUT_CODE:
+                _e = ProviderError(
+                    f"⏱️ لم يستجب المزوّد ({self.config.base_url}) خلال "
+                    f"{self.config.timeout} ثانية.\n"
+                    f"   الأرجح: مفتاح/رابط منصة لا يستجيب، أو نموذج بطيء جداً.\n"
+                    f"   جرّب: /model لاختيار نموذج آخر، أو بدّل المفتاح/المنصة، "
+                    f"أو قلّل WEAVER_TIMEOUT.")
+                _e.is_timeout = True
+                raise _e
             msg = (
                 f"❌ فشل الاتصال بالمزود ({self.config.base_url}).\n"
                 f"   السبب: {detail}\n"
                 f"   تلميح: تحقق من الإنترنت أو من صحة WEAVER_BASE_URL "
                 f"أو اضبط WEAVER_PROXY إذا كنت خلف بروكسي."
             )
-            # أخطاء الشبكة/DNS/المهلة عابرة → أعِد المحاولة
+            # أخطاء الشبكة/DNS العابرة → أعِد المحاولة
             if proc.returncode in _CURL_TRANSIENT_CODES:
                 raise TransientProviderError(msg)
             raise ProviderError(msg)
@@ -1019,9 +1034,20 @@ class WeaverProvider:
             t = tools if use_tools else None
             try:
                 resp = await self._complete_format(messages, t, fmt)
+            except TransientProviderError as e:
+                # عطل اتصال على مستوى الشبكة (بلا حالة HTTP): البوابة لا تُوصَل —
+                # تبديل الصيغة/إسقاط الأدوات لن يُصلح شبكة مع نفس المضيف → افشل
+                # فوراً (كان يعلّق «يفكّر» دقائق). أما الأخطاء ذات حالة HTTP (305/
+                # 429/5xx) فتُواصل السلّم (قد يُصلحها إسقاط الأدوات/تبديل الصيغة).
+                if not getattr(e, "status", 0):
+                    raise
+                last_err = e
+                continue
             except ProviderError as e:
-                # الرصيد/المصادقة تفشل بكل المرشّحين → أوقف فوراً (لا تُهدر طلبات)
-                if getattr(e, "billing", False) or getattr(e, "status", 0) in (401, 403):
+                # الرصيد/المصادقة/المهلة تفشل بكل المرشّحين (نفس المضيف) → أوقف
+                # فوراً بدل تجربة 4 مرشّحين (كان يضاعف انتظار «يفكّر»).
+                if (getattr(e, "billing", False) or getattr(e, "is_timeout", False)
+                        or getattr(e, "status", 0) in (401, 403)):
                     raise
                 last_err = e
                 continue

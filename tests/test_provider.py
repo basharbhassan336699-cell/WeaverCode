@@ -373,3 +373,71 @@ def test_complete_forced_format_no_fallback(monkeypatch):
     import asyncio
     asyncio.run(p.complete([Message(role="user", content="hi")]))
     assert calls["n"] == 1
+
+
+# ── فشل سريع عند مهلة/عطل شبكة (لا تعليق «يفكّر» دقائق) ───────────────────────
+
+def test_timeout_fails_fast_single_attempt():
+    """مهلة المزوّد (is_timeout) تُوقف السلّم فوراً بلا تجربة 4 مرشّحين."""
+    import asyncio
+    from core.engine.provider import ProviderError
+    p = _p("https://dead.example/v1", "m")
+    calls = {"n": 0}
+
+    async def fake(messages, tools, anthropic, bare=False):
+        calls["n"] += 1
+        e = ProviderError("⏱️ مهلة"); e.is_timeout = True
+        raise e
+    p._complete_format = fake
+
+    async def run():
+        with __import__("pytest").raises(ProviderError):
+            await p.complete([Message(role="user", content="hi")],
+                             tools=[{"function": {"name": "R", "parameters": {}}}])
+    asyncio.run(run())
+    assert calls["n"] == 1   # محاولة واحدة لا أربع
+
+
+def test_network_transient_no_status_fails_fast():
+    """عطل اتصال بلا حالة HTTP يفشل فوراً (تبديل الصيغة لا يُصلح الشبكة)."""
+    import asyncio
+    from core.engine.provider import ProviderError, TransientProviderError
+    p = _p("https://dead.example/v1", "m")
+    calls = {"n": 0}
+
+    async def fake(messages, tools, anthropic, bare=False):
+        calls["n"] += 1
+        raise TransientProviderError("connect failed")  # بلا status
+    p._complete_format = fake
+
+    async def run():
+        with __import__("pytest").raises(ProviderError):
+            await p.complete([Message(role="user", content="hi")],
+                             tools=[{"function": {"name": "R", "parameters": {}}}])
+    asyncio.run(run())
+    assert calls["n"] == 1
+
+
+def test_http_transient_with_status_still_laddered():
+    """خطأ بحالة HTTP (مثل 305) يُواصل السلّم (لا يفشل فوراً)."""
+    import asyncio
+    from core.engine.provider import TransientProviderError
+    p = _p("https://x/v1", "m")
+    calls = {"n": 0}
+
+    async def fake(messages, tools, anthropic, bare=False):
+        calls["n"] += 1
+        if tools:
+            e = TransientProviderError("HTTP 305"); e.status = 305
+            raise e
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"},
+                             "finish_reason": "stop"}], "usage": {}}
+    p._complete_format = fake
+
+    async def run():
+        r = await p.complete([Message(role="user", content="hi")],
+                             tools=[{"function": {"name": "R", "parameters": {}}}])
+        return r
+    r = asyncio.run(run())
+    assert r["choices"][0]["message"]["content"] == "ok"
+    assert calls["n"] >= 2   # واصل السلّم (أسقط الأدوات فنجح)
