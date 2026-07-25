@@ -982,6 +982,15 @@ class QueryEngine:
                     continue
                 # في وضع التخطيط: امنع أدوات التعديل (اسمح بالقراءة للبحث)
                 if self.plan_mode and self.tools.requires_permission(tool_name):
+                    # commit/push معلّق: اعرض معاينة في شريط النشاط (لون «معلّق»)
+                    if tool_name in ("GitCommit", "GitPush"):
+                        try:
+                            from core import git_activity as _ga
+                            _msg = (args.get("message", "") if isinstance(args, dict) else "") \
+                                or "commit معلّق (بانتظار اعتماد الخطة)"
+                            _ga.log_pending_commit(self.tools.work_dir, _msg)
+                        except Exception:
+                            pass
                     tool_results.append(Message(role="tool",
                         content=("🔬 أنت في وضع التخطيط: لا تنفّذ أدوات التعديل الآن. "
                                  "ابحث بأدوات القراءة، جهّز خطة، ثم استدعِ ExitPlanMode(plan)."),

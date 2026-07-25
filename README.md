@@ -144,6 +144,18 @@ python3 weaver.py --plan --interactive
   البيانات كافية لإعادة بناء كل مستوى دون قراءة القرص — مخزّنة في
   `~/.weaver/operations.jsonl` (كل عملية لها `id` و`batch_id`). نقاط:
   `GET /api/operations` (batches) و`GET /api/operations/detail?id=<op_id>`.
+- **شريط نشاط Git/GitHub** (لوحة الويب): بطاقات أفقية قابلة للطي تعرض آخر
+  commits (رقم/فرع/`+Added -Removed`/الرسالة) و Pull Requests مع شارة الحالة
+  (Merged بنفسجي، Open/Closed) وحالة CI (نقطة ملوّنة). زر «عرض المزيد» للترقيم،
+  وتحديث دوري تلقائي (polling). في وضع التخطيط تظهر commits **معلّقة** (معاينة
+  بلون مختلف) قبل الاعتماد. نقطة: `GET /api/git-activity?limit=&offset=&refresh=`.
+
+  **تفعيل حالة الـ PR/CI** (اختياري — commits المحلية تعمل بلا ذلك): صدّر توكن
+  GitHub قبل التشغيل ليجلب النظام حالة الـ PRs والـ CI عبر GitHub API:
+  ```bash
+  export GITHUB_TOKEN=ghp_xxx      # أو WEAVER_GITHUB_TOKEN، أو ارتباط GitHub في الواجهة
+  ```
+  بلا توكن: يعرض الشريط الـ commits المحلية فقط بأمان (لا يفشل، لا يفترض وجوده).
 - **Live status**: مؤشر «✻ يفكّر…» متحرك (كما في Claude Code) في صفحة الويب
   أثناء العمل، مبني على أحداث SSE اللحظية (تفكير/أداة/نص).
 - **Slash commands**: محلّل أوامر قابل للتوسيع (`core/commands.parse`) —

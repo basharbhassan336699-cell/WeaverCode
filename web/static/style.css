@@ -333,6 +333,36 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .op-diff .add { background: #1c3a1c; color: #9be89b; }
 .op-diff .del { background: #3a1c1c; color: #e89b9b; }
 .op-diff .ctx { color: var(--muted); }
+
+/* شريط نشاط Git/GitHub — بطاقات أفقية قابلة للتمرير (كواجهة Claude Code) */
+.git-act-head { width: 100%; display: flex; align-items: center; gap: 8px; background: none;
+  border: none; color: var(--text); cursor: pointer; font-family: inherit; padding: 0 0 10px; }
+.git-act-head .op-caret { color: var(--orange); }
+.git-act-head .muted { margin-inline-start: auto; }
+.git-act-bar { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+.git-card { flex: 0 0 auto; min-width: 190px; max-width: 240px; background: var(--card-2);
+  border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+.git-card:hover { border-color: var(--orange); }
+.git-card.is-pr { border-inline-start: 3px solid #a371f7; }
+.git-card.pending { opacity: .75; border-style: dashed; }
+.git-card-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 5px; }
+.git-num { font-family: monospace; font-size: 12px; color: var(--muted); }
+.git-card-msg { font-size: 13px; line-height: 1.5; margin-bottom: 6px;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.git-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; }
+.git-repo { color: var(--muted-2); direction: ltr; }
+.git-branch { color: var(--muted); direction: ltr; }
+/* الشارات: Merged بنفسجي، CI رمادي بنقطة حالة */
+.git-badge { font-size: 10px; padding: 2px 7px; border-radius: 20px; display: inline-flex;
+  align-items: center; gap: 4px; border: 1px solid var(--line); color: var(--muted); }
+.git-badge.merged { background: #6f42c122; color: #c9a4ff; border-color: #6f42c155; }
+.git-badge.open { color: #3fb950; border-color: #3fb95055; }
+.git-badge.closed { color: #f85149; border-color: #f8514955; }
+.git-badge.pending-b { background: var(--orange); color: #1a1a1a; border-color: transparent; }
+.ci-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted-2); }
+.ci-ok .ci-dot { background: #3fb950; } .ci-ok { color: #3fb950; }
+.ci-fail .ci-dot { background: #f85149; } .ci-fail { color: #f85149; }
+.ci-run .ci-dot { background: #d29922; } .ci-run { color: #d29922; }
 .repo-quick { display: flex; gap: 8px; margin-bottom: 10px; }
 .repo-quick-btn { flex: 1; background: var(--card-2); border: 1px solid var(--line); color: var(--text);
   border-radius: 12px; padding: 10px 8px; font-size: 13px; font-family: inherit; cursor: pointer; }

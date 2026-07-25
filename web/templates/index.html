@@ -124,6 +124,19 @@
     <!-- المستوى 1: ملخّصات الدفعات القابلة للطي -->
     <div id="opsBatches" class="ops-batches"><span class="muted small">…جارٍ التحميل</span></div>
   </div>
+
+  <!-- شريط نشاط Git/GitHub (commits + PRs) — قابل للطي -->
+  <div class="dash-card">
+    <button id="gitActToggle" class="git-act-head">
+      <span class="op-caret" id="gitActCaret">▾</span>
+      <span class="dash-title" style="margin:0">🔀 نشاط Git/GitHub</span>
+      <span id="gitActMeta" class="muted small"></span>
+    </button>
+    <div id="gitActBody" class="git-act-body">
+      <div id="gitActBar" class="git-act-bar"><span class="muted small">…جارٍ التحميل</span></div>
+      <button id="gitActMore" class="chip-btn" style="display:none"></button>
+    </div>
+  </div>
 </section>
 
 <!-- المستوى 3: نافذة تفاصيل عملية واحدة -->

@@ -418,6 +418,7 @@
 
   // ── اللوحة (Dashboard): وضع التخطيط + سجل التعديلات ──
   async function loadDashboard() {
+    loadGitActivity(true);   // تحديث فعلي من git عند فتح اللوحة
     try {
       const p = await api("/api/plan");
       const st = $("#planState");
@@ -536,6 +537,68 @@
   $$("[data-opclose]").forEach((b) => b.onclick = () => $("#opDetailModal").classList.remove("open"));
   $("#opDetailModal").addEventListener("click", (e) => { if (e.target.id === "opDetailModal") $("#opDetailModal").classList.remove("open"); });
   $("#opDetailBack") && ($("#opDetailBack").onclick = () => $("#opDetailModal").classList.remove("open"));
+
+  // ── شريط نشاط Git/GitHub (commits + PRs) — بطاقات + Show N more + polling ──
+  let gitActShown = 20;   // عدد العناصر المعروضة (يتوسّع بـ Show N more)
+  const CI_BADGE = {
+    success: { t: "CI ✓", c: "ci-ok" }, failure: { t: "CI ✗", c: "ci-fail" },
+    pending: { t: "CI …", c: "ci-run" }, unknown: { t: "CI", c: "ci-unknown" },
+  };
+  function gitCard(a) {
+    const add = a.added != null ? '<span class="ab-added">+' + a.added + "</span>" : "";
+    const rem = a.removed != null ? '<span class="ab-removed">-' + a.removed + "</span>" : "";
+    let badge = "";
+    if (a.kind === "pr") {
+      if (a.state === "merged") badge = '<span class="git-badge merged">Merged</span>';
+      else if (a.state === "closed") badge = '<span class="git-badge closed">Closed</span>';
+      else badge = '<span class="git-badge open">Open</span>';
+      const ci = CI_BADGE[a.ci] || CI_BADGE.unknown;
+      badge += '<span class="git-badge ' + ci.c + '"><span class="ci-dot"></span>' + ci.t + "</span>";
+    }
+    const num = a.kind === "pr" ? "#" + (a.number || "") : (a.hash || "").slice(0, 7);
+    const cls = "git-card" + (a.pending ? " pending" : "") + (a.kind === "pr" ? " is-pr" : "");
+    const title = a.kind === "pr" ? (a.title || "") : (a.message || "");
+    return '<div class="' + cls + '"' + (a.url ? ' data-url="' + escapeHtml(a.url) + '"' : "") + ">" +
+      '<div class="git-card-top"><span class="git-num">' + escapeHtml(num) + "</span>" +
+      (a.pending ? '<span class="git-badge pending-b">معلّق</span>' : "") + badge + "</div>" +
+      '<div class="git-card-msg">' + escapeHtml(title.slice(0, 70)) + "</div>" +
+      '<div class="git-card-meta">' +
+        (a.repo ? '<span class="git-repo">' + escapeHtml(a.repo) + "</span>" : "") +
+        (a.branch ? '<span class="git-branch">⑂ ' + escapeHtml(a.branch) + "</span>" : "") +
+        add + rem + "</div></div>";
+  }
+  async function loadGitActivity(refresh) {
+    const bar = $("#gitActBar");
+    if (!bar) return;
+    try {
+      const r = await api("/api/git-activity?limit=" + gitActShown +
+        "&offset=0" + (refresh ? "&refresh=1" : ""));
+      const acts = r.activity || [];
+      $("#gitActMeta").textContent = (r.repo || "محلي") + " · " + (r.total || 0) +
+        (r.token ? "" : " · (بلا توكن: commits فقط)");
+      bar.innerHTML = acts.length
+        ? acts.map(gitCard).join("")
+        : '<span class="muted small">لا نشاط Git بعد.</span>';
+      bar.querySelectorAll("[data-url]").forEach((el) =>
+        el.onclick = () => window.open(el.dataset.url, "_blank"));
+      const more = $("#gitActMore");
+      if (r.has_more) { more.style.display = "inline-block"; more.textContent = "عرض المزيد ↓"; }
+      else more.style.display = "none";
+    } catch (e) {
+      bar.innerHTML = '<span class="muted small">تعذّر جلب النشاط.</span>';
+    }
+  }
+  $("#gitActMore") && ($("#gitActMore").onclick = () => { gitActShown += 20; loadGitActivity(); });
+  $("#gitActToggle") && ($("#gitActToggle").onclick = () => {
+    const body = $("#gitActBody"), caret = $("#gitActCaret");
+    const open = body.style.display !== "none";
+    body.style.display = open ? "none" : "block";
+    caret.textContent = open ? "▸" : "▾";
+  });
+  // polling دوري خفيف عندما تكون اللوحة مفتوحة (لا يُثقل عند إغلاقها)
+  setInterval(() => {
+    if ($("#v-dashboard") && $("#v-dashboard").classList.contains("active")) loadGitActivity(true);
+  }, 15000);
   $("#planToggle") && ($("#planToggle").onclick = async () => {
     const cur = $("#planState").classList.contains("on");
     const r = await post("/api/plan/toggle", { on: !cur });

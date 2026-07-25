@@ -953,6 +953,35 @@ def _api_operation_detail(op_id: str) -> dict:
         return {"ok": False, "error": str(e)[:200]}
 
 
+def _activity_cwd() -> str:
+    """مجلد المستودع للنشاط: المستودع المستنسَخ النشِط أو جذر WeaverCode."""
+    ws = _active_workspace()
+    return ws.get("work_dir") or str(WEAVER_ROOT)
+
+
+def _api_git_activity(limit: int = 20, offset: int = 0, refresh: bool = False) -> dict:
+    """نشاط Git/GitHub (commits + PRs) مع دعم «Show N more» (limit/offset).
+
+    refresh=True يجمع من git/GitHub حديثاً؛ وإلا يقرأ الكاش السريع.
+    """
+    try:
+        from core import git_activity as ga
+        cwd = _activity_cwd()
+        if refresh:
+            items = ga.collect_activity(cwd)
+        else:
+            items = ga.read_cached(200) or ga.collect_activity(cwd)
+        total = len(items)
+        page = items[offset:offset + limit]
+        return {"activity": page, "total": total,
+                "offset": offset, "limit": limit,
+                "has_more": offset + limit < total,
+                "repo": ga.repo_slug(cwd),
+                "token": bool(ga.github_token())}
+    except Exception as e:
+        return {"activity": [], "total": 0, "has_more": False, "error": str(e)[:200]}
+
+
 def _github_push(msg: str) -> dict:
     # يعمل على مساحة العمل النشِطة (المستودع المستنسَخ) إن وُجدت، وإلا مستودع WeaverCode.
     ws = _active_workspace()
@@ -1324,6 +1353,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_api_operations())
         if path == "/api/operations/detail":
             return self._json(_api_operation_detail((qs.get("id", [""]) or [""])[0]))
+        if path == "/api/git-activity":
+            def _qi(k, d):
+                try:
+                    return int((qs.get(k, [str(d)]) or [str(d)])[0])
+                except Exception:
+                    return d
+            _refresh = (qs.get("refresh", ["0"]) or ["0"])[0] in ("1", "true", "yes")
+            return self._json(_api_git_activity(_qi("limit", 20), _qi("offset", 0), _refresh))
         if path == "/api/integrations":
             return self._json({"integrations": _load_integrations()})
         if path == "/api/files/download-zip":
