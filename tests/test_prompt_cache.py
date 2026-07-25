@@ -21,7 +21,7 @@ _MSGS = [Message(role="system", content="SYS"), Message(role="user", content="hi
 
 
 def test_cache_control_on_last_tool(monkeypatch):
-    monkeypatch.delenv("WEAVER_PROMPT_CACHE", raising=False)
+    monkeypatch.setenv("WEAVER_PROMPT_CACHE", "1")
     pl = _prov()._build_anthropic_payload(_MSGS, tools=_TOOLS)
     assert pl["tools"][-1]["cache_control"] == {"type": "ephemeral"}
     # الأدوات الأخرى بلا cache_control (نقطة كسر واحدة تكفي لتخزين الكل)
@@ -29,7 +29,7 @@ def test_cache_control_on_last_tool(monkeypatch):
 
 
 def test_system_is_cached_block(monkeypatch):
-    monkeypatch.delenv("WEAVER_PROMPT_CACHE", raising=False)
+    monkeypatch.setenv("WEAVER_PROMPT_CACHE", "1")
     pl = _prov()._build_anthropic_payload(_MSGS, tools=_TOOLS)
     assert isinstance(pl["system"], list)
     assert pl["system"][0]["cache_control"] == {"type": "ephemeral"}
@@ -46,6 +46,14 @@ def test_all_tools_still_sent(monkeypatch):
 
 def test_cache_disabled_reverts_cleanly(monkeypatch):
     monkeypatch.setenv("WEAVER_PROMPT_CACHE", "0")
+    pl = _prov()._build_anthropic_payload(_MSGS, tools=_TOOLS)
+    assert isinstance(pl["system"], str) and pl["system"] == "SYS"
+    assert "cache_control" not in pl["tools"][-1]
+
+
+def test_cache_off_by_default(monkeypatch):
+    """الافتراضي = معطّل (شكل طلب آمن): system نصّ، لا cache_control على الأدوات."""
+    monkeypatch.delenv("WEAVER_PROMPT_CACHE", raising=False)
     pl = _prov()._build_anthropic_payload(_MSGS, tools=_TOOLS)
     assert isinstance(pl["system"], str) and pl["system"] == "SYS"
     assert "cache_control" not in pl["tools"][-1]

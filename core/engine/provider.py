@@ -179,12 +179,13 @@ def _apply_text_tool_calls(content: str):
 def _prompt_cache_enabled() -> bool:
     """هل نُفعّل تخزين الأدوات/النظام بالكاش (Anthropic prompt caching)؟
 
-    مُفعّل افتراضياً — يجعل الأدوات وبروموه النظام تُرسَل مرة وتُقرأ من الكاش
-    (أرخص/أسرع) بدل إعادة معالجتها كل طلب، تماماً كـ Claude Code. للتعطيل الفوري
-    عند أي مشكلة مع بوابة لا تدعمه: WEAVER_PROMPT_CACHE=0.
+    **معطّل افتراضياً** لأن بعض البوابات ترفض حقل cache_control أو تبطئ معه (فيظهر
+    «يفكّر بلا رد»). الشكل الافتراضي = بروموه نظام نصّي عادي وأدوات بلا cache_control
+    (نفس ما كان يعمل قبل v4.12). للتفعيل مع بوابة تدعمه (Anthropic/aerolink):
+    WEAVER_PROMPT_CACHE=1.
     """
-    return os.environ.get("WEAVER_PROMPT_CACHE", "1").strip().lower() not in (
-        "0", "false", "no", "off")
+    return os.environ.get("WEAVER_PROMPT_CACHE", "0").strip().lower() in (
+        "1", "true", "yes", "on")
 
 
 def _media_blocks_anthropic(paths: List[str]) -> List[Dict[str, Any]]:
