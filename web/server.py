@@ -1130,6 +1130,68 @@ def _api_settings_save(body: dict) -> dict:
     return out
 
 
+# ── شريط الجهد (Effort): من «أسرع» إلى «أذكى» — يعمل فعلياً بضبط توكنات/حرارة ──
+# ليس مجرد أيقونات: كل مستوى يكتب WEAVER_MAX_TOKENS و WEAVER_TEMPERATURE في
+# config/.env فيؤثر مباشرةً في كل طلب لاحق (كل المزوّدين يحترمونهما).
+_EFFORT_LEVELS = [
+    {"name": "أسرع",   "en": "Faster",   "max_tokens": 2048,  "temperature": 0.9},
+    {"name": "سريع",   "en": "Fast",     "max_tokens": 4096,  "temperature": 0.8},
+    {"name": "متوازن", "en": "Balanced", "max_tokens": 8192,  "temperature": 0.7},
+    {"name": "عالٍ",   "en": "High",     "max_tokens": 12288, "temperature": 0.55},
+    {"name": "أعلى",   "en": "Higher",   "max_tokens": 16384, "temperature": 0.45},
+    {"name": "أقصى",   "en": "Max",      "max_tokens": 24576, "temperature": 0.35},
+]
+_EFFORT_DEFAULT = 3   # «عالٍ» (High) — كما في لقطة الشاشة
+
+
+def _current_effort_level() -> int:
+    """يستنتج مستوى الجهد الحالي: WEAVER_EFFORT إن وُجد، وإلا من max_tokens."""
+    env = _read_env()
+    raw = (env.get("WEAVER_EFFORT") or os.environ.get("WEAVER_EFFORT", "")).strip()
+    if raw.isdigit():
+        return max(0, min(len(_EFFORT_LEVELS) - 1, int(raw)))
+    # اشتقاق تقريبي من max_tokens الحالي (أقرب مستوى)
+    try:
+        mt = int((env.get("WEAVER_MAX_TOKENS") or os.environ.get("WEAVER_MAX_TOKENS", "")).strip())
+        best = min(range(len(_EFFORT_LEVELS)),
+                   key=lambda i: abs(_EFFORT_LEVELS[i]["max_tokens"] - mt))
+        return best
+    except Exception:
+        return _EFFORT_DEFAULT
+
+
+def _api_effort_get() -> dict:
+    env = _read_env()
+    lvl = _current_effort_level()
+    return {"level": lvl, "levels": _EFFORT_LEVELS,
+            "model": (env.get("WEAVER_MODEL") or os.environ.get("WEAVER_MODEL", "") or "—"),
+            "provider": (env.get("WEAVER_PROVIDER") or "")}
+
+
+def _api_effort_set(body: dict) -> dict:
+    try:
+        lvl = int(body.get("level"))
+    except (TypeError, ValueError):
+        return {"error": "مستوى غير صالح"}
+    lvl = max(0, min(len(_EFFORT_LEVELS) - 1, lvl))
+    spec = _EFFORT_LEVELS[lvl]
+    updates = {"WEAVER_EFFORT": str(lvl),
+               "WEAVER_MAX_TOKENS": str(spec["max_tokens"]),
+               "WEAVER_TEMPERATURE": str(spec["temperature"])}
+    _write_env(updates)
+    for k, v in updates.items():
+        os.environ[k] = v
+    return {"saved": True, "level": lvl, "spec": spec}
+
+
+def _api_stop() -> dict:
+    """يوقف المهمة الجارية: يُفرغ الطابور ويرفع راية الإيقاف (يفحصها المحرّك)."""
+    cleared = st.clear_queue()
+    st.request_cancel()
+    st.save_status("idle")
+    return {"stopped": True, "cleared": cleared}
+
+
 def _run_command(cmd: str) -> dict:
     cmd = (cmd or "").strip()
     if cmd.startswith("/model "):
@@ -1341,6 +1403,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"settings": s})
         if path == "/api/models":
             return self._json(_discover_models())
+        if path == "/api/effort":
+            return self._json(_api_effort_get())
         if path == "/api/github":
             return self._json(_api_github())
         if path == "/api/github/repos":
@@ -1392,6 +1456,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"queued": True, "position": pos})
         if path == "/api/command":
             return self._json(_run_command(body.get("command", "")))
+        if path == "/api/effort":
+            return self._json(_api_effort_set(body))
+        if path == "/api/stop":
+            return self._json(_api_stop())
         if path == "/api/settings":
             return self._json(_api_settings_save(body))
         if path == "/api/models/discover":

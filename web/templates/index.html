@@ -13,7 +13,11 @@
 <!-- شريط علوي -->
 <header class="topbar">
   <button id="menuBtn" class="ic" title="القائمة">☰</button>
-  <div class="top-center"><img src="/static/weaver-icon.png" class="brand-logo" alt="WeaverCode"/><span class="brand-name">WeaverCode</span><span id="stateDot" class="state-dot" title="الحالة"></span><span id="verBadge" class="ver-badge"></span></div>
+  <div class="top-center"><img src="/static/weaver-icon.png" class="brand-logo" alt="WeaverCode"/>
+    <div class="brand-block">
+      <div class="brand-row"><span class="brand-name">WeaverCode</span><span id="stateDot" class="state-dot" title="الحالة"></span><span id="verBadge" class="ver-badge"></span></div>
+      <div id="ctxSub" class="ctx-sub"></div>
+    </div></div>
   <button id="filterBtn" class="ic" title="أدوات">⚙️</button>
 </header>
 
@@ -71,12 +75,39 @@
     <span id="liveWord" style="display:none">يفكّر</span><span id="liveDots" class="live-dots" style="display:none"></span>
     <img id="liveIcon" class="live-icon" src="/static/weaver-idle.png?v=__CACHEBUST__" alt="WeaverCode"/>
   </div>
-  <div id="chatAttachList" class="attach-list chat-attach"></div>
   <div class="chat-composer">
-    <button id="chatAttachBtn" class="ic" title="إرفاق">📎</button>
-    <input id="chatFileInput" type="file" multiple hidden/>
-    <input id="chatInput" type="text" placeholder="أضف ملاحظة أو تابع…"/>
-    <button id="chatSend" class="round-btn">↑</button>
+    <div class="composer-panel">
+      <div id="chatAttachList" class="attach-list chat-attach"></div>
+      <div class="composer-input-row">
+        <textarea id="chatInput" rows="1" placeholder="أضف ملاحظة أو تابع…"></textarea>
+        <button id="chatSend" class="send-btn" title="إرسال" aria-label="إرسال">
+          <svg class="ic-send" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 20V5M12 5l-6 6M12 5l6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <svg class="ic-stop" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></svg>
+        </button>
+      </div>
+      <div class="composer-bar">
+        <div class="composer-bar-left">
+          <button id="chatAttachBtn" class="cbar-ic" title="إرفاق ملفات">📎</button>
+          <input id="chatFileInput" type="file" multiple hidden/>
+        </div>
+        <button id="effortBtn" class="effort-btn" title="النموذج ومستوى الجهد">
+          <span id="cbarModel" class="cbar-model">…</span>
+          <span id="effortBadge" class="effort-badge">High</span>
+          <span id="effortSpin" class="effort-spin" style="display:none"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- نافذة شريط الجهد (Effort) — أسرع ↔ أذكى، مبرمج ليعمل فعلياً -->
+  <div id="effortPop" class="effort-pop">
+    <div class="effort-pop-head">
+      <span class="effort-pop-title">الجهد <b id="effortPopName">High</b></span>
+      <span class="effort-help" title="أعلى = ذكاء ودقّة أكثر (توكنات أكثر، حرارة أقل). أدنى = أسرع وأخفّ.">?</span>
+    </div>
+    <div class="effort-pop-labels"><span>أسرع</span><span>أذكى</span></div>
+    <input id="effortSlider" class="effort-slider" type="range" min="0" max="5" step="1" value="3"/>
+    <div id="effortPopModel" class="effort-pop-model"></div>
   </div>
 </section>
 

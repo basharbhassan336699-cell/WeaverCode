@@ -11,6 +11,9 @@ STATUS_FILE = Path(os.path.expanduser(
     os.environ.get("WEAVER_STATUS_FILE", "~/.weaver/daemon_status.json")))
 QUEUE_FILE = Path(os.path.expanduser(
     os.environ.get("WEAVER_QUEUE_FILE", "~/.weaver/task_queue.json")))
+# راية إيقاف المهمة الجارية (زر «توقيف» في الويب) — يفحصها المحرّك بين الدورات.
+CANCEL_FILE = Path(os.path.expanduser(
+    os.environ.get("WEAVER_CANCEL_FILE", "~/.weaver/cancel.flag")))
 
 
 def save_status(state: str, task: str = "", pid: int = 0) -> None:
@@ -59,3 +62,33 @@ def pop_task():
     task = tasks.pop(0)
     QUEUE_FILE.write_text(json.dumps(tasks, ensure_ascii=False))
     return task
+
+
+def clear_queue() -> int:
+    """يُفرغ طابور المهام المعلّقة (لزر «توقيف»). يُرجع عدد ما أُزيل."""
+    n = len(read_queue())
+    try:
+        QUEUE_FILE.write_text("[]")
+    except Exception:
+        pass
+    return n
+
+
+# ── راية الإيقاف: يضبطها الويب، يفحصها المحرّك بين الدورات، ويمسحها عند البدء ──
+def request_cancel() -> None:
+    CANCEL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        CANCEL_FILE.write_text(str(time.time()))
+    except Exception:
+        pass
+
+
+def is_cancelled() -> bool:
+    return CANCEL_FILE.exists()
+
+
+def clear_cancel() -> None:
+    try:
+        CANCEL_FILE.unlink()
+    except Exception:
+        pass

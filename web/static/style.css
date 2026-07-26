@@ -119,23 +119,95 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 .accept:active { opacity: .85; }
 
 /* المحادثة */
-.chat-msgs { display: flex; flex-direction: column; gap: 12px; padding-bottom: 90px; }
+.chat-msgs { display: flex; flex-direction: column; gap: 12px; padding-bottom: 168px; }
 .bubble { padding: 12px 14px; border-radius: 16px; max-width: 90%; white-space: normal;
   word-break: break-word; font-size: 15px; line-height: 1.6; }
 .bubble.user { background: var(--orange); color: #fff; align-self: flex-start; border-bottom-inline-start-radius: 4px; }
 .bubble.agent { background: var(--card); border: 1px solid var(--line); align-self: flex-end; border-bottom-inline-end-radius: 4px; }
 .bubble.event { background: none; border: none; color: var(--muted); font-size: 13px; align-self: center; padding: 2px; }
 .bubble .who { font-size: 11px; opacity: .7; margin-bottom: 4px; }
-.chat-composer { position: fixed; inset-inline: 0; bottom: 0; display: flex; gap: 10px; align-items: center;
-  padding: 12px 18px calc(12px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 30%); }
-.chat-composer input { flex: 1; background: var(--card); border: 1px solid var(--line); color: var(--text);
-  padding: 13px 16px; border-radius: 20px; font-size: 15px; outline: none; }
-.round-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--orange); color: #fff;
-  border: none; font-size: 20px; cursor: pointer; flex: none; }
-.chat-composer .ic { width: 40px; height: 40px; font-size: 18px; flex: none;
-  background: var(--card); border: 1px solid var(--line); }
-.chat-attach { position: fixed; inset-inline: 0; bottom: 74px; padding: 0 18px; z-index: 6; }
+/* ── لوحة الكتابة (بأسلوب Claude Code): إدخال + زر إرسال/توقيف + شريط سفلي ── */
+.chat-composer { position: fixed; inset-inline: 0; bottom: 0; z-index: 6;
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, var(--bg) 34%); }
+.composer-panel { background: var(--card); border: 1px solid var(--line);
+  border-radius: 22px; padding: 8px 10px 8px; box-shadow: 0 6px 22px rgba(0,0,0,.28); }
+.composer-input-row { display: flex; align-items: flex-end; gap: 8px; }
+.composer-input-row textarea { flex: 1; background: none; border: none; color: var(--text);
+  padding: 8px 8px 4px; font-size: 15px; line-height: 1.5; outline: none; resize: none;
+  max-height: 140px; font-family: inherit; }
+.composer-input-row textarea::placeholder { color: var(--muted-2); }
+.send-btn { width: 40px; height: 40px; border-radius: 50%; background: var(--orange); color: #fff;
+  border: none; cursor: pointer; flex: none; display: flex; align-items: center; justify-content: center;
+  transition: background .15s, transform .12s; }
+.send-btn:active { transform: scale(.92); }
+.send-btn:disabled { background: var(--card-2); color: var(--muted-2); cursor: default; }
+.send-btn .ic-stop { display: none; }
+/* أثناء العمل: يتحوّل زر الإرسال إلى زر توقيف بمربّع */
+.send-btn.running { background: var(--text); color: var(--bg); }
+.send-btn.running .ic-send { display: none; }
+.send-btn.running .ic-stop { display: block; }
+.composer-bar { display: flex; align-items: center; justify-content: space-between;
+  margin-top: 4px; padding: 0 2px; }
+.composer-bar-left { display: flex; align-items: center; gap: 6px; }
+.cbar-ic { width: 32px; height: 32px; font-size: 16px; background: none; border: none;
+  color: var(--muted); cursor: pointer; border-radius: 8px; }
+.cbar-ic:active { background: var(--card-2); }
+.effort-btn { display: inline-flex; align-items: center; gap: 8px; background: none; border: none;
+  color: var(--muted); font-size: 13px; cursor: pointer; padding: 4px 6px; border-radius: 10px; }
+.effort-btn:active { background: var(--card-2); }
+.cbar-model { color: var(--text); font-size: 13px; max-width: 44vw; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.effort-badge { background: var(--card-2); border: 1px solid var(--line); color: var(--text);
+  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 8px; }
+.effort-spin { width: 13px; height: 13px; border: 2px solid var(--line);
+  border-top-color: var(--orange); border-radius: 50%; animation: eff-spin .8s linear infinite; }
+@keyframes eff-spin { to { transform: rotate(360deg); } }
+.chat-attach { padding: 0 4px 6px; }
 .chat-attach:empty { display: none; }
+
+/* ── نافذة شريط الجهد (Effort) ── */
+.effort-pop { position: fixed; z-index: 40; inset-inline: 0; margin-inline: auto; width: min(320px, 90vw);
+  bottom: calc(96px + env(safe-area-inset-bottom)); background: var(--card); border: 1px solid var(--line);
+  border-radius: 16px; padding: 14px 16px 16px; box-shadow: 0 10px 34px rgba(0,0,0,.4);
+  display: none; }
+.effort-pop.open { display: block; }
+.effort-pop-head { display: flex; align-items: center; justify-content: space-between; }
+.effort-pop-title { color: var(--muted); font-size: 14px; }
+.effort-pop-title b { color: var(--text); font-weight: 600; margin-inline-start: 4px; }
+.effort-help { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line);
+  color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+.effort-pop-labels { display: flex; justify-content: space-between; color: var(--muted);
+  font-size: 12px; margin: 14px 2px 6px; }
+.effort-pop-model { color: var(--muted-2); font-size: 11px; margin-top: 10px; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* شريط تمرير مخصّص بنقاط (6 مستويات) كما في Claude Code */
+.effort-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 26px;
+  background: none; cursor: pointer; }
+.effort-slider::-webkit-slider-runnable-track { height: 6px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--muted-2), var(--orange));
+  background-image:
+    radial-gradient(circle 2px at 0% 50%, var(--muted) 99%, transparent),
+    radial-gradient(circle 2px at 20% 50%, var(--muted) 99%, transparent),
+    radial-gradient(circle 2px at 40% 50%, var(--muted) 99%, transparent),
+    radial-gradient(circle 2px at 60% 50%, var(--muted) 99%, transparent),
+    radial-gradient(circle 2px at 80% 50%, var(--muted) 99%, transparent),
+    radial-gradient(circle 2px at 100% 50%, var(--muted) 99%, transparent),
+    linear-gradient(90deg, var(--line), var(--line)); }
+.effort-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; border-radius: 50%; background: var(--text);
+  border: 3px solid var(--card); box-shadow: 0 1px 4px rgba(0,0,0,.4); margin-top: -7px; }
+.effort-slider::-moz-range-track { height: 6px; border-radius: 4px; background: var(--line); }
+.effort-slider::-moz-range-progress { height: 6px; border-radius: 4px; background: var(--orange); }
+.effort-slider::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%;
+  background: var(--text); border: 3px solid var(--card); }
+
+/* ── العنوان الفرعي (المستودع/المحادثة) تحت الاسم ── */
+.brand-block { display: flex; flex-direction: column; gap: 1px; }
+.brand-row { display: flex; align-items: center; gap: 8px; }
+.ctx-sub { color: var(--muted-2); font-size: 11px; font-style: italic; max-width: 52vw;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.1; }
+.ctx-sub:empty { display: none; }
 
 /* Markdown */
 pre.code { background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
@@ -277,8 +349,11 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .model-item.sel { border-color: var(--orange); color: var(--orange); }
 
 /* مؤشر الحالة الحيّ: شبكة WeaverCode (GIF متحرك عند العمل، PNG ثابت عند التوقف) */
-.live-status { display: flex; align-items: center; gap: 8px; padding: 6px 18px;
+.live-status { position: fixed; inset-inline: 0; z-index: 6;
+  bottom: calc(104px + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: 8px; padding: 4px 22px;
   color: var(--orange); font-size: 14px; }
+.live-status:not(.on) { display: none; }
 .live-icon { width: 34px; height: 34px; object-fit: contain; vertical-align: middle; }
 .live-dots::after { content: ""; animation: live-dots 1.5s steps(4, end) infinite; }
 @keyframes live-dots { 0% { content: ""; } 25% { content: "."; }

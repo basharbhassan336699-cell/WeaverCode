@@ -108,6 +108,7 @@ class WeaverDaemon:
 
     async def _run_task(self, prompt: str, mode: str = "main", history=None,
                         session_id: str = ""):
+        st.clear_cancel()   # راية إيقاف قديمة يجب ألّا توقف مهمة جديدة
         st.save_status("working", prompt)
         await event_bus.emit(WeaverEvent(EventType.THINKING, "يعالج المهمة...", prompt))
 

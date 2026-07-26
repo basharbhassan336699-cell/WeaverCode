@@ -822,9 +822,25 @@ class QueryEngine:
         _loop_limit = int(os.environ.get("WEAVER_LOOP_LIMIT", "4") or 0)
         _loop_guard: Dict[str, int] = {}   # توقيع (أداة+وسائط) → عدد التنفيذ
         _t0 = time.monotonic()
+        # امسح أي راية إيقاف قديمة عند البدء — فلا يُلغى إلا إيقافٌ يصل أثناء العمل.
+        try:
+            from background import status as _st0
+            _st0.clear_cancel()
+        except Exception:
+            pass
 
         while turns < self.max_turns:
             turns += 1
+
+            # إيقاف يدوي (زر «توقيف» في الويب): افحص الراية قبل كل دورة.
+            try:
+                from background import status as _st
+                if _st.is_cancelled():
+                    _st.clear_cancel()
+                    result.text = (result.text or "").strip() or "⏹️ أُوقفت المهمة بطلبك."
+                    break
+            except Exception:
+                pass
 
             # ميزانية زمنية: أوقف قبل استدعاء المزوّد مجدداً إن تجاوزنا الحدّ.
             if _budget and (time.monotonic() - _t0) > _budget:

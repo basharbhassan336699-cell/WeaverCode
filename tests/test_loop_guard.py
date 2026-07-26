@@ -158,6 +158,32 @@ def test_guard_verdict_triggers_bare_retry(monkeypatch):
     assert any((not has_sys and not has_tools) for has_sys, has_tools in eng.provider.calls)
 
 
+def test_cancel_flag_stops_task(monkeypatch, tmp_path):
+    """رفع راية الإيقاف أثناء العمل يوقف المهمة بردٍّ واضح."""
+    monkeypatch.setenv("WEAVER_CANCEL_FILE", str(tmp_path / "cancel.flag"))
+    monkeypatch.setenv("WEAVER_AUTO_APPROVE", "1")
+    monkeypatch.setenv("WEAVER_LOOP_LIMIT", "0")
+    monkeypatch.setenv("WEAVER_TASK_BUDGET", "0")
+    import importlib
+    from background import status as st
+    importlib.reload(st)   # يلتقط مسار الراية الجديد
+    st.request_cancel()    # محاكاة ضغط «توقيف» قبل الدورة الأولى فوراً
+    eng = QueryEngine(provider=_LoopProvider())
+    # المحرّك يمسح الراية عند البدء ثم يفحصها كل دورة؛ نرفعها ثانيةً بعد البدء عبر
+    # مزوّد يرفعها في أول نداء لمحاكاة الإيقاف أثناء العمل.
+    calls = {"n": 0}
+    orig = eng.provider.complete
+
+    async def flagging_complete(messages, tools=None):
+        calls["n"] += 1
+        st.request_cancel()          # المستخدم ضغط «توقيف» أثناء العمل
+        return await orig(messages, tools=tools)
+    eng.provider.complete = flagging_complete
+    res = asyncio.run(eng.run("مهمة طويلة"))
+    assert "أُوقفت" in res.text
+    assert st.is_cancelled() is False   # المحرّك مسح الراية بعد الإيقاف
+
+
 def test_guards_disabled_runs_to_max_turns(monkeypatch):
     """تعطيل الحدّين (0) يُبقي السلوك القديم: يدور حتى max_turns."""
     monkeypatch.setenv("WEAVER_MAX_TURNS", "6")

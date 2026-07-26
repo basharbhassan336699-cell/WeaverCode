@@ -28,6 +28,8 @@
     if (id === "v-compose") loadCompose();
     if (id === "v-integrations") loadIntegrations();
     if (id === "v-dashboard") loadDashboard();
+    if (id === "v-chat") { loadEffort(); updateCtxSub(); }
+    updateCtxSub();
     window.scrollTo(0, 0);
   }
   function go(id) {
@@ -59,8 +61,10 @@
       dot.className = "state-dot " + (state === "working" ? "working" : state === "idle" ? "idle" : "");
       $("#menuStatus").textContent = "النموذج: " + (s.model || "—") + " · " + (s.provider || "") +
         (s.key_set ? " · المفتاح ✓" : " · المفتاح ✗");
+      const cm = $("#cbarModel"); if (cm && s.model) cm.textContent = shortModel(s.model);
     } catch (e) {}
   }
+  function shortModel(m) { return String(m || "").split("/").pop() || m || "النموذج"; }
   setInterval(refreshStatus, 4000); refreshStatus();
   // عرض إصدار الخادم الفعلي (لتتأكد أنك تشغّل أحدث كود)
   api("/api/version").then((r) => { if (r && r.version) $("#verBadge").textContent = r.version; }).catch(() => {});
@@ -128,6 +132,7 @@
   async function openSession(meta) {
     currentSessionId = meta.id || "";
     $("#chatTitle").textContent = (meta.prompt || "محادثة").slice(0, 30);
+    setRunning(false); updateCtxSub(); loadEffort();
     $("#chatMsgs").innerHTML = '<div class="bubble event">⟳ تحميل المحادثة…</div>';
     go("v-chat");
     // حمّل كل رسائل المحادثة (لا رسالة واحدة)
@@ -320,9 +325,11 @@
     }
     chatHistory = []; // محادثة جديدة
     currentSessionId = uuid(); // معرّف جديد ثابت لهذه المحادثة
+    setRunning(true);
     await post("/api/task", { prompt: prompt, mode: $("#buildMode").value, history: [], session_id: currentSessionId, repo: (activeRepo && activeRepo.full_name) || "" });
     chatHistory.push({ role: "user", content: prompt });
     $("#chatTitle").textContent = (v || "ملفات مرفقة").slice(0, 30);
+    updateCtxSub();
     $("#chatMsgs").innerHTML = bubble("user", escapeHtml(v) +
       (files.length ? '<div class="who">📎 ' + files.length + " ملف مرفق</div>" : ""));
     attached = []; renderAttached();
@@ -331,9 +338,33 @@
     scrollChat();
   }
 
-  // ── متابعة داخل المحادثة ──
-  $("#chatSend").onclick = sendFollow;
-  $("#chatInput").addEventListener("keydown", (e) => { if (e.key === "Enter") sendFollow(); });
+  // ── متابعة داخل المحادثة (زر إرسال ↔ توقيف) ──
+  let taskRunning = false;
+  function setRunning(on) {
+    taskRunning = on;
+    const b = $("#chatSend");
+    if (b) { b.classList.toggle("running", on); b.disabled = false; b.title = on ? "توقيف" : "إرسال"; }
+    const spin = $("#effortSpin"); if (spin) spin.style.display = on ? "inline-block" : "none";
+    if (!on) updateSendEnabled();
+  }
+  function updateSendEnabled() {
+    const b = $("#chatSend"); if (!b) return;
+    if (taskRunning) { b.disabled = false; return; }
+    const has = ($("#chatInput").value || "").trim().length > 0 || chatAttached.some((a) => a.path);
+    b.disabled = !has;
+  }
+  function autoGrow(t) { if (!t) return; t.style.height = "auto"; t.style.height = Math.min(140, t.scrollHeight) + "px"; }
+  async function stopTask() {
+    try { await post("/api/stop", {}); } catch (e) {}
+    setRunning(false); setLive(null);
+    $("#chatMsgs").insertAdjacentHTML("beforeend", '<div class="bubble event">⏹️ أُوقفت المهمة</div>');
+    scrollChat();
+  }
+  $("#chatSend").onclick = () => { if (taskRunning) stopTask(); else sendFollow(); };
+  $("#chatInput").addEventListener("input", () => { autoGrow($("#chatInput")); updateSendEnabled(); });
+  $("#chatInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!taskRunning) sendFollow(); }
+  });
   async function sendFollow() {
     const v = $("#chatInput").value.trim();
     const files = chatAttached.filter((a) => a.path);
@@ -342,14 +373,62 @@
     if (files.length) prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" + files.map((a) => "- " + a.path).join("\n");
     $("#chatMsgs").insertAdjacentHTML("beforeend", bubble("user", escapeHtml(v) +
       (files.length ? '<div class="who">📎 ' + files.length + " ملف</div>" : "")));
-    $("#chatInput").value = "";
+    $("#chatInput").value = ""; autoGrow($("#chatInput"));
     if (!currentSessionId) currentSessionId = uuid();
+    setRunning(true);
     // أرسل سياق المحادثة السابق ليفهم المتابعة (بنفس معرّف المحادثة)
     await post("/api/task", { prompt: prompt, mode: "main", history: chatHistory.slice(), session_id: currentSessionId });
     chatHistory.push({ role: "user", content: prompt });
-    chatAttached = []; $("#chatAttachList").innerHTML = "";
+    chatAttached = []; $("#chatAttachList").innerHTML = ""; updateSendEnabled();
     scrollChat();
   }
+
+  // ── العنوان الفرعي (المستودع/المحادثة) تحت اسم WeaverCode ──
+  function updateCtxSub() {
+    const el = $("#ctxSub"); if (!el) return;
+    let txt = "";
+    const repo = ghRepo || (activeRepo && activeRepo.full_name) || "";
+    if (repo) {
+      txt = "📦 " + repo;
+    } else if ($("#v-chat") && $("#v-chat").classList.contains("active")) {
+      const t = (($("#chatTitle") && $("#chatTitle").textContent) || "").trim();
+      if (t && t !== "محادثة") txt = "💬 " + t;
+    }
+    el.textContent = txt;
+  }
+
+  // ── شريط الجهد (Effort): أسرع ↔ أذكى — مبرمج ليضبط التوكنات/الحرارة فعلياً ──
+  let effortLevels = [];
+  const EFFORT_EN = ["Faster", "Fast", "Balanced", "High", "Higher", "Max"];
+  async function loadEffort() {
+    try {
+      const r = await api("/api/effort");
+      effortLevels = r.levels || [];
+      const lvl = (r.level == null ? 3 : r.level);
+      const sl = $("#effortSlider"); if (sl) sl.value = lvl;
+      updateEffortLabels(lvl);
+      const model = r.model || "النموذج";
+      const cm = $("#cbarModel"); if (cm) cm.textContent = shortModel(model);
+      const pm = $("#effortPopModel"); if (pm) pm.textContent = "النموذج: " + model;
+    } catch (e) {}
+  }
+  function effortEn(lvl) { return (effortLevels[lvl] && effortLevels[lvl].en) || EFFORT_EN[lvl] || "High"; }
+  function updateEffortLabels(lvl) {
+    $("#effortBadge").textContent = effortEn(lvl);
+    $("#effortPopName").textContent = effortEn(lvl);
+  }
+  $("#effortBtn").onclick = (e) => { e.stopPropagation(); $("#effortPop").classList.toggle("open"); };
+  $("#effortSlider").addEventListener("input", (e) => updateEffortLabels(+e.target.value));
+  $("#effortSlider").addEventListener("change", async (e) => {
+    const lvl = +e.target.value;
+    updateEffortLabels(lvl);
+    try { await post("/api/effort", { level: lvl }); } catch (err) {}
+    refreshStatus();
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#effortPop") && !e.target.closest("#effortBtn"))
+      $("#effortPop").classList.remove("open");
+  });
   function scrollChat() { const m = $("#chatMsgs"); m.scrollTop = m.scrollHeight; window.scrollTo(0, document.body.scrollHeight); }
 
   // ── أزرار كتل الكود: نسخ + تكبير (تفويض الأحداث) ──
@@ -622,6 +701,7 @@
   // عند التوقف: الشبكة «الثابتة» (PNG) وحدها — كما طلب المستخدم.
   const LIVE_GIF = "/static/weaver-live.gif", IDLE_PNG = "/static/weaver-idle.png";
   function setLive(word) {
+    const box = $("#liveStatus"); if (box) box.classList.toggle("on", !!word);
     const icon = $("#liveIcon");
     if (icon) icon.src = word ? LIVE_GIF : IDLE_PNG;
     const w = $("#liveWord"), d = $("#liveDots");
@@ -638,8 +718,10 @@
     es.onmessage = (ev) => {
       let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
       // مؤشر الحالة الحيّ: يظهر مع أحداث العمل ويختفي عند الاكتمال/الخطأ
-      if (LIVE_WORD[d.type]) setLive(LIVE_WORD[d.type]);
+      // وزر الإرسال يتحوّل «توقيف» أثناء العمل ويعود «إرسال» عند الانتهاء.
+      if (LIVE_WORD[d.type]) { setLive(LIVE_WORD[d.type]); setRunning(true); }
       else if (d.type === "response" || d.type === "done" || d.type === "error") setLive(null);
+      if (d.type === "done" || d.type === "error") setRunning(false);
       // عند اكتمال مهمة، حدّث قائمة الجلسات إن كانت ظاهرة
       if (d.type === "done") { refreshStatus(); if ($("#v-sessions").classList.contains("active")) loadSessions(); if ($("#v-dashboard").classList.contains("active")) loadDashboard(); }
       const chat = $("#v-chat");
