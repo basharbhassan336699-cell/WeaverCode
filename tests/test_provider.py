@@ -63,6 +63,47 @@ def test_305_raises_clear_error_with_status():
     p._raise_for_status(200, '{"ok":1}')
 
 
+def test_404_rate_limit_is_retryable_but_model_not_found_is_permanent():
+    """404 مع نصّ «rate limit» → RateLimitedError (يُعاد)؛ 404 «not found» → دائم."""
+    from core.engine.provider import (ProviderError, TransientProviderError,
+                                       RateLimitedError)
+    assert issubclass(RateLimitedError, TransientProviderError)
+    p = _p("https://integrate.api.nvidia.com/v1")
+
+    # 404 بسبب تجاوز الحدّ → خطأ مؤقّت يُعاد تلقائياً
+    try:
+        p._raise_for_status(404, '{"error":"rate limit exceeded, try again later"}')
+        assert False, "should raise"
+    except RateLimitedError as e:
+        assert getattr(e, "retry_after", 0) > 0
+
+    # 404 لأنّ النموذج غير موجود → خطأ دائم (لا يُعاد) وتبقى رسالة «اسم النموذج»
+    try:
+        p._raise_for_status(404, '{"error":"model meta/x does not exist, not found"}')
+        assert False, "should raise"
+    except RateLimitedError:
+        assert False, "404 not-found must NOT be RateLimitedError"
+    except ProviderError as e:
+        assert not isinstance(e, TransientProviderError)
+
+    # 404 برسالة رصيد → يبقى دائماً (رصيد لا يُعاد)
+    try:
+        p._raise_for_status(404, '{"error":"no active free usage, add balance"}')
+        assert False, "should raise"
+    except RateLimitedError:
+        assert False, "billing 404 must NOT be RateLimitedError"
+    except ProviderError:
+        pass
+
+
+def test_request_delay_from_env(monkeypatch):
+    from core.engine.provider import ProviderConfig
+    monkeypatch.setenv("WEAVER_REQUEST_DELAY", "3")
+    assert ProviderConfig.from_env().request_delay == 3.0
+    monkeypatch.delenv("WEAVER_REQUEST_DELAY", raising=False)
+    assert ProviderConfig.from_env().request_delay == 0.0   # افتراضي 0 (لا تأخير)
+
+
 def test_forced_format_override(monkeypatch):
     monkeypatch.setenv("WEAVER_API_FORMAT", "openai")
     assert _p("https://api.anthropic.com/v1")._is_anthropic() is False

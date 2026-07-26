@@ -235,6 +235,7 @@ class ProviderConfig:
     timeout: int = 120   # ثانية — بوابة لا تستجيب خلالها تفشل بوضوح (WEAVER_TIMEOUT)
     retries: int = 2
     retry_base: float = 1.0
+    request_delay: float = 0.0   # تأخير ثابت بين الطلبات (ثوانٍ) — اختياري لمنع rate limit
     extra_headers: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -261,6 +262,7 @@ class ProviderConfig:
             timeout=int(os.environ.get("WEAVER_TIMEOUT", "120")),
             retries=int(os.environ.get("WEAVER_RETRIES", "2")),
             retry_base=float(os.environ.get("WEAVER_RETRY_BASE", "1.0")),
+            request_delay=float(os.environ.get("WEAVER_REQUEST_DELAY", "0.0")),
         )
 
 
@@ -271,6 +273,11 @@ class ProviderError(RuntimeError):
 
 class TransientProviderError(ProviderError):
     """خطأ عابر (شبكة/DNS/429/5xx) — يستحق إعادة المحاولة."""
+
+
+class RateLimitedError(TransientProviderError):
+    """تجاوز حد الطلبات (429، أو 404 مؤقت من بعض البوابات) — يُعاد بعد انتظار."""
+    retry_after: float = 5.0
 
 
 class RequestTooLargeError(ProviderError):
@@ -291,6 +298,14 @@ _CURL_TRANSIENT_CODES = {6, 7, 35, 52, 55, 56}
 _CURL_TIMEOUT_CODE = 28
 # حالات HTTP العابرة (تُعاد المحاولة)؛ ما عداها (401/403/404/رصيد) دائم
 _HTTP_TRANSIENT = {408, 425, 429, 500, 502, 503, 504}
+# كلمات في نصّ الرد تدل على تجاوز حد الطلبات — حتى لو كان الكود 404 (بعض البوابات
+# مثل NVIDIA/GLM/Groq تُرجع 404 بدل 429 عند الضغط). عندها نعامله كخطأ مؤقّت يُعاد.
+_RATE_LIMIT_BODY_KW = (
+    "rate limit", "rate_limit", "too many requests", "quota exceeded",
+    "requests per minute", "rpm exceeded", "tpm exceeded", "capacity",
+    "overloaded", "try again later", "retry after", "concurrent requests",
+    "model is currently overloaded", "حد الطلبات", "تجاوزت الحد",
+)
 
 
 class WeaverProvider:
@@ -833,15 +848,28 @@ class WeaverProvider:
 
     async def _run_curl(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """POST عبر curl مع إعادة محاولة تلقائية للأخطاء العابرة فقط."""
+        # تأخير ثابت اختياري بين الطلبات (WEAVER_REQUEST_DELAY) — يخفّف rate limit.
+        # افتراضياً 0 (لا تأخير) فلا يبطئ الاستخدام العادي.
+        if self.config.request_delay > 0:
+            await asyncio.sleep(self.config.request_delay)
+
         attempts = max(1, self.config.retries + 1)
         delay = self.config.retry_base
         for i in range(attempts):
             try:
                 return await self._run_curl_once(url, payload)
+            except RateLimitedError as e:
+                # rate limit صريح (429 أو 404 مؤقت) → انتظر المدّة المقترحة ثم أعِد.
+                # يجب أن يسبق TransientProviderError لأنه فرعٌ منه.
+                if i >= attempts - 1:
+                    raise
+                wait = getattr(e, "retry_after", delay) or delay
+                await asyncio.sleep(min(wait, 60))
+                delay *= 2
             except TransientProviderError:
                 if i >= attempts - 1:
                     raise
-                await asyncio.sleep(delay)
+                await asyncio.sleep(min(delay, 60))
                 delay *= 2  # تأخير متصاعد
         # لن يصل هنا
         raise ProviderError("❌ فشل غير متوقع في الاتصال.")
@@ -963,6 +991,19 @@ class WeaverProvider:
                       "insufficient", "quota", "billing", "payment required",
                       "credit", "out of usage", "no credit", "رصيد", "اشتراك")
         low = (snippet or "").lower()
+
+        # ── 404 قد يكون rate limit مؤقتاً من بعض البوابات (NVIDIA/GLM/Groq) ──
+        # نفرّق: نصّ يحوي كلمات تجاوز الحدّ → مؤقّت (يُعاد تلقائياً)؛ وإلا فالنموذج/
+        # المسار غير موجود (دائم — تبقى رسالة «اسم النموذج غير موجود» كما هي).
+        if status == 404 and any(k in low for k in _RATE_LIMIT_BODY_KW):
+            _wait = max(self.config.retry_base * 2, 2.0)
+            err = RateLimitedError(
+                f"⏳ تجاوزت حدّ طلبات المزوّد (HTTP 404 مؤقت).\n"
+                f"   التفصيل: {snippet}\n"
+                f"   يُعاد المحاولة تلقائياً بعد ~{_wait:.0f} ثانية. لحلٍّ دائم اضبط "
+                f"WEAVER_REQUEST_DELAY=3 (وربما WEAVER_RETRIES=4) في config/.env.")
+            err.retry_after = _wait
+            raise err
 
         # ── الطلب أكبر من الحدّ (413 أو TPM) → قابل للإصلاح بتقليل max_tokens ──
         too_large_kw = ("request too large", "reduce your message",
