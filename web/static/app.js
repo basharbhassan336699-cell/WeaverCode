@@ -459,6 +459,9 @@
     } else if (expBtn) {
       expBtn.closest(".codewrap").classList.toggle("expanded");
       expBtn.textContent = expBtn.closest(".codewrap").classList.contains("expanded") ? "⤡" : "⤢";
+    } else {
+      const ab = e.target.closest("[data-ab]");
+      if (ab) showActionDetail(actionBlocks[+ab.dataset.ab]);
     }
   });
 
@@ -715,6 +718,73 @@
   // أثناء العمل: شبكة WeaverCode «المتحركة» (GIF بكامل حركتها) + كلمة الحالة.
   // عند التوقف: الشبكة «الثابتة» (PNG) وحدها — كما طلب المستخدم.
   const LIVE_GIF = "/static/weaver-live.gif", IDLE_PNG = "/static/weaver-idle.png";
+
+  // ── تفاصيل Action Block: popup بأيقونات SVG عصرية (كواجهة Claude Code) ──
+  let actionBlocks = [];
+  const AB_ACTION = { Write: "Created", Edit: "Edited", MultiEdit: "Edited", Read: "Read",
+    Bash: "Ran", PythonRun: "Ran", DirectoryList: "Listed", Glob: "Searched", Grep: "Searched",
+    GitCommit: "Committed", GitPush: "Pushed", GitClone: "Cloned", GitStatus: "Checked",
+    TodoWrite: "Planned", WebFetch: "Fetched", WebSearch: "Searched", PipInstall: "Installed",
+    NotebookEdit: "Edited" };
+  // أيقونات SVG خطّية عصرية (outline · currentColor) — لا إيموجي
+  const AB_ICON = {
+    edit: '<path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M13.5 6.5l3 3"/>',
+    run: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7 9l3.2 3.2L7 15.4"/><path d="M12.5 15.4h4.6"/>',
+    read: '<path d="M2 12s3.6-6.8 10-6.8S22 12 22 12s-3.6 6.8-10 6.8S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>',
+    doc: '<path d="M6.5 2.5h7l4.5 4.5V21a.9.9 0 0 1-.9.9H6.5a.9.9 0 0 1-.9-.9V3.4a.9.9 0 0 1 .9-.9z"/><path d="M13 2.7V7h4.3"/><path d="M8.5 13h7M8.5 16.5h4.5"/>',
+    folder: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+    git: '<circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="9" r="2.4"/><path d="M6 8.4v7.2M8.3 7.2A6 6 0 0 0 15.5 9.4M18 11.4V13a3 3 0 0 1-3 3H8.4"/>',
+    plan: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+    tool: '<path d="M14.5 6.5a3.5 3.5 0 0 1-4.6 4.6L5 16l3 3 4.9-4.9a3.5 3.5 0 0 1 4.6-4.6l-2 2-2-2z"/>' };
+  const AB_ICON_FOR = { Write: "doc", Edit: "edit", MultiEdit: "edit", Read: "read",
+    Bash: "run", PythonRun: "run", DirectoryList: "folder", Glob: "search", Grep: "search",
+    GitCommit: "git", GitPush: "git", GitClone: "git", GitStatus: "git", TodoWrite: "plan",
+    WebFetch: "read", WebSearch: "search", PipInstall: "doc" };
+  function abSvg(tool) {
+    const k = AB_ICON_FOR[tool] || "tool";
+    return '<svg viewBox="0 0 24 24" class="adx-svg" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + (AB_ICON[k] || AB_ICON.tool) + '</svg>';
+  }
+  function closeActionDetail() { const o = $("#actionDetailPop"); if (o) o.remove(); }
+  function showActionDetail(block) {
+    closeActionDetail();
+    if (!block) return;
+    const ops = block.ops || [];
+    const rows = ops.map((op) => {
+      const label = AB_ACTION[op.tool_name] || op.tool_name;
+      const arg = op.arg || "";
+      const nm = arg.indexOf("/") >= 0 ? arg.split("/").pop() : arg;
+      const name = nm ? escapeHtml(nm.slice(0, 40)) : escapeHtml(op.tool_name);
+      const hd = (op.lines_removed || 0) > 0 || (op.lines_added || 0) > 0;
+      const diff = hd
+        ? '<span class="adx-rm">' + (op.lines_removed || 0) + '-</span> <span class="adx-add">+' + (op.lines_added || 0) + '</span>'
+        : '<span class="adx-none">──</span>';
+      return '<div class="adx-row"><span class="adx-ic">' + abSvg(op.tool_name) + '</span>' +
+        '<span class="adx-act">' + escapeHtml(label) + '</span>' +
+        '<span class="adx-name" title="' + escapeHtml(arg) + '">' + name + '</span>' +
+        '<span class="adx-diff">' + diff + '</span></div>';
+    }).join("");
+    const ta = ops.reduce((s, o) => s + (o.lines_added || 0), 0);
+    const tr = ops.reduce((s, o) => s + (o.lines_removed || 0), 0);
+    const stats = ops.length ? '<div class="adx-stats">' + ops.length + ' عملية · +' + ta + ' -' + tr + ' سطر</div>' : '';
+    const pop = document.createElement("div");
+    pop.id = "actionDetailPop"; pop.className = "adx-pop";
+    pop.innerHTML =
+      '<div class="adx-head"><span class="adx-title">' + escapeHtml(block.desc || "تفاصيل العمليات") + '</span>' +
+      '<button class="adx-close" aria-label="إغلاق">✕</button></div>' +
+      '<div class="adx-rows">' + (rows || '<div class="adx-empty">لا تفاصيل متاحة</div>') + '</div>' + stats;
+    document.body.appendChild(pop);
+    pop.querySelector(".adx-close").onclick = closeActionDetail;
+    setTimeout(() => {
+      document.addEventListener("click", function h(e) {
+        if (!pop.contains(e.target) && !e.target.closest("[data-ab]")) {
+          closeActionDetail(); document.removeEventListener("click", h);
+        }
+      });
+    }, 50);
+  }
+
   // مؤشر الحالة الحيّ يظهر داخل مجرى المحادثة أسفل آخر رسالة (كما في Claude Code)
   // — لا مثبّتاً في الأسفل قرب لوحة الكتابة.
   function setLive(word) {
@@ -769,13 +839,20 @@
         chatAppend('<div class="bubble event">✅ اكتملت</div>');
       } else if (d.type === "action_block") {
         // ملخص جولة الأدوات بصيغة Claude Code:  ‹ 2- +11  edited a file, read a file
+        // قابل للضغط → popup تفصيلي بكل عملية (بأيقونات عصرية).
         const hasDiff = (d.diff_removed || 0) > 0 || (d.diff_added || 0) > 0;
         const diff = hasDiff
           ? '<span class="ab-removed">' + (d.diff_removed || 0) + '-</span> '
             + '<span class="ab-added">+' + (d.diff_added || 0) + '</span>&nbsp;&nbsp;'
           : "";
-        chatAppend('<div class="action-block"><span class="ab-arrow">‹</span> ' + diff +
-          '<span class="ab-desc">' + escapeHtml(d.detail || d.message) + '</span></div>');
+        const idx = actionBlocks.push({
+          desc: d.detail || d.message, ops: d.ops || [],
+          added: d.diff_added || 0, removed: d.diff_removed || 0,
+        }) - 1;
+        const clickable = (d.ops && d.ops.length) ? ' clickable" data-ab="' + idx + '"' : '"';
+        chatAppend('<div class="action-block' + clickable + '><span class="ab-arrow">‹</span> ' + diff +
+          '<span class="ab-desc">' + escapeHtml(d.detail || d.message) + '</span>' +
+          ((d.ops && d.ops.length) ? '<span class="ab-more">⌄</span>' : '') + '</div>');
       } else if (d.type !== "status") {
         const ic = EV_ICON[d.type] || "•";
         chatAppend('<div class="bubble event">' + ic + " " + escapeHtml(d.message) + (d.detail ? " · " + escapeHtml(d.detail.slice(0, 50)) : "") + "</div>");

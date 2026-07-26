@@ -32,6 +32,7 @@ class WeaverEvent:
     detail: str = ""
     diff_added: int = 0
     diff_removed: int = 0
+    ops: list = field(default_factory=list)   # تفاصيل عمليات Action Block (للـ popup)
     timestamp: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
@@ -41,6 +42,7 @@ class WeaverEvent:
             "detail": self.detail,
             "diff_added": self.diff_added,
             "diff_removed": self.diff_removed,
+            "ops": self.ops,
             "timestamp": self.timestamp,
         }
 

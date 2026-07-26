@@ -496,3 +496,39 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .ab-removed { color: #e05555; }
 .ab-added { color: #4ec94e; }
 .ab-desc { color: var(--muted); }
+.action-block.clickable { cursor: pointer; transition: background .15s; }
+.action-block.clickable:hover { background: rgba(198,113,33,.14); }
+.action-block .ab-more { color: var(--muted-2); margin-inline-start: auto; font-size: 12px; }
+
+/* ── popup تفاصيل Action Block (بأيقونات عصرية كواجهة Claude Code) ── */
+.adx-pop { position: fixed; z-index: 9999; inset-inline: 0; margin-inline: auto;
+  width: min(92vw, 480px); bottom: calc(96px + env(safe-area-inset-bottom));
+  max-height: 62vh; overflow-y: auto; background: var(--card); border: 1px solid var(--line);
+  border-radius: 16px; padding: 14px 16px 16px; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  animation: adx-up .2s ease-out; }
+@keyframes adx-up { from { transform: translateY(18px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.adx-head { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 10px; }
+.adx-title { color: var(--text); font-weight: 600; font-size: 14px; line-height: 1.4; }
+.adx-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer;
+  width: 28px; height: 28px; border-radius: 8px; flex: none; }
+.adx-close:active { background: var(--card-2); }
+.adx-rows { position: relative; }
+/* خطّ رأسي متقطّع يربط الأيقونات (كما في الصورة) */
+.adx-rows::before { content: ""; position: absolute; inset-inline-end: 13px; top: 10px; bottom: 10px;
+  border-inline-end: 1px dashed var(--line); }
+.adx-row { display: grid; grid-template-columns: 26px auto 1fr auto; align-items: center; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--line); font-family: ui-monospace, monospace; }
+.adx-row:last-child { border-bottom: none; }
+.adx-ic { display: flex; align-items: center; justify-content: center; color: var(--text);
+  background: var(--card); z-index: 1; }
+.adx-svg { width: 19px; height: 19px; }
+.adx-act { color: var(--text); font-size: 13px; white-space: nowrap; }
+.adx-name { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; text-align: start; }
+.adx-diff { white-space: nowrap; font-size: 13px; direction: ltr; unicode-bidi: isolate; text-align: start; }
+.adx-rm { color: #e05555; }
+.adx-add { color: #4ec94e; }
+.adx-none { color: var(--muted-2); }
+.adx-stats { margin-top: 10px; color: var(--muted-2); font-size: 12px; text-align: center; }
+.adx-empty { color: var(--muted); padding: 10px 0; }

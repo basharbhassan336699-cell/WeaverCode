@@ -524,12 +524,22 @@ class QueryEngine:
         try:
             from background.events import event_bus, WeaverEvent, EventType
             import asyncio as _asyncio
+            # تفاصيل كل عملية (للـ popup التفصيلي في الويب — كواجهة Claude Code)
+            ops_detail = []
+            for op in getattr(block, "ops", []):
+                ops_detail.append({
+                    "tool_name": getattr(op, "tool_name", ""),
+                    "arg": getattr(op, "primary_arg", "") or "",
+                    "lines_added": getattr(op, "lines_added", 0) or 0,
+                    "lines_removed": getattr(op, "lines_removed", 0) or 0,
+                })
             ev = WeaverEvent(
                 EventType.ACTION_BLOCK,
                 block.summary_line(),
                 block._build_description(),
                 diff_added=block.lines_added,
                 diff_removed=block.lines_removed,
+                ops=ops_detail,
             )
             # نشر غير متزامن دون إيقاف الحلقة
             _asyncio.create_task(event_bus.emit(ev))
