@@ -525,14 +525,39 @@ class QueryEngine:
             from background.events import event_bus, WeaverEvent, EventType
             import asyncio as _asyncio
             # تفاصيل كل عملية (للـ popup التفصيلي في الويب — كواجهة Claude Code)
+            # نضمّن ما يلزم للمستوى الثالث «ماذا فعل»: الأمر/المخرجات (Bash)،
+            # المحتوى (Write)، الفرق (Edit)، محتوى القراءة (Read) — بحدود آمنة.
+            _CAP = 8000
             ops_detail = []
             for op in getattr(block, "ops", []):
-                ops_detail.append({
-                    "tool_name": getattr(op, "tool_name", ""),
+                tn = getattr(op, "tool_name", "")
+                a = getattr(op, "args", {}) or {}
+                res = str(getattr(op, "result", "") or "")
+                d = {
+                    "tool_name": tn,
                     "arg": getattr(op, "primary_arg", "") or "",
                     "lines_added": getattr(op, "lines_added", 0) or 0,
                     "lines_removed": getattr(op, "lines_removed", 0) or 0,
-                })
+                }
+                if tn in ("Bash", "PythonRun"):
+                    d["command"] = str(a.get("command") or a.get("code") or "")[:_CAP]
+                    d["output"] = res[:_CAP]
+                elif tn == "Write":
+                    d["path"] = str(a.get("path", "") or "")
+                    d["content"] = str(a.get("content", "") or "")[:_CAP]
+                elif tn == "Edit":
+                    d["path"] = str(a.get("path", "") or "")
+                    d["before"] = str(a.get("old_string", "") or "")[:_CAP]
+                    d["after"] = str(a.get("new_string", "") or "")[:_CAP]
+                elif tn == "MultiEdit":
+                    d["path"] = str(a.get("path", "") or "")
+                    _edits = a.get("edits") or []
+                    d["before"] = "\n".join(str(e.get("old_string", "")) for e in _edits)[:_CAP]
+                    d["after"] = "\n".join(str(e.get("new_string", "")) for e in _edits)[:_CAP]
+                elif tn in ("Read", "Glob", "Grep", "DirectoryList"):
+                    d["path"] = str(a.get("path") or op.primary_arg or "")
+                    d["content"] = res[:_CAP]
+                ops_detail.append(d)
             ev = WeaverEvent(
                 EventType.ACTION_BLOCK,
                 block.summary_line(),

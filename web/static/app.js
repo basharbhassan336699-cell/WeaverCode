@@ -746,12 +746,49 @@
     return '<svg viewBox="0 0 24 24" class="adx-svg" fill="none" stroke="currentColor" ' +
       'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + (AB_ICON[k] || AB_ICON.tool) + '</svg>';
   }
-  function closeActionDetail() { const o = $("#actionDetailPop"); if (o) o.remove(); }
+  function closeActionDetail() {
+    const o = $("#actionDetailPop"); if (o) o.remove();
+    const b = $("#actionDetailBackdrop"); if (b) b.remove();
+  }
+  let _abCurrent = null;   // الدفعة المعروضة حالياً (للرجوع من تفاصيل عملية)
+  function _ensureAbPop() {
+    let pop = $("#actionDetailPop");
+    if (!pop) {
+      // خلفية شفّافة تلتقط النقر خارج النافذة (أمتن من مراقبة النقر على المستند)
+      const bd = document.createElement("div");
+      bd.id = "actionDetailBackdrop"; bd.className = "adx-backdrop";
+      bd.onclick = closeActionDetail;
+      document.body.appendChild(bd);
+      pop = document.createElement("div");
+      pop.id = "actionDetailPop"; pop.className = "adx-pop";
+      document.body.appendChild(pop);
+    }
+    return pop;
+  }
+  // هل للعملية تفاصيل «ماذا فعل» (أمر/مخرجات/محتوى/فرق)؟
+  function opHasDetail(op) {
+    return !!(op && (op.command || op.output || op.content || op.before || op.after));
+  }
+  // تحويل عملية SSE إلى كائن يفهمه renderOpDetail (المستوى الثالث المشترك)
+  function opToDetailObj(op) {
+    const tn = op.tool_name;
+    if (tn === "Bash" || tn === "PythonRun")
+      return { type: "run", command: op.command || op.arg || "", output: op.output || "" };
+    if (tn === "Write")
+      return { type: "create", path: op.path || op.arg || "", content: op.content || "" };
+    if (tn === "Edit" || tn === "MultiEdit")
+      return { type: "edit", path: op.path || op.arg || "", before: op.before || "", after: op.after || "" };
+    if (tn === "Read" || tn === "Glob" || tn === "Grep" || tn === "DirectoryList")
+      return { type: "read", path: op.path || op.arg || "", content: op.content || "" };
+    return { type: "other", command: op.arg || "", output: op.output || "" };
+  }
+  // المستوى الثاني: قائمة العمليات (كل صفّ قابل للضغط لعرض «ماذا فعل»)
   function showActionDetail(block) {
-    closeActionDetail();
     if (!block) return;
+    _abCurrent = block;
+    const pop = _ensureAbPop();
     const ops = block.ops || [];
-    const rows = ops.map((op) => {
+    const rows = ops.map((op, i) => {
       const label = AB_ACTION[op.tool_name] || op.tool_name;
       const arg = op.arg || "";
       const nm = arg.indexOf("/") >= 0 ? arg.split("/").pop() : arg;
@@ -760,29 +797,37 @@
       const diff = hd
         ? '<span class="adx-rm">' + (op.lines_removed || 0) + '-</span> <span class="adx-add">+' + (op.lines_added || 0) + '</span>'
         : '<span class="adx-none">──</span>';
-      return '<div class="adx-row"><span class="adx-ic">' + abSvg(op.tool_name) + '</span>' +
+      const can = opHasDetail(op);
+      return '<div class="adx-row' + (can ? ' has-detail" data-op="' + i : '') + '">' +
+        '<span class="adx-ic">' + abSvg(op.tool_name) + '</span>' +
         '<span class="adx-act">' + escapeHtml(label) + '</span>' +
         '<span class="adx-name" title="' + escapeHtml(arg) + '">' + name + '</span>' +
-        '<span class="adx-diff">' + diff + '</span></div>';
+        '<span class="adx-diff">' + diff + (can ? ' <span class="adx-caret">›</span>' : '') + '</span></div>';
     }).join("");
     const ta = ops.reduce((s, o) => s + (o.lines_added || 0), 0);
     const tr = ops.reduce((s, o) => s + (o.lines_removed || 0), 0);
     const stats = ops.length ? '<div class="adx-stats">' + ops.length + ' عملية · +' + ta + ' -' + tr + ' سطر</div>' : '';
-    const pop = document.createElement("div");
-    pop.id = "actionDetailPop"; pop.className = "adx-pop";
     pop.innerHTML =
       '<div class="adx-head"><span class="adx-title">' + escapeHtml(block.desc || "تفاصيل العمليات") + '</span>' +
       '<button class="adx-close" aria-label="إغلاق">✕</button></div>' +
       '<div class="adx-rows">' + (rows || '<div class="adx-empty">لا تفاصيل متاحة</div>') + '</div>' + stats;
-    document.body.appendChild(pop);
     pop.querySelector(".adx-close").onclick = closeActionDetail;
-    setTimeout(() => {
-      document.addEventListener("click", function h(e) {
-        if (!pop.contains(e.target) && !e.target.closest("[data-ab]")) {
-          closeActionDetail(); document.removeEventListener("click", h);
-        }
-      });
-    }, 50);
+    pop.querySelectorAll("[data-op]").forEach((r) => {
+      r.onclick = () => { const op = ops[+r.dataset.op]; if (opHasDetail(op)) showOpDetail(op); };
+    });
+  }
+  // المستوى الثالث: «ماذا فعل» لعملية واحدة (أمر+مخرجات / محتوى / فرق) — كواجهة Claude Code
+  function showOpDetail(op) {
+    const pop = _ensureAbPop();
+    const label = AB_ACTION[op.tool_name] || op.tool_name;
+    pop.innerHTML =
+      '<div class="adx-head"><button class="adx-back" aria-label="رجوع">‹</button>' +
+      '<span class="adx-title">' + escapeHtml(label) + ' · <span class="adx-done">مكتمل</span></span>' +
+      '<button class="adx-close" aria-label="إغلاق">✕</button></div>' +
+      '<div class="adx-detail">' + renderOpDetail(opToDetailObj(op)) + '</div>';
+    pop.querySelector(".adx-back").onclick = () => showActionDetail(_abCurrent);
+    pop.querySelector(".adx-close").onclick = closeActionDetail;
+    pop.scrollTop = 0;
   }
 
   // مؤشر الحالة الحيّ يظهر داخل مجرى المحادثة أسفل آخر رسالة (كما في Claude Code)

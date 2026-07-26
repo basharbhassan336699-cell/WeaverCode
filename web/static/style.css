@@ -532,3 +532,27 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .adx-none { color: var(--muted-2); }
 .adx-stats { margin-top: 10px; color: var(--muted-2); font-size: 12px; text-align: center; }
 .adx-empty { color: var(--muted); padding: 10px 0; }
+.adx-backdrop { position: fixed; inset: 0; z-index: 9998; background: rgba(0,0,0,.35); }
+/* صفوف قابلة للضغط → المستوى الثالث «ماذا فعل» */
+.adx-row.has-detail { cursor: pointer; }
+.adx-row.has-detail:hover { background: rgba(198,113,33,.08); }
+.adx-caret { color: var(--muted-2); margin-inline-start: 6px; }
+.adx-back { background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer;
+  width: 28px; height: 28px; border-radius: 8px; flex: none; }
+.adx-back:active { background: var(--card-2); }
+.adx-done { color: var(--green); font-weight: 500; font-size: 12px; }
+.adx-detail { margin-top: 6px; }
+.adx-detail .op-path { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted);
+  margin-bottom: 8px; word-break: break-all; }
+.adx-detail .op-sec-label { color: var(--muted-2); font-size: 11px; margin: 8px 2px 4px; text-align: start; }
+.adx-detail .op-code { background: var(--card-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; font-family: ui-monospace, monospace; font-size: 12.5px; line-height: 1.5;
+  white-space: pre; overflow-x: auto; color: var(--text); max-height: 44vh; }
+.adx-detail .op-out { color: var(--muted); }
+.adx-detail .op-diff { border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  font-family: ui-monospace, monospace; font-size: 12.5px; }
+.adx-detail .dl { display: flex; gap: 8px; padding: 1px 8px; white-space: pre; overflow-x: auto; }
+.adx-detail .dl .ln { color: var(--muted-2); min-width: 34px; text-align: end; user-select: none; }
+.adx-detail .dl.add { background: rgba(78,201,78,.14); color: #9ff0a0; }
+.adx-detail .dl.del { background: rgba(224,85,85,.14); color: #f4a3a3; }
+.adx-detail .dl.ctx { color: var(--muted); }
