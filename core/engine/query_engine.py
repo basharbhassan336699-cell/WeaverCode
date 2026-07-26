@@ -288,6 +288,83 @@ _GUARD_MODEL_HINT = (
 )
 
 
+def _basename(p: str) -> str:
+    """اسم الملف من مسار (بلا الاعتماد على نظام المسارات)."""
+    p = (p or "").rstrip("/")
+    return p.rsplit("/", 1)[-1] if "/" in p else p
+
+
+def _build_timeout_summary(result: "QueryResult", elapsed: float,
+                           budget: float, tools: Any = None) -> str:
+    """ملخّص دقيق وفعلي لما أُنجز قبل انتهاء الحدّ الزمني (بدل رسالة عامة).
+
+    يقرأ Action Blocks الفعلية (ملفات مُنشأة/معدّلة، أوامر، قراءات + إحصاء)
+    وآخر قائمة مهام (TodoWrite) لعرض «ما تبقّى»، ويدعو للإكمال بـ «أكمل».
+    لا يمسّ المزوّد/المفاتيح — قراءة حالة فقط.
+    """
+    lines = [f"⏱️ توقفت بعد {int(elapsed)} ثانية "
+             f"(الحدّ المضبوط: {int(budget)}s). ما أُنجز محفوظ.\n"]
+
+    ops_summary: List[str] = []
+    total_added = total_removed = total_ops = 0
+    for block in (getattr(result, "blocks", None) or []):
+        for op in getattr(block, "ops", []):
+            total_ops += 1
+            a = getattr(op, "lines_added", 0) or 0
+            r = getattr(op, "lines_removed", 0) or 0
+            total_added += a
+            total_removed += r
+            arg = getattr(op, "primary_arg", "") or ""
+            name = _basename(arg) or arg[:40]
+            tn = getattr(op, "tool_name", "")
+            if tn == "Write" and arg:
+                ops_summary.append(f"  • أنشأ: {name}" + (f" (+{a} سطر)" if a else ""))
+            elif tn in ("Edit", "MultiEdit") and arg:
+                suf = (f" +{a}" if a else "") + (f" -{r}" if r else "")
+                ops_summary.append(f"  • عدّل: {name}" + (f" ({suf.strip()} سطر)" if suf else ""))
+            elif tn == "Bash" and arg:
+                ops_summary.append(f"  • شغّل: {arg[:60].replace(chr(10), ' ')}")
+            elif tn in ("Read", "DirectoryList", "Glob") and arg:
+                ops_summary.append(f"  • قرأ: {name}")
+            elif tn in ("GitCommit", "GitPush"):
+                ops_summary.append(f"  • {tn}: {arg[:40]}" if arg else f"  • {tn}")
+
+    if ops_summary:
+        lines.append("✅ ما تم إنجازه:")
+        lines.extend(ops_summary[:20])
+        if len(ops_summary) > 20:
+            lines.append(f"  … و{len(ops_summary) - 20} عملية أخرى")
+        lines.append("")
+
+    if total_ops:
+        stats = f"📊 {total_ops} عملية"
+        if total_added:
+            stats += f" · +{total_added} سطر"
+        if total_removed:
+            stats += f" · -{total_removed} سطر"
+        lines.append(stats)
+        lines.append("")
+
+    # ما تبقّى من آخر قائمة مهام (TodoWrite) — غير المكتملة فقط
+    pending: List[str] = []
+    try:
+        for t in (tools.get_todos() if tools and hasattr(tools, "get_todos") else []):
+            if isinstance(t, dict) and t.get("status") != "completed":
+                c = (t.get("content") or "").strip()
+                if c:
+                    pending.append(c)
+    except Exception:
+        pass
+    if pending:
+        lines.append("⏭️ ما تبقّى (من آخر قائمة مهام):")
+        for item in pending[:10]:
+            lines.append(f"  • {item}")
+        lines.append("")
+
+    lines.append('قل «أكمل» للمتابعة من حيث توقّفت.')
+    return "\n".join(lines)
+
+
 # ── منقّي الهوية على مستوى المخرجات (شبكة أمان أخيرة) ─────────────────────────
 # إذا كان الخادم/الوسيط يحقن هوية «Claude Code» ويتجاهل بروموهنا (كما في بعض
 # وسطاء aerolink)، فهذه الطبقة تضمن ألّا يرى المستخدم الهوية الخاطئة إطلاقاً.
@@ -818,8 +895,12 @@ class QueryEngine:
         # نموذج ضعيف مع أدوات كثيرة قد يدور على الأدوات كل الدورات (مثلاً «هلا»
         # فيستدعي Bash مراراً) فيبقى «يفكّر» دقائق دون ردّ مفيد. هذان الحدّان
         # يضمنان ردّاً سريعاً وواضحاً بدل التعليق. (0 = تعطيل الميزانية الزمنية.)
-        _budget = float(os.environ.get("WEAVER_TASK_BUDGET", "150") or 0)
-        _loop_limit = int(os.environ.get("WEAVER_LOOP_LIMIT", "4") or 0)
+        # TASK_BUDGET: الافتراضي 1800 ثانية (30 دقيقة) — يكفي المشاريع الكبيرة.
+        # عند التجاوز لا تُلغى المهمة: يُحفظ ما أُنجز ويُعرض ملخّص + دعوة «أكمل».
+        # 0 = بلا حدّ. يُضبط عبر WEAVER_TASK_BUDGET في config/.env.
+        _budget = float(os.environ.get("WEAVER_TASK_BUDGET", "1800") or 0)
+        # LOOP_LIMIT: كم مرّة يُسمح بتكرار نفس (الأداة+الوسائط) قبل الإيقاف.
+        _loop_limit = int(os.environ.get("WEAVER_LOOP_LIMIT", "8") or 0)
         _loop_guard: Dict[str, int] = {}   # توقيع (أداة+وسائط) → عدد التنفيذ
         _t0 = time.monotonic()
         # امسح أي راية إيقاف قديمة عند البدء — فلا يُلغى إلا إيقافٌ يصل أثناء العمل.
@@ -843,15 +924,13 @@ class QueryEngine:
                 pass
 
             # ميزانية زمنية: أوقف قبل استدعاء المزوّد مجدداً إن تجاوزنا الحدّ.
+            # لا نُلغي العمل: نحفظ ما أُنجز ونعرض ملخّصاً دقيقاً + دعوة «أكمل».
             if _budget and (time.monotonic() - _t0) > _budget:
                 result.timed_out = True
-                if not (result.text or "").strip():
-                    result.text = (
-                        f"⏱️ تجاوزت المهمة الحدّ الزمني ({int(_budget)} ثانية) — "
-                        f"أوقفت التنفيذ لتفادي تعليق «يفكّر» طويلاً.\n"
-                        f"   الأرجح: نموذج بطيء أو يدور على الأدوات لطلب بسيط.\n"
-                        f"   جرّب: نموذجاً أسرع (/model)، أو WEAVER_COMPACT_TOOLS=1، "
-                        f"أو صياغة أوضح. (لرفع الحدّ: WEAVER_TASK_BUDGET بالثواني.)")
+                elapsed = time.monotonic() - _t0
+                summary = _build_timeout_summary(result, elapsed, _budget, self.tools)
+                prior = (result.text or "").strip()
+                result.text = (prior + "\n\n" + summary) if prior else summary
                 break
 
             # حدّ للسياق داخل الحلقة: نتائج أدوات ضخمة (قراءة ملف كبير) لا تبتلع

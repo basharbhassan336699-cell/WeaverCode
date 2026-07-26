@@ -86,7 +86,9 @@ def test_time_budget_stops_slow_task(monkeypatch):
     res = asyncio.run(eng.run("نفّذ مهمة طويلة"))
     assert res.timed_out is True
     assert eng.provider.calls < 50            # توقّف قبل استنفاد الدورات
-    assert "الحدّ الزمني" in res.text
+    # ملخّص التوقّف الجديد: يحفظ ما أُنجز ويدعو للإكمال بدل رسالة عامة
+    assert "توقفت بعد" in res.text
+    assert "أكمل" in res.text
 
 
 class _GuardModelProvider:
@@ -156,6 +158,35 @@ def test_guard_verdict_triggers_bare_retry(monkeypatch):
     assert "User Safety" not in res.text
     # أُعيدت المحاولة بطلب بلا نظام وبلا أدوات (عارٍ)
     assert any((not has_sys and not has_tools) for has_sys, has_tools in eng.provider.calls)
+
+
+def test_timeout_summary_reports_work():
+    """ملخّص التوقّف يذكر الملفات المُنشأة/المعدّلة والأوامر والإحصاء وما تبقّى."""
+    from core.engine.query_engine import _build_timeout_summary, QueryResult
+    from core.action_blocks import ActionBlockTracker
+
+    tr = ActionBlockTracker()
+    tr.begin_tool("Write", {"path": "model.py", "content": "x\n" * 30})
+    tr.end_tool("Write", {"path": "model.py", "content": "x\n" * 30}, "ok")
+    tr.begin_tool("Bash", {"command": "mkdir -p src/models"})
+    tr.end_tool("Bash", {"command": "mkdir -p src/models"}, "ok")
+    block = tr.finalize()
+
+    res = QueryResult(text="")
+    res.blocks = [block]
+
+    class _Tools:
+        def get_todos(self):
+            return [{"content": "بناء trainer.py", "status": "pending"},
+                    {"content": "تم الإعداد", "status": "completed"}]
+
+    out = _build_timeout_summary(res, elapsed=127, budget=1800, tools=_Tools())
+    assert "توقفت بعد 127 ثانية" in out
+    assert "model.py" in out            # ملف مُنشأ
+    assert "mkdir" in out               # أمر مُنفّذ
+    assert "بناء trainer.py" in out     # مهمة متبقّية
+    assert "تم الإعداد" not in out      # المكتملة لا تظهر في «ما تبقّى»
+    assert "أكمل" in out
 
 
 def test_cancel_flag_stops_task(monkeypatch, tmp_path):
