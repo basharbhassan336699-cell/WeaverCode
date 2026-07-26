@@ -281,26 +281,41 @@
   // ── إرفاق الملفات (لشاشتَي الإنشاء والمحادثة) ──
   let chatAttached = [];
   function fileToB64(f) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); }); }
+  function isImageName(n) { return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(n || ""); }
   function renderAtt(listId, arr) {
     const box = $("#" + listId);
-    box.innerHTML = arr.map((a, i) => a.loading
-      ? '<span class="attach-chip">⏳ ' + escapeHtml(a.name) + "…</span>"
-      : '<span class="attach-chip">📎 ' + escapeHtml(a.name) + ' <b data-rm="' + i + '">✕</b></span>').join("");
+    box.innerHTML = arr.map((a, i) => {
+      if (a.loading) return '<span class="attach-chip">⏳ ' + escapeHtml(a.name) + "…</span>";
+      const rm = '<b class="att-rm" data-rm="' + i + '">✕</b>';
+      if (a.isImage && a.dataUrl)
+        return '<span class="attach-thumb"><img src="' + a.dataUrl + '" alt="' + escapeHtml(a.name) + '"/>' + rm + '</span>';
+      return '<span class="attach-chip">📎 ' + escapeHtml(a.name) + ' ' + rm + '</span>';
+    }).join("");
     $$("#" + listId + " [data-rm]").forEach((b) => b.onclick = () => { arr.splice(+b.dataset.rm, 1); renderAtt(listId, arr); });
   }
   async function handleFiles(files, arr, listId) {
     for (const f of files) {
       if (f.size > 25 * 1024 * 1024) { alert("الملف " + f.name + " أكبر من 25MB"); continue; }
-      const slot = { name: f.name, loading: true };
+      const slot = { name: f.name, loading: true, isImage: isImageName(f.name) || (f.type || "").startsWith("image/") };
       arr.push(slot); renderAtt(listId, arr);
       try {
         const b64 = await fileToB64(f);
+        if (slot.isImage) slot.dataUrl = b64;   // معاينة مصغّرة محلياً (بلا خادم)
         const r = await post("/api/upload", { name: f.name, data_base64: b64 });
         if (r && r.ok) { slot.loading = false; slot.path = r.path; slot.name = r.name; }
         else { arr.splice(arr.indexOf(slot), 1); alert("تعذّر رفع " + f.name + (r && r.error ? ": " + r.error : "")); }
       } catch (err) { arr.splice(arr.indexOf(slot), 1); alert("خطأ في رفع " + f.name); }
       renderAtt(listId, arr);
     }
+  }
+  // بطاقات المرفقات داخل رسالة المستخدم (صور مصغّرة + بطاقات ملفات) كما في Claude Code
+  function attachCardsHtml(files) {
+    if (!files || !files.length) return "";
+    const items = files.map((a) => a.isImage && a.dataUrl
+      ? '<span class="msg-att-img"><img src="' + a.dataUrl + '" alt="' + escapeHtml(a.name) + '"/></span>'
+      : '<span class="msg-att-file"><span class="mf-ic">📄</span><span class="mf-nm">' + escapeHtml(a.name) + '</span></span>'
+    ).join("");
+    return '<div class="msg-att-row">' + items + "</div>";
   }
   $("#attachBtn").onclick = () => $("#fileInput").click();
   $("#fileInput").addEventListener("change", async (e) => { await handleFiles(e.target.files, attached, "attachList"); e.target.value = ""; });
@@ -330,8 +345,8 @@
     chatHistory.push({ role: "user", content: prompt });
     $("#chatTitle").textContent = (v || "ملفات مرفقة").slice(0, 30);
     updateCtxSub();
-    $("#chatMsgs").innerHTML = bubble("user", escapeHtml(v) +
-      (files.length ? '<div class="who">📎 ' + files.length + " ملف مرفق</div>" : ""));
+    $("#chatMsgs").innerHTML = bubble("user", attachCardsHtml(files) +
+      (v ? '<div class="msg-txt">' + escapeHtml(v) + "</div>" : ""));
     attached = []; renderAttached();
     $("#chatAttachList").innerHTML = ""; chatAttached = [];
     go("v-chat");
@@ -371,8 +386,8 @@
     if (!v && !files.length) return;
     let prompt = v;
     if (files.length) prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" + files.map((a) => "- " + a.path).join("\n");
-    $("#chatMsgs").insertAdjacentHTML("beforeend", bubble("user", escapeHtml(v) +
-      (files.length ? '<div class="who">📎 ' + files.length + " ملف</div>" : "")));
+    chatAppend(bubble("user", attachCardsHtml(files) +
+      (v ? '<div class="msg-txt">' + escapeHtml(v) + "</div>" : "")));
     $("#chatInput").value = ""; autoGrow($("#chatInput"));
     if (!currentSessionId) currentSessionId = uuid();
     setRunning(true);
@@ -700,18 +715,38 @@
   // أثناء العمل: شبكة WeaverCode «المتحركة» (GIF بكامل حركتها) + كلمة الحالة.
   // عند التوقف: الشبكة «الثابتة» (PNG) وحدها — كما طلب المستخدم.
   const LIVE_GIF = "/static/weaver-live.gif", IDLE_PNG = "/static/weaver-idle.png";
+  // مؤشر الحالة الحيّ يظهر داخل مجرى المحادثة أسفل آخر رسالة (كما في Claude Code)
+  // — لا مثبّتاً في الأسفل قرب لوحة الكتابة.
   function setLive(word) {
-    const box = $("#liveStatus"); if (box) box.classList.toggle("on", !!word);
-    const icon = $("#liveIcon");
-    if (icon) icon.src = word ? LIVE_GIF : IDLE_PNG;
-    const w = $("#liveWord"), d = $("#liveDots");
-    if (w) { w.textContent = word || ""; w.style.display = word ? "inline" : "none"; }
-    if (d) d.style.display = word ? "inline" : "none";
+    const msgs = $("#chatMsgs");
+    let row = $("#inlineLive");
+    if (word) {
+      if (!row && msgs) {
+        row = document.createElement("div");
+        row.id = "inlineLive"; row.className = "inline-live";
+        msgs.appendChild(row);
+      }
+      if (row) {
+        msgs.appendChild(row); // أبقِه دائماً في الأسفل
+        row.innerHTML = '<img class="live-icon" src="' + LIVE_GIF + '"/>' +
+          '<span class="live-word">' + escapeHtml(word) + '</span>' +
+          '<span class="live-dots"></span>';
+      }
+      scrollChat();
+    } else if (row) {
+      row.remove();
+    }
     // مرآة الحالة في اللوحة (إن كانت مفتوحة)
     const dl = $("#dashLive");
     if (dl) dl.innerHTML = word
       ? '<img class="live-icon" src="' + LIVE_GIF + '"/> ' + escapeHtml(word) + "…"
       : '<img class="live-icon" src="' + IDLE_PNG + '"/> <span class="muted small">لا مهمة قيد التنفيذ.</span>';
+  }
+  // يُدرِج محتوى المحادثة قبل مؤشر الحالة الحيّ ليبقى المؤشر دائماً في الأسفل.
+  function chatAppend(html) {
+    const live = $("#inlineLive");
+    if (live) live.insertAdjacentHTML("beforebegin", html);
+    else $("#chatMsgs").insertAdjacentHTML("beforeend", html);
   }
   function connectSSE() {
     const es = new EventSource("/events");
@@ -728,10 +763,10 @@
       if (!chat.classList.contains("active")) { return; }
       if (d.type === "response") {
         const txt = d.detail || d.message;
-        $("#chatMsgs").insertAdjacentHTML("beforeend", bubble("agent", md(txt)));
+        chatAppend(bubble("agent", md(txt)));
         chatHistory.push({ role: "assistant", content: txt });
       } else if (d.type === "done") {
-        $("#chatMsgs").insertAdjacentHTML("beforeend", '<div class="bubble event">✅ اكتملت</div>');
+        chatAppend('<div class="bubble event">✅ اكتملت</div>');
       } else if (d.type === "action_block") {
         // ملخص جولة الأدوات بصيغة Claude Code:  ‹ 2- +11  edited a file, read a file
         const hasDiff = (d.diff_removed || 0) > 0 || (d.diff_added || 0) > 0;
@@ -739,12 +774,11 @@
           ? '<span class="ab-removed">' + (d.diff_removed || 0) + '-</span> '
             + '<span class="ab-added">+' + (d.diff_added || 0) + '</span>&nbsp;&nbsp;'
           : "";
-        $("#chatMsgs").insertAdjacentHTML("beforeend",
-          '<div class="action-block"><span class="ab-arrow">‹</span> ' + diff +
+        chatAppend('<div class="action-block"><span class="ab-arrow">‹</span> ' + diff +
           '<span class="ab-desc">' + escapeHtml(d.detail || d.message) + '</span></div>');
       } else if (d.type !== "status") {
         const ic = EV_ICON[d.type] || "•";
-        $("#chatMsgs").insertAdjacentHTML("beforeend", '<div class="bubble event">' + ic + " " + escapeHtml(d.message) + (d.detail ? " · " + escapeHtml(d.detail.slice(0, 50)) : "") + "</div>");
+        chatAppend('<div class="bubble event">' + ic + " " + escapeHtml(d.message) + (d.detail ? " · " + escapeHtml(d.detail.slice(0, 50)) : "") + "</div>");
       }
       scrollChat();
     };
