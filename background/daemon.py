@@ -224,6 +224,19 @@ class WeaverDaemon:
         # ── حفظ المحادثة كاملةً (السجل + رسالة المستخدم + الرد) في صفّ واحد ────
         _persist(response_text)
 
+        # ── تذكير التحقق الذاتي: فقط إن كُتبت ملفات ولم يذكر النموذج تحقّقاً ─────
+        # (لا نُزعج المحادثات العادية بلا كتابة كود — تفادياً لتذكير بعد «هلا».)
+        _wrote_code = any(t in ("Write", "Edit", "MultiEdit")
+                          for t in (getattr(result, "tool_calls_made", None) or []))
+        _verify_kw = ("✅ تم التحقق", "py_compile", "pytest", "الاختبارات تمر",
+                      "tests pass", "✅ ok", "اختبار")
+        _verified = any(s in (response_text or "").lower() for s in
+                        (k.lower() for k in _verify_kw))
+        if _wrote_code and not _verified:
+            _rem = ("⚠️ تذكير: تحقّق من الملفات المُنشأة (py_compile/pytest) "
+                    "قبل اعتبار المهمة منجزة.")
+            await event_bus.emit(WeaverEvent(EventType.RESPONSE, _rem, _rem))
+
         await event_bus.emit(WeaverEvent(EventType.DONE, "اكتملت المهمة"))
         st.save_status("idle")
 
