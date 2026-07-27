@@ -162,7 +162,37 @@ class WeaverDaemon:
                 if role in ("user", "assistant") and content:
                     hist_msgs.append(Message(role=role, content=content))
 
-        result = await engine.run(prompt, history=hist_msgs, on_tool=on_tool)
+        # ── حفظ الجلسة (تدريجي): يُستدعى مبكّراً + عند الخطأ + عند الانتهاء ──────
+        # يمنع ضياع المحادثة عند 404/مهلة/إغلاق التطبيق أثناء العمل: رسالة المستخدم
+        # تُحفَظ فوراً قبل التنفيذ، ثم تُحدَّث بالردّ لاحقاً.
+        def _persist(resp_text: str = "") -> None:
+            if not session_id:
+                return
+            try:
+                msgs = list(history or [])
+                msgs.append({"role": "user", "content": prompt})
+                if resp_text:
+                    msgs.append({"role": "assistant", "content": resp_text})
+                first_user = next((m.get("content", "") for m in msgs
+                                   if m.get("role") == "user"), prompt)
+                name = (first_user or prompt)[:50]
+                import json as _json
+                memory.save_session(session_id, name, prompt,
+                                    _json.dumps(msgs, ensure_ascii=False))
+            except Exception:
+                pass
+
+        _persist("")   # حفظ فوري لرسالة المستخدم قبل بدء التنفيذ
+
+        try:
+            result = await engine.run(prompt, history=hist_msgs, on_tool=on_tool)
+        except Exception as exc:
+            # عطل غير متوقّع: احفظ ما لدينا (رسالة المستخدم على الأقل) ثم أبلغ
+            _persist("")
+            await event_bus.emit(WeaverEvent(EventType.ERROR, str(exc)))
+            await event_bus.emit(WeaverEvent(EventType.DONE, "اكتملت المهمة"))
+            st.save_status("idle")
+            return
 
         response_text = ""
         if result.error:
@@ -191,24 +221,8 @@ class WeaverDaemon:
             response_text = text
             await event_bus.emit(WeaverEvent(EventType.RESPONSE, text[:200], text))
 
-        # ── حفظ المحادثة كجلسة واحدة (لا رسالة منفصلة لكل دور) ────────────────
-        # يجمع كل الدورة (السجل السابق + رسالة المستخدم + رد الوكيل) في صفّ واحد
-        # بجدول sessions، فتظهر المحادثة كعنصر واحد في القائمة الخارجية.
-        if session_id:
-            try:
-                msgs = list(history or [])
-                msgs.append({"role": "user", "content": prompt})
-                if response_text:
-                    msgs.append({"role": "assistant", "content": response_text})
-                # اسم الجلسة = أول رسالة مستخدم في المحادثة
-                first_user = next((m.get("content", "") for m in msgs
-                                   if m.get("role") == "user"), prompt)
-                name = (first_user or prompt)[:50]
-                import json as _json
-                memory.save_session(session_id, name, prompt,
-                                    _json.dumps(msgs, ensure_ascii=False))
-            except Exception:
-                pass
+        # ── حفظ المحادثة كاملةً (السجل + رسالة المستخدم + الرد) في صفّ واحد ────
+        _persist(response_text)
 
         await event_bus.emit(WeaverEvent(EventType.DONE, "اكتملت المهمة"))
         st.save_status("idle")

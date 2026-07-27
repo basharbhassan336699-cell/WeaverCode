@@ -125,12 +125,17 @@
     return '<div class="bubble ' + role + '"><div class="who">' + who + "</div>" + html + "</div>";
   }
   let chatHistory = []; // سياق المحادثة الحالية (يُرسَل مع كل متابعة)
-  let currentSessionId = ""; // معرّف المحادثة الحالية (يبقى ثابتاً طوال الدردشة)
+  // معرّف المحادثة الحالية — يُسترجَع من localStorage ليصمد عبر تحديث الصفحة
+  let currentSessionId = localStorage.getItem("weaver_session_id") || "";
+  function rememberSession(id) {
+    if (id) localStorage.setItem("weaver_session_id", id);
+  }
   function uuid() {
     return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   }
   async function openSession(meta) {
     currentSessionId = meta.id || "";
+    rememberSession(currentSessionId);
     $("#chatTitle").textContent = (meta.prompt || "محادثة").slice(0, 30);
     setRunning(false); updateCtxSub(); loadEffort();
     $("#chatMsgs").innerHTML = '<div class="bubble event">⟳ تحميل المحادثة…</div>';
@@ -151,7 +156,7 @@
   }
 
   // ── محادثة جديدة (compose) ──
-  $("#newBtn").onclick = () => go("v-compose");
+  $("#newBtn").onclick = () => { localStorage.removeItem("weaver_session_id"); go("v-compose"); };
   let attached = []; // ملفات مرفقة
   async function loadCompose() {
     $("#modelPick").textContent = (ENV.model || "النموذج") + " ▾";
@@ -340,6 +345,7 @@
     }
     chatHistory = []; // محادثة جديدة
     currentSessionId = uuid(); // معرّف جديد ثابت لهذه المحادثة
+    rememberSession(currentSessionId);
     setRunning(true);
     await post("/api/task", { prompt: prompt, mode: $("#buildMode").value, history: [], session_id: currentSessionId, repo: (activeRepo && activeRepo.full_name) || "" });
     chatHistory.push({ role: "user", content: prompt });
@@ -390,6 +396,7 @@
       (v ? '<div class="msg-txt">' + escapeHtml(v) + "</div>" : "")));
     $("#chatInput").value = ""; autoGrow($("#chatInput"));
     if (!currentSessionId) currentSessionId = uuid();
+    rememberSession(currentSessionId);
     setRunning(true);
     // أرسل سياق المحادثة السابق ليفهم المتابعة (بنفس معرّف المحادثة)
     await post("/api/task", { prompt: prompt, mode: "main", history: chatHistory.slice(), session_id: currentSessionId });
@@ -588,17 +595,86 @@
     }
   }
 
+  // ── تلوين الكود (Syntax Highlighting) بلا مكتبات خارجية — يعمل دون إنترنت ──
+  // (لا نعتمد CDN حتى لا ينكسر على Termux أوفلاين؛ محرّك خفيف مدمج يكفي للعرض.)
+  const _HL_KW = {
+    _common: new Set(("if else for while return function class import from export const let var new this " +
+      "null true false try catch finally throw switch case break continue default do typeof instanceof " +
+      "void delete yield await async static extends super public private protected interface enum type").split(" ")),
+    python: new Set(("def class return if elif else for while import from as pass break continue try except " +
+      "finally raise with lambda yield global nonlocal assert del in is not and or None True False async await match case print self").split(" ")),
+    bash: new Set(("if then else elif fi for while do done case esac function return in select until echo " +
+      "export local readonly declare set unset source alias cd grep sed awk cat").split(" ")),
+  };
+  function _kwset(lang) {
+    if (lang === "python" || lang === "pyi") return _HL_KW.python;
+    if (lang === "bash") return _HL_KW.bash;
+    return _HL_KW._common;
+  }
+  function detectLang(path, content) {
+    const ext = (path || "").split(".").pop().toLowerCase();
+    const map = { py: "python", pyw: "python", pyi: "python", js: "javascript", mjs: "javascript",
+      cjs: "javascript", ts: "typescript", tsx: "typescript", jsx: "javascript", json: "json",
+      jsonl: "json", yaml: "yaml", yml: "yaml", toml: "toml", sh: "bash", bash: "bash", zsh: "bash",
+      md: "markdown", html: "html", htm: "html", css: "css", scss: "css", rs: "rust", go: "go",
+      java: "java", cpp: "cpp", c: "c", cs: "csharp", rb: "ruby", php: "php", sql: "sql", xml: "xml",
+      ini: "ini", cfg: "ini", conf: "ini", env: "bash", txt: "text" };
+    if (map[ext]) return map[ext];
+    const base = (path || "").split("/").pop().toLowerCase();
+    if (base === "dockerfile") return "bash";
+    if (base === "makefile") return "bash";
+    if (base.indexOf(".env") >= 0) return "bash";
+    const first = ((content || "").split("\n")[0] || "").trim();
+    if (first.startsWith("#!") && first.indexOf("python") >= 0) return "python";
+    if (first.startsWith("#!")) return "bash";
+    if (first.startsWith("{") || first.startsWith("[")) return "json";
+    if (first.startsWith("---")) return "yaml";
+    return "text";
+  }
+  function _hlLine(line, lang, kw) {
+    const hash = /^(python|bash|yaml|ini|ruby|toml)$/.test(lang);
+    const re = hash
+      ? /(#[^\n]*)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\b\d[\w.]*)|([A-Za-z_]\w*)/g
+      : /(\/\/[^\n]*)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\b\d[\w.]*)|([A-Za-z_$]\w*)/g;
+    let out = "", last = 0, m;
+    while ((m = re.exec(line))) {
+      out += escapeHtml(line.slice(last, m.index));
+      last = re.lastIndex;
+      if (m[1]) out += '<span class="token comment">' + escapeHtml(m[1]) + "</span>";
+      else if (m[2]) out += '<span class="token string">' + escapeHtml(m[2]) + "</span>";
+      else if (m[3]) out += '<span class="token number">' + escapeHtml(m[3]) + "</span>";
+      else {
+        const w = m[4];
+        if (kw.has(w)) out += '<span class="token keyword">' + escapeHtml(w) + "</span>";
+        else if (["true", "false", "null", "None", "True", "False", "undefined"].indexOf(w) >= 0)
+          out += '<span class="token boolean">' + escapeHtml(w) + "</span>";
+        else out += escapeHtml(w);
+      }
+    }
+    out += escapeHtml(line.slice(last));
+    return out;
+  }
+  function highlightCode(content, lang) {
+    if (!content) return "";
+    const kw = _kwset(lang);
+    const doHl = lang && lang !== "text";
+    return content.split("\n").map((line, i) =>
+      '<span class="ln">' + (i + 1) + "</span>" + (doHl ? _hlLine(line, lang, kw) : escapeHtml(line))
+    ).join("\n");
+  }
+
   function renderOpDetail(o) {
     if (o.type === "edit") {
-      return '<div class="op-path">' + escapeHtml(o.path) + "</div>" + renderDiff(o.before || "", o.after || "");
-    }
-    if (o.type === "create") {
+      const lang = detectLang(o.path, o.before || o.after || "");
       return '<div class="op-path">' + escapeHtml(o.path) + "</div>" +
-        '<pre class="op-code">' + numberLines(o.content || "") + "</pre>";
+        '<div class="op-lang-badge">' + escapeHtml(lang) + "</div>" +
+        renderDiff(o.before || "", o.after || "", lang);
     }
-    if (o.type === "read") {
+    if (o.type === "create" || o.type === "read") {
+      const lang = detectLang(o.path, o.content || "");
       return '<div class="op-path">' + escapeHtml(o.path) + "</div>" +
-        '<pre class="op-code">' + escapeHtml(o.content || "") + "</pre>";
+        '<div class="op-lang-badge">' + escapeHtml(lang) + "</div>" +
+        '<pre class="op-code hl"><code>' + highlightCode(o.content || "", lang) + "</code></pre>";
     }
     if (o.type === "run") {
       return '<div class="op-sec-label">الأمر (Command)</div>' +
@@ -609,21 +685,21 @@
     return '<pre class="op-code">' + escapeHtml(JSON.stringify(o, null, 2)) + "</pre>";
   }
 
-  // diff view: تمييز الأسطر المضافة/المحذوفة بألوان + أرقام
-  function renderDiff(before, after) {
+  // diff view: تمييز الأسطر المضافة/المحذوفة بألوان + أرقام + تلوين الكود
+  function renderDiff(before, after, lang) {
     const a = before.split("\n"), b = after.split("\n");
     const rows = [];
-    let i = 0, j = 0;
-    // مقارنة بسيطة سطراً بسطر (LCS خفيف عبر difflib-like)
     const setB = new Set(b);
     const setA = new Set(a);
+    const kw = lang ? _kwset(lang) : null;
+    const hl = (ln) => (lang && lang !== "text") ? _hlLine(ln, lang, kw) : escapeHtml(ln);
     // نعرض المحذوف ثم المضاف بأسلوب موحّد مقروء
     a.forEach((ln, idx) => {
-      if (!setB.has(ln)) rows.push('<div class="dl del"><span class="ln">-' + (idx + 1) + '</span>' + escapeHtml(ln) + "</div>");
-      else rows.push('<div class="dl ctx"><span class="ln">' + (idx + 1) + "</span>" + escapeHtml(ln) + "</div>");
+      if (!setB.has(ln)) rows.push('<div class="dl del"><span class="ln">-' + (idx + 1) + '</span>' + hl(ln) + "</div>");
+      else rows.push('<div class="dl ctx"><span class="ln">' + (idx + 1) + "</span>" + hl(ln) + "</div>");
     });
     b.forEach((ln, idx) => {
-      if (!setA.has(ln)) rows.push('<div class="dl add"><span class="ln">+' + (idx + 1) + '</span>' + escapeHtml(ln) + "</div>");
+      if (!setA.has(ln)) rows.push('<div class="dl add"><span class="ln">+' + (idx + 1) + '</span>' + hl(ln) + "</div>");
     });
     return '<div class="op-diff">' + rows.join("") + "</div>";
   }
@@ -1282,4 +1358,21 @@
 
   // بدء
   show("v-sessions");
+
+  // استرجاع آخر محادثة تلقائياً عند تحميل/تحديث الصفحة (تصمد عبر التحديث)
+  async function restoreLastSession() {
+    const savedId = localStorage.getItem("weaver_session_id");
+    if (!savedId) return;
+    try {
+      const r = await api("/api/session?id=" + encodeURIComponent(savedId));
+      if (!r || !r.messages || !r.messages.length) {
+        localStorage.removeItem("weaver_session_id"); return;
+      }
+      const firstUser = (r.messages.find((m) => m.role === "user") || {}).content || "محادثة";
+      openSession({ id: savedId, prompt: firstUser });   // يعيد العرض والتنقّل
+    } catch (e) {
+      localStorage.removeItem("weaver_session_id");
+    }
+  }
+  restoreLastSession();
 })();

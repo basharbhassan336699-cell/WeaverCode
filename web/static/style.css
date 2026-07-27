@@ -549,10 +549,25 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
   padding: 10px 12px; font-family: ui-monospace, monospace; font-size: 12.5px; line-height: 1.5;
   white-space: pre; overflow-x: auto; color: var(--text); max-height: 44vh; }
 .adx-detail .op-out { color: var(--muted); }
-.adx-detail .op-diff { border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
-  font-family: ui-monospace, monospace; font-size: 12.5px; }
+/* كود ملوّن على خلفية داكنة ثابتة (كما في Claude Code) — يعمل في الوضعين */
+.adx-detail .op-code.hl { background: #1b1b24; color: #d7d7db; border-color: #2a2a3a; }
+.adx-detail .op-code.hl .ln { color: #5a5a6a; }
+.op-lang-badge { display: inline-block; font-family: ui-monospace, monospace; font-size: 11px;
+  color: var(--orange); background: rgba(198,113,33,.12); border: 1px solid rgba(198,113,33,.3);
+  border-radius: 6px; padding: 1px 8px; margin-bottom: 6px; }
+/* ألوان الوسوم (token) — لوحة داكنة متوافقة مع خلفية الكود */
+.token.comment { color: #7f8596; font-style: italic; }
+.token.string { color: #7ec699; }
+.token.number { color: #f08d49; }
+.token.boolean { color: #f08d49; }
+.token.keyword { color: #cc99cd; }
+.token.function { color: #f8d862; }
+.op-diff .dl.add .token.string { color: #a8e6a8; }
+.op-diff .dl.del .token.string { color: #e8a8a8; }
+.adx-detail .op-diff { border: 1px solid #2a2a3a; border-radius: 10px; overflow: hidden;
+  background: #1b1b24; color: #d7d7db; font-family: ui-monospace, monospace; font-size: 12.5px; }
 .adx-detail .dl { display: flex; gap: 8px; padding: 1px 8px; white-space: pre; overflow-x: auto; }
-.adx-detail .dl .ln { color: var(--muted-2); min-width: 34px; text-align: end; user-select: none; }
-.adx-detail .dl.add { background: rgba(78,201,78,.14); color: #9ff0a0; }
-.adx-detail .dl.del { background: rgba(224,85,85,.14); color: #f4a3a3; }
-.adx-detail .dl.ctx { color: var(--muted); }
+.adx-detail .dl .ln { color: #5a5a6a; min-width: 34px; text-align: end; user-select: none; }
+.adx-detail .dl.add { background: rgba(78,201,78,.16); }
+.adx-detail .dl.del { background: rgba(224,85,85,.16); }
+.adx-detail .dl.ctx { color: #9a9aa8; }
