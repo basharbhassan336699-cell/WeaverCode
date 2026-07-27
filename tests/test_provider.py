@@ -96,6 +96,35 @@ def test_404_rate_limit_is_retryable_but_model_not_found_is_permanent():
         pass
 
 
+def test_adaptive_throttle_engages_and_decays():
+    """التأخير التكيّفي التلقائي: 0 للعادي، يرتفع عند rate limit، ثم ينحسر لصفر."""
+    import asyncio
+    from core.engine.provider import RateLimitedError
+    p = _p("https://x/v1")
+    p.config.retries = 1
+    p.config.retry_base = 0.001
+    assert p._rl_penalty == 0.0                      # لا تبطئة افتراضاً
+
+    async def _ok(u, pl): return {"choices": [{"message": {"content": "ok"}}]}
+    p._run_curl_once = _ok
+    asyncio.run(p._run_curl("u", {}))
+    assert p._rl_penalty == 0.0                      # نجاح نظيف يبقى 0
+
+    async def _rl(u, pl):
+        e = RateLimitedError("rate limit"); e.retry_after = 0.001; raise e
+    p._run_curl_once = _rl
+    try:
+        asyncio.run(p._run_curl("u", {}))
+    except RateLimitedError:
+        pass
+    assert p._rl_penalty >= 3.0                      # ارتفع تلقائياً
+
+    p._run_curl_once = _ok
+    for _ in range(6):
+        asyncio.run(p._run_curl("u", {}))
+    assert p._rl_penalty == 0.0                      # عاد لصفر بعد نجاحات متتالية
+
+
 def test_request_delay_from_env(monkeypatch):
     from core.engine.provider import ProviderConfig
     monkeypatch.setenv("WEAVER_REQUEST_DELAY", "3")

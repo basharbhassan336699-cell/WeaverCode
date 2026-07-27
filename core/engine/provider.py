@@ -326,6 +326,9 @@ class WeaverProvider:
         # قاطع دائرة: بعد نجاح «الوضع الأدنى» على بوابة مقيّدة، نرسل به مباشرةً
         # (طلب واحد) بدل سلّم المرشّحين — حتى لا نستنزف توكينات المستخدم.
         self._bare_mode: bool = False
+        # تأخير تكيّفي تلقائي ضدّ تجاوز الحدّ: يبدأ 0 (لا تبطئة)، يرتفع عند رؤية
+        # rate limit، ثم ينحسر لصفر عند نجاح الطلبات — بلا أي إعداد من المستخدم.
+        self._rl_penalty: float = 0.0
         # نحمّل ما تعلّمناه سابقاً عن هذا المزوّد (يُوفّر إعادة الاكتشاف عبر التشغيلات)
         self._load_quirk_cache()
         if not shutil.which("curl"):
@@ -848,19 +851,27 @@ class WeaverProvider:
 
     async def _run_curl(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """POST عبر curl مع إعادة محاولة تلقائية للأخطاء العابرة فقط."""
-        # تأخير ثابت اختياري بين الطلبات (WEAVER_REQUEST_DELAY) — يخفّف rate limit.
-        # افتراضياً 0 (لا تأخير) فلا يبطئ الاستخدام العادي.
-        if self.config.request_delay > 0:
-            await asyncio.sleep(self.config.request_delay)
+        # تأخير قبل الطلب = الأكبر من: تأخير ثابت اختياري (WEAVER_REQUEST_DELAY)،
+        # والتأخير التكيّفي التلقائي (_rl_penalty). الأخير 0 ما لم يُرَ rate limit،
+        # فلا يبطئ الاستخدام العادي إطلاقاً، ويوفّر حمايةً تلقائيةً عند الحاجة.
+        pre_delay = max(self.config.request_delay, self._rl_penalty)
+        if pre_delay > 0:
+            await asyncio.sleep(min(pre_delay, 30))
 
         attempts = max(1, self.config.retries + 1)
         delay = self.config.retry_base
         for i in range(attempts):
             try:
-                return await self._run_curl_once(url, payload)
+                resp = await self._run_curl_once(url, payload)
+                # نجاح → خفّف العقوبة التكيّفية تدريجياً حتى تعود لصفر
+                if self._rl_penalty:
+                    self._rl_penalty = 0.0 if self._rl_penalty < 0.5 else self._rl_penalty * 0.5
+                return resp
             except RateLimitedError as e:
-                # rate limit صريح (429 أو 404 مؤقت) → انتظر المدّة المقترحة ثم أعِد.
+                # rate limit صريح (429 أو 404 مؤقت) → ارفع العقوبة التكيّفية (سقف
+                # 15ث) لتبطئة الطلبات التالية تلقائياً، ثم انتظر وأعِد.
                 # يجب أن يسبق TransientProviderError لأنه فرعٌ منه.
+                self._rl_penalty = min(max(self._rl_penalty * 1.5, 3.0), 15.0)
                 if i >= attempts - 1:
                     raise
                 wait = getattr(e, "retry_after", delay) or delay
