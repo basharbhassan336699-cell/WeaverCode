@@ -829,14 +829,14 @@
   function closePrPanel() {
     ["prPanel", "prBackdrop"].forEach((id) => { const e = document.getElementById(id); if (e) e.remove(); });
   }
-  function openPrPanel(prs) {
+  function openPrPanel(items, title) {
     closePrPanel();
     const bd = document.createElement("div"); bd.id = "prBackdrop"; bd.className = "adx-backdrop";
     bd.onclick = closePrPanel; document.body.appendChild(bd);
     const el = document.createElement("div"); el.id = "prPanel"; el.className = "pr-panel";
-    el.innerHTML = '<div class="pr-head"><span class="pr-h-title">Pull requests</span>' +
+    el.innerHTML = '<div class="pr-head"><span class="pr-h-title">' + escapeHtml(title || "Pull requests") + "</span>" +
       '<button class="pr-close" aria-label="إغلاق">✕</button></div>' +
-      '<div class="pr-list">' + prs.map(gitCard).join("") + "</div>";
+      '<div class="pr-list">' + items.map(gitCard).join("") + "</div>";
     document.body.appendChild(el);
     el.querySelector(".pr-close").onclick = closePrPanel;
     el.querySelectorAll("[data-url]").forEach((c) => c.onclick = () => window.open(c.dataset.url, "_blank"));
@@ -844,20 +844,30 @@
   async function maybeAddPrChip() {
     try {
       const r = await api("/api/git-activity?limit=100");
-      // نعرض فقط الطلبات المفتوحة/المعلّقة (القابلة للتنفيذ) — لا نُظهر المدموجة/
-      // المغلقة القديمة كأنها إنجاز حديث (سبق أن ظهرت «وهمية»). العمل الحديث يذهب
-      // إلى main كـ commits لا PRs، فلا تظهر رقاقة إن لم توجد طلبات مفتوحة.
-      const open = (r.activity || []).filter(
-        (a) => a.kind === "pr" && (a.state === "open" || a.pending));
+      const acts = r.activity || [];
+      // العمل الحديث في WeaverCode يذهب إلى main كـ commits (لا PRs)، لذا نعرض
+      // رقاقة تعكس ما أُنجِز فعلاً: الطلبات المفتوحة إن وُجدت، وإلا آخر commits.
+      // (سابقاً كنا نُظهر PRs مدموجة قديمة «وهمية»، ثم أخفيناها كلياً — كلاهما خطأ.)
+      const openPrs = acts.filter((a) => a.kind === "pr" && (a.state === "open" || a.pending));
+      const commits = acts.filter((a) => a.kind === "commit").slice(0, 10);
       const old = document.querySelector(".pr-chip-row"); if (old) old.remove();
-      if (!open.length) return;
+      let items, label, title;
+      if (openPrs.length) {
+        items = openPrs; title = "Pull requests";
+        label = openPrs.length + " · Pull requests";
+      } else if (commits.length) {
+        items = commits; title = "آخر النشاط";
+        label = commits.length + " · commits";
+      } else {
+        return;   // لا نشاط بعد → لا رقاقة
+      }
       const el = document.createElement("div"); el.className = "pr-chip-row";
       el.innerHTML = '<button class="pr-chip"><span class="pr-branch">⑂</span> ' +
-        open.length + " · Pull requests</button>";
+        escapeHtml(label) + "</button>";
       const live = $("#inlineLive");
       if (live) live.insertAdjacentElement("beforebegin", el);
       else $("#chatMsgs").appendChild(el);
-      el.querySelector(".pr-chip").onclick = () => openPrPanel(open);
+      el.querySelector(".pr-chip").onclick = () => openPrPanel(items, title);
       scrollChat();
     } catch (e) {}
   }
