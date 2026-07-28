@@ -844,16 +844,20 @@
   async function maybeAddPrChip() {
     try {
       const r = await api("/api/git-activity?limit=100");
-      const prs = (r.activity || []).filter((a) => a.kind === "pr");
+      // نعرض فقط الطلبات المفتوحة/المعلّقة (القابلة للتنفيذ) — لا نُظهر المدموجة/
+      // المغلقة القديمة كأنها إنجاز حديث (سبق أن ظهرت «وهمية»). العمل الحديث يذهب
+      // إلى main كـ commits لا PRs، فلا تظهر رقاقة إن لم توجد طلبات مفتوحة.
+      const open = (r.activity || []).filter(
+        (a) => a.kind === "pr" && (a.state === "open" || a.pending));
       const old = document.querySelector(".pr-chip-row"); if (old) old.remove();
-      if (!prs.length) return;
+      if (!open.length) return;
       const el = document.createElement("div"); el.className = "pr-chip-row";
       el.innerHTML = '<button class="pr-chip"><span class="pr-branch">⑂</span> ' +
-        prs.length + " · Pull requests</button>";
+        open.length + " · Pull requests</button>";
       const live = $("#inlineLive");
       if (live) live.insertAdjacentElement("beforebegin", el);
       else $("#chatMsgs").appendChild(el);
-      el.querySelector(".pr-chip").onclick = () => openPrPanel(prs);
+      el.querySelector(".pr-chip").onclick = () => openPrPanel(open);
       scrollChat();
     } catch (e) {}
   }
