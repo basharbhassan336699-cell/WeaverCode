@@ -155,10 +155,12 @@
     pendingBlocks = [];
     $("#chatMsgs").innerHTML = msgs.map((m) => {
       if (m.role === "user") return bubble("user", escapeHtml(m.content || ""));
-      // المساعد: اعرض سجل العمليات (إن حُفظ) قبل نصّ الرد — كما كان لحظياً
+      // المساعد: سجل العمليات (إن حُفظ) قبل النصّ، ثم بطاقة ملخّص الإنجاز — كما كان لحظياً
       let html = "";
       (m.blocks || []).forEach((b) => { html += actionBlockHtml(b); });
-      return html + bubble("agent", md(m.content || ""));
+      html += bubble("agent", md(m.content || ""));
+      if (m.blocks && m.blocks.length) html += completionSummaryHtml(m.blocks);
+      return html;
     }).join("") || bubble("agent", "(محادثة فارغة)");
     $("#chatAttachList").innerHTML = ""; chatAttached = [];
     scrollChat();
@@ -356,7 +358,7 @@
     currentSessionId = uuid(); // معرّف جديد ثابت لهذه المحادثة
     rememberSession(currentSessionId);
     setRunning(true);
-    pendingBlocks = [];
+    pendingBlocks = []; turnBlocks = [];
     await post("/api/task", { prompt: prompt, mode: $("#buildMode").value, history: [], session_id: currentSessionId, repo: (activeRepo && activeRepo.full_name) || "" });
     chatHistory.push({ role: "user", content: prompt });
     $("#chatTitle").textContent = (v || "ملفات مرفقة").slice(0, 30);
@@ -414,7 +416,7 @@
     $("#chatInput").value = ""; autoGrow($("#chatInput"));
     if (!currentSessionId) currentSessionId = uuid();
     rememberSession(currentSessionId);
-    if (!queued) { setRunning(true); pendingBlocks = []; }
+    if (!queued) { setRunning(true); pendingBlocks = []; turnBlocks = []; }
     // أرسل سياق المحادثة السابق ليفهم المتابعة (بنفس معرّف المحادثة)
     await post("/api/task", { prompt: prompt, mode: "main", history: chatHistory.slice(), session_id: currentSessionId });
     chatHistory.push({ role: "user", content: prompt });
@@ -815,6 +817,37 @@
   // ── تفاصيل Action Block: popup بأيقونات SVG عصرية (كواجهة Claude Code) ──
   let actionBlocks = [];
   let pendingBlocks = [];   // كتل العمليات للدور الحالي (تُرفَق برد المساعد للحفظ)
+  let turnBlocks = [];      // كتل الدور الحالي (لبطاقة ملخّص الإنجاز عند الاكتمال)
+  // بطاقة ملخّص الإنجاز — تظهر بعد اكتمال العمل بدل كلمة «اكتملت» (كواجهة Claude Code)
+  function completionSummaryHtml(blocks) {
+    let added = 0, removed = 0, cmds = 0, reads = 0, commits = 0, failed = 0;
+    const files = [];
+    (blocks || []).forEach((b) => (b.ops || []).forEach((o) => {
+      added += o.lines_added || 0; removed += o.lines_removed || 0;
+      if (o.failed) failed++;
+      const tn = o.tool_name;
+      if (tn === "Write" || tn === "Edit" || tn === "MultiEdit") {
+        const f = o.path || o.arg; if (f && files.indexOf(f) < 0) files.push(f);
+      } else if (tn === "Bash" || tn === "PythonRun") cmds++;
+      else if (tn === "Read" || tn === "Glob" || tn === "Grep" || tn === "DirectoryList") reads++;
+      else if (tn === "GitCommit" || tn === "GitPush") commits++;
+    }));
+    if (!blocks || !blocks.length) return '<div class="bubble event">✅ تم</div>';
+    const parts = [];
+    if (files.length) parts.push(files.length + " ملف");
+    if (added || removed) parts.push('<span class="cs-add">+' + added + '</span> <span class="cs-rm">-' + removed + '</span>');
+    if (cmds) parts.push(cmds + (cmds > 2 ? " أوامر" : " أمر"));
+    if (reads) parts.push(reads + " قراءة");
+    if (commits) parts.push(commits + " commit");
+    const fileChips = files.slice(0, 6).map((f) =>
+      '<span class="cs-file">📄 ' + escapeHtml(f.split("/").pop()) + "</span>").join("");
+    return '<div class="complete-card' + (failed ? " has-fail" : "") + '">' +
+      '<div class="cs-head"><span class="cs-mark">' + (failed ? "⚠️" : "✅") + '</span>' +
+      '<span class="cs-title">' + (failed ? "اكتمل مع تنبيهات" : "اكتمل العمل") + '</span>' +
+      (parts.length ? '<span class="cs-stats">' + parts.join(" · ") + "</span>" : "") + "</div>" +
+      (fileChips ? '<div class="cs-files">' + fileChips + (files.length > 6 ? '<span class="cs-more">+' + (files.length - 6) + "</span>" : "") + "</div>" : "") +
+      "</div>";
+  }
   // يبني HTML لسطر Action Block ويُسجّل تفاصيله (للنقر → المستوى الثالث).
   // يقبل شكلَي البيانات: SSE (detail/diff_added) والمحفوظ (desc/added).
   function actionBlockHtml(b) {
@@ -1015,12 +1048,14 @@
         if (pendingBlocks.length) { entry.blocks = pendingBlocks.slice(); pendingBlocks = []; }
         chatHistory.push(entry);
       } else if (d.type === "done") {
-        chatAppend('<div class="bubble event">✅ اكتملت</div>');
-        pendingBlocks = [];
+        // بدل «اكتملت»: بطاقة ملخّص إنجاز (ملفات + أسطر + أوامر) كواجهة Claude Code
+        chatAppend(completionSummaryHtml(turnBlocks));
+        pendingBlocks = []; turnBlocks = [];
       } else if (d.type === "action_block") {
-        // ملخص جولة الأدوات (قابل للضغط → المستوى الثالث). يُتراكم للحفظ أيضاً.
-        pendingBlocks.push({ desc: d.detail || d.message, ops: d.ops || [],
-          added: d.diff_added || 0, removed: d.diff_removed || 0 });
+        // ملخص جولة الأدوات (قابل للضغط → المستوى الثالث). يُتراكم للحفظ + الملخّص.
+        const blk = { desc: d.detail || d.message, ops: d.ops || [],
+          added: d.diff_added || 0, removed: d.diff_removed || 0 };
+        pendingBlocks.push(blk); turnBlocks.push(blk);
         chatAppend(actionBlockHtml(d));
       } else if (d.type !== "status") {
         const ic = EV_ICON[d.type] || "•";

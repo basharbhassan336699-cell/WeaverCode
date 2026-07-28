@@ -506,6 +506,23 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .adx-row.failed .adx-act { color: var(--red); }
 .adx-row.failed .adx-ic { color: var(--red); }
 
+/* بطاقة ملخّص الإنجاز (بعد اكتمال العمل بدل «اكتملت») — كواجهة Claude Code */
+.complete-card { align-self: center; width: 92%; background: var(--card); border: 1px solid var(--line);
+  border-radius: 14px; padding: 10px 14px; margin: 4px 0 2px; }
+.complete-card.has-fail { border-color: rgba(229,84,75,.5); }
+.cs-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cs-mark { font-size: 15px; }
+.cs-title { color: var(--text); font-weight: 600; font-size: 14px; }
+.cs-stats { color: var(--muted); font-size: 12.5px; font-family: ui-monospace, monospace;
+  margin-inline-start: auto; }
+.cs-add { color: #4ec94e; }
+.cs-rm { color: #e05555; }
+.cs-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.cs-file { background: var(--card-2); border: 1px solid var(--line); color: var(--muted);
+  font-size: 12px; font-family: ui-monospace, monospace; padding: 2px 8px; border-radius: 8px;
+  max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-more { color: var(--muted-2); font-size: 12px; align-self: center; }
+
 /* ── popup تفاصيل Action Block (بأيقونات عصرية كواجهة Claude Code) ── */
 .adx-pop { position: fixed; z-index: 9999; inset-inline: 0; margin-inline: auto;
   width: min(92vw, 480px); bottom: calc(96px + env(safe-area-inset-bottom));
