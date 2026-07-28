@@ -76,6 +76,7 @@ _TOOL_META = {
     "EnvSet":        ("set env var",      "set {n} env vars",     False),
     "EnvGet":        ("got env var",      "got {n} env vars",     False),
     "Skill":         ("loaded skill",     "loaded {n} skills",    False),
+    "Screenshot":    ("captured a screenshot", "captured {n} screenshots", False),
 }
 
 _DEFAULT_META = ("used a tool", "used {n} tools", False)

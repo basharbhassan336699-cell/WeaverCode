@@ -241,6 +241,13 @@ class WeaverDaemon:
             response_text = text
             await event_bus.emit(WeaverEvent(EventType.RESPONSE, text[:200], text))
 
+        # ── لقطة شاشة تلقائية للناتج المرئي (كواجهة Claude Code) ───────────────
+        # «صورة لما عمله فعلاً» — لا سجل commits: إن أنتجت المهمة ملفاً مرئياً
+        # (صفحة/واجهة HTML أو SVG) نلتقط لقطة حقيقية للنتيجة ونعرضها في بطاقة
+        # الاكتمال. للمهام غير المرئية (بايثون مثلاً) لا يُلتقط شيء (لا ضجيج).
+        if not getattr(result, "error", None):
+            await self._auto_shot_result(tools, result, loop)
+
         # ── حفظ المحادثة كاملةً + سجل العمليات (blocks) لاسترجاعه بعد التحديث ──
         _saved_blocks = None
         try:
@@ -265,6 +272,49 @@ class WeaverDaemon:
 
         await event_bus.emit(WeaverEvent(EventType.DONE, "اكتملت المهمة"))
         st.save_status("idle")
+
+    async def _auto_shot_result(self, tools, result, loop) -> None:
+        """يلتقط تلقائياً لقطة شاشة حقيقية للناتج المرئي عند اكتمال المهمة.
+
+        Auto-capture a real screenshot of a visual result (HTML/SVG file the
+        task created/edited) and surface it in the completion card — as the
+        user asked: «صورة لما عمله فعلاً» لا مجرد سجل commits. للمهام غير المرئية
+        لا يُلتقط شيء (لا ضجيج). آمن تماماً: أي فشل يُتجاهَل بلا كسر للمهمة.
+        """
+        try:
+            blocks = getattr(result, "blocks", None) or []
+            visual_ext = (".html", ".htm", ".svg")
+            target = ""
+            for b in blocks:
+                for op in getattr(b, "ops", []) or []:
+                    if getattr(op, "tool_name", "") in ("Write", "Edit", "MultiEdit"):
+                        p = str((getattr(op, "args", {}) or {}).get("path") or "")
+                        if p.lower().endswith(visual_ext):
+                            target = p   # آخر ملف مرئي كُتب = الناتج النهائي
+            if not target:
+                return
+            await event_bus.emit(WeaverEvent(
+                EventType.TOOL_START, "يلتقط لقطة للنتيجة", target))
+            # subprocess حاجب → نفّذه في منفّذ منفصل كي لا يوقف حلقة الأحداث
+            msg = await loop.run_in_executor(None, tools._screenshot, target)
+            if "التقطت لقطة الشاشة" not in (msg or ""):
+                return   # لا متصفّح Chromium أو فشل الالتقاط — تجاهل بهدوء
+            from core.action_blocks import ActionBlock, ToolOp, serialize_ops
+            blk = ActionBlock(ops=[ToolOp(
+                tool_name="Screenshot", args={"target": target}, result=msg)])
+            # (1) ألحِقه بكتل النتيجة ليُحفَظ في الجلسة (يظهر بعد إعادة التحميل أيضاً)
+            try:
+                if getattr(result, "blocks", None) is None:
+                    result.blocks = []
+                result.blocks.append(blk)
+            except Exception:
+                pass
+            # (2) ابثّه حيّاً ليظهر في بطاقة الاكتمال فوراً (نفس شكل action_block)
+            await event_bus.emit(WeaverEvent(
+                EventType.ACTION_BLOCK, blk.summary_line(), blk._build_description(),
+                diff_added=0, diff_removed=0, ops=serialize_ops(blk)))
+        except Exception:
+            pass
 
     def stop(self):
         self.running = False
