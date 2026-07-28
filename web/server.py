@@ -1105,7 +1105,8 @@ def _api_settings_save(body: dict) -> dict:
     الحالي) — فلا يُمسح المفتاح/الرابط بالخطأ ولا يُكسَر اتصال المزوّد.
     """
     allowed = {"WEAVER_API_KEY", "WEAVER_BASE_URL", "WEAVER_MODEL",
-               "WEAVER_MAX_TOKENS", "WEAVER_TEMPERATURE", "WEAVER_TIMEOUT"}
+               "WEAVER_MAX_TOKENS", "WEAVER_TEMPERATURE", "WEAVER_TIMEOUT",
+               "WEAVER_ASK_PERMISSION"}
     updates = {k: str(v).strip() for k, v in (body or {}).items()
                if k in allowed and str(v).strip()}
     if not updates:
@@ -1405,6 +1406,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_discover_models())
         if path == "/api/effort":
             return self._json(_api_effort_get())
+        if path == "/api/permission/pending":
+            from background import permissions as _perm
+            return self._json({"pending": _perm.pending()})
         if path == "/api/github":
             return self._json(_api_github())
         if path == "/api/github/repos":
@@ -1437,6 +1441,15 @@ class Handler(BaseHTTPRequestHandler):
             if not target.exists() or not target.is_file():
                 return self._json({"error": "الملف غير موجود"}, 404)
             return self._file(target, "application/octet-stream", target.name)
+        if path == "/api/shot":
+            # يخدم لقطة شاشة PNG من مجلد العمل (لأداة Screenshot) مع حماية المسار
+            rel = (qs.get("path", [""]) or [""])[0]
+            target = _safe_output_path(rel)
+            if target is None or ".weaver_shots" not in str(target):
+                return self._json({"error": "مسار غير صالح"}, 400)
+            if not target.exists() or not target.is_file():
+                return self._json({"error": "غير موجود"}, 404)
+            return self._file(target, "image/png")
         return self._json({"error": "not found"}, 404)
 
     # -- POST --
@@ -1458,6 +1471,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_run_command(body.get("command", "")))
         if path == "/api/effort":
             return self._json(_api_effort_set(body))
+        if path == "/api/permission":
+            from background import permissions as _perm
+            ok = _perm.resolve((body.get("id") or "").strip(),
+                               (body.get("decision") or "deny").strip())
+            return self._json({"resolved": ok})
         if path == "/api/stop":
             return self._json(_api_stop())
         if path == "/api/settings":

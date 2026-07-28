@@ -368,6 +368,11 @@ def serialize_ops(block, cap: int = 8000) -> list:
         elif tn in ("Read", "Glob", "Grep", "DirectoryList"):
             d["path"] = str(a.get("path") or getattr(op, "primary_arg", "") or "")
             d["content"] = res[:cap]
+        elif tn == "Screenshot":
+            d["target"] = str(a.get("target", "") or "")
+            m = re.search(r"لقطة الشاشة:\s*(\S+\.png)", res)
+            if m:
+                d["image_path"] = m.group(1)   # للعرض عبر /api/shot
         out.append(d)
     return out
 

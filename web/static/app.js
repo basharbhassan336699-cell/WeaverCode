@@ -162,6 +162,7 @@
       if (m.blocks && m.blocks.length) html += completionSummaryHtml(m.blocks);
       return html;
     }).join("") || bubble("agent", "(محادثة فارغة)");
+    maybeAddPrChip();   // رقاقة PRs عند فتح المحادثة أيضاً
     $("#chatAttachList").innerHTML = ""; chatAttached = [];
     scrollChat();
   }
@@ -683,6 +684,12 @@
   }
 
   function renderOpDetail(o) {
+    if (o.type === "shot") {
+      return (o.target ? '<div class="op-path">' + escapeHtml(o.target) + "</div>" : "") +
+        (o.image_path
+          ? '<img class="op-shot" src="/api/shot?path=' + encodeURIComponent(o.image_path) + '" alt="لقطة شاشة"/>'
+          : '<div class="muted small">لا صورة.</div>');
+    }
     if (o.type === "edit") {
       const lang = detectLang(o.path, o.before || o.after || "");
       return '<div class="op-path">' + escapeHtml(o.path) + "</div>" +
@@ -818,13 +825,46 @@
   let actionBlocks = [];
   let pendingBlocks = [];   // كتل العمليات للدور الحالي (تُرفَق برد المساعد للحفظ)
   let turnBlocks = [];      // كتل الدور الحالي (لبطاقة ملخّص الإنجاز عند الاكتمال)
+  // ── رقاقة «N · Pull requests» بعد الاكتمال + لوحة عرضها (كواجهة Claude Code) ──
+  function closePrPanel() {
+    ["prPanel", "prBackdrop"].forEach((id) => { const e = document.getElementById(id); if (e) e.remove(); });
+  }
+  function openPrPanel(prs) {
+    closePrPanel();
+    const bd = document.createElement("div"); bd.id = "prBackdrop"; bd.className = "adx-backdrop";
+    bd.onclick = closePrPanel; document.body.appendChild(bd);
+    const el = document.createElement("div"); el.id = "prPanel"; el.className = "pr-panel";
+    el.innerHTML = '<div class="pr-head"><span class="pr-h-title">Pull requests</span>' +
+      '<button class="pr-close" aria-label="إغلاق">✕</button></div>' +
+      '<div class="pr-list">' + prs.map(gitCard).join("") + "</div>";
+    document.body.appendChild(el);
+    el.querySelector(".pr-close").onclick = closePrPanel;
+    el.querySelectorAll("[data-url]").forEach((c) => c.onclick = () => window.open(c.dataset.url, "_blank"));
+  }
+  async function maybeAddPrChip() {
+    try {
+      const r = await api("/api/git-activity?limit=100");
+      const prs = (r.activity || []).filter((a) => a.kind === "pr");
+      const old = document.querySelector(".pr-chip-row"); if (old) old.remove();
+      if (!prs.length) return;
+      const el = document.createElement("div"); el.className = "pr-chip-row";
+      el.innerHTML = '<button class="pr-chip"><span class="pr-branch">⑂</span> ' +
+        prs.length + " · Pull requests</button>";
+      const live = $("#inlineLive");
+      if (live) live.insertAdjacentElement("beforebegin", el);
+      else $("#chatMsgs").appendChild(el);
+      el.querySelector(".pr-chip").onclick = () => openPrPanel(prs);
+      scrollChat();
+    } catch (e) {}
+  }
   // بطاقة ملخّص الإنجاز — تظهر بعد اكتمال العمل بدل كلمة «اكتملت» (كواجهة Claude Code)
   function completionSummaryHtml(blocks) {
     let added = 0, removed = 0, cmds = 0, reads = 0, commits = 0, failed = 0;
-    const files = [];
+    const files = [], shots = [];
     (blocks || []).forEach((b) => (b.ops || []).forEach((o) => {
       added += o.lines_added || 0; removed += o.lines_removed || 0;
       if (o.failed) failed++;
+      if (o.image_path && shots.indexOf(o.image_path) < 0) shots.push(o.image_path);
       const tn = o.tool_name;
       if (tn === "Write" || tn === "Edit" || tn === "MultiEdit") {
         const f = o.path || o.arg; if (f && files.indexOf(f) < 0) files.push(f);
@@ -841,11 +881,14 @@
     if (commits) parts.push(commits + " commit");
     const fileChips = files.slice(0, 6).map((f) =>
       '<span class="cs-file">📄 ' + escapeHtml(f.split("/").pop()) + "</span>").join("");
+    const shotImgs = shots.map((s) =>
+      '<img class="cs-shot" src="/api/shot?path=' + encodeURIComponent(s) + '" alt="لقطة شاشة"/>').join("");
     return '<div class="complete-card' + (failed ? " has-fail" : "") + '">' +
       '<div class="cs-head"><span class="cs-mark">' + (failed ? "⚠️" : "✅") + '</span>' +
       '<span class="cs-title">' + (failed ? "اكتمل مع تنبيهات" : "اكتمل العمل") + '</span>' +
       (parts.length ? '<span class="cs-stats">' + parts.join(" · ") + "</span>" : "") + "</div>" +
       (fileChips ? '<div class="cs-files">' + fileChips + (files.length > 6 ? '<span class="cs-more">+' + (files.length - 6) + "</span>" : "") + "</div>" : "") +
+      (shotImgs ? '<div class="cs-shots">' + shotImgs + "</div>" : "") +
       "</div>";
   }
   // يبني HTML لسطر Action Block ويُسجّل تفاصيله (للنقر → المستوى الثالث).
@@ -872,7 +915,7 @@
     Bash: "Ran", PythonRun: "Ran", DirectoryList: "Listed", Glob: "Searched", Grep: "Searched",
     GitCommit: "Committed", GitPush: "Pushed", GitClone: "Cloned", GitStatus: "Checked",
     TodoWrite: "Planned", WebFetch: "Fetched", WebSearch: "Searched", PipInstall: "Installed",
-    NotebookEdit: "Edited" };
+    NotebookEdit: "Edited", Screenshot: "Captured" };
   // أيقونات SVG خطّية عصرية (outline · currentColor) — لا إيموجي
   const AB_ICON = {
     edit: '<path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M13.5 6.5l3 3"/>',
@@ -881,13 +924,14 @@
     doc: '<path d="M6.5 2.5h7l4.5 4.5V21a.9.9 0 0 1-.9.9H6.5a.9.9 0 0 1-.9-.9V3.4a.9.9 0 0 1 .9-.9z"/><path d="M13 2.7V7h4.3"/><path d="M8.5 13h7M8.5 16.5h4.5"/>',
     folder: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+    shot: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><circle cx="12" cy="12.5" r="3.2"/><path d="M8.5 6l1.3-2h4.4l1.3 2"/>',
     git: '<circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="9" r="2.4"/><path d="M6 8.4v7.2M8.3 7.2A6 6 0 0 0 15.5 9.4M18 11.4V13a3 3 0 0 1-3 3H8.4"/>',
     plan: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
     tool: '<path d="M14.5 6.5a3.5 3.5 0 0 1-4.6 4.6L5 16l3 3 4.9-4.9a3.5 3.5 0 0 1 4.6-4.6l-2 2-2-2z"/>' };
   const AB_ICON_FOR = { Write: "doc", Edit: "edit", MultiEdit: "edit", Read: "read",
     Bash: "run", PythonRun: "run", DirectoryList: "folder", Glob: "search", Grep: "search",
     GitCommit: "git", GitPush: "git", GitClone: "git", GitStatus: "git", TodoWrite: "plan",
-    WebFetch: "read", WebSearch: "search", PipInstall: "doc" };
+    WebFetch: "read", WebSearch: "search", PipInstall: "doc", Screenshot: "shot" };
   function abSvg(tool) {
     const k = AB_ICON_FOR[tool] || "tool";
     return '<svg viewBox="0 0 24 24" class="adx-svg" fill="none" stroke="currentColor" ' +
@@ -914,11 +958,13 @@
   }
   // هل للعملية تفاصيل «ماذا فعل» (أمر/مخرجات/محتوى/فرق)؟
   function opHasDetail(op) {
-    return !!(op && (op.command || op.output || op.content || op.before || op.after));
+    return !!(op && (op.command || op.output || op.content || op.before || op.after || op.image_path));
   }
   // تحويل عملية SSE إلى كائن يفهمه renderOpDetail (المستوى الثالث المشترك)
   function opToDetailObj(op) {
     const tn = op.tool_name;
+    if (tn === "Screenshot")
+      return { type: "shot", image_path: op.image_path || "", target: op.target || op.arg || "" };
     if (tn === "Bash" || tn === "PythonRun")
       return { type: "run", command: op.command || op.arg || "", output: op.output || "" };
     if (tn === "Write")
@@ -1051,6 +1097,7 @@
         // بدل «اكتملت»: بطاقة ملخّص إنجاز (ملفات + أسطر + أوامر) كواجهة Claude Code
         chatAppend(completionSummaryHtml(turnBlocks));
         pendingBlocks = []; turnBlocks = [];
+        maybeAddPrChip();   // رقاقة «N · Pull requests» إن وُجدت PRs
       } else if (d.type === "action_block") {
         // ملخص جولة الأدوات (قابل للضغط → المستوى الثالث). يُتراكم للحفظ + الملخّص.
         const blk = { desc: d.detail || d.message, ops: d.ops || [],
@@ -1065,6 +1112,47 @@
     };
   }
   connectSSE();
+
+  // ── وضع الإذن: يسأل قبل الأدوات الحسّاسة (كواجهة Claude Code) ──
+  // نستطلع الطلب المعلّق أثناء العمل ونعرض حواراً «سماح/رفض». افتراضياً معطّل.
+  const PERM_LABEL = { Bash: "تنفيذ أمر (Bash)", PythonRun: "تشغيل بايثون",
+    Write: "إنشاء/كتابة ملف", Edit: "تعديل ملف", MultiEdit: "تعديل ملف",
+    GitPush: "رفع إلى GitHub", GitCommit: "حفظ commit", GitClone: "استنساخ مستودع" };
+  let _permSeen = null;
+  function closePermDialog() {
+    ["permDialog", "permBackdrop"].forEach((id) => { const e = document.getElementById(id); if (e) e.remove(); });
+  }
+  function showPermDialog(p) {
+    closePermDialog();
+    const bd = document.createElement("div"); bd.id = "permBackdrop"; bd.className = "perm-backdrop";
+    document.body.appendChild(bd);
+    const el = document.createElement("div"); el.id = "permDialog"; el.className = "perm-dialog";
+    const label = PERM_LABEL[p.name] || p.name;
+    el.innerHTML =
+      '<div class="perm-title">🔐 طلب إذن</div>' +
+      '<div class="perm-body">يريد الوكيل تنفيذ: <b>' + escapeHtml(label) + "</b>" +
+      (p.arg ? '<pre class="perm-arg">' + escapeHtml(p.arg) + "</pre>" : "") + "</div>" +
+      '<div class="perm-actions">' +
+        '<button class="perm-btn deny" data-d="deny">رفض</button>' +
+        '<button class="perm-btn once" data-d="allow_once">سماح مرّة</button>' +
+        '<button class="perm-btn always" data-d="allow_always">سماح دائماً</button>' +
+      "</div>";
+    document.body.appendChild(el);
+    el.querySelectorAll("[data-d]").forEach((b) => b.onclick = async () => {
+      try { await post("/api/permission", { id: p.id, decision: b.dataset.d }); } catch (e) {}
+      closePermDialog(); _permSeen = null;
+    });
+  }
+  async function pollPermission() {
+    if (!taskRunning) { if (_permSeen) { _permSeen = null; closePermDialog(); } return; }
+    try {
+      const r = await api("/api/permission/pending");
+      const p = r && r.pending;
+      if (p && p.id !== _permSeen) { _permSeen = p.id; showPermDialog(p); }
+      else if (!p && _permSeen) { _permSeen = null; closePermDialog(); }
+    } catch (e) {}
+  }
+  setInterval(pollPermission, 1200);
 
   // ── الملفات ──
   async function loadFiles() {
@@ -1090,8 +1178,16 @@
     $("#modelInput").value = s.WEAVER_MODEL || "";
     if ($("#baseUrlInput")) $("#baseUrlInput").value = s.WEAVER_BASE_URL || "";
     if ($("#maxTokensInput")) $("#maxTokensInput").value = s.WEAVER_MAX_TOKENS || "";
+    if ($("#askPermToggle")) $("#askPermToggle").checked =
+      String(s.WEAVER_ASK_PERMISSION || "0").toLowerCase() in { "1": 1, "true": 1, "yes": 1, "on": 1 };
     $("#keyInput").value = ""; $("#keyInput").placeholder = s.WEAVER_API_KEY || "WEAVER_API_KEY";
   }
+  $("#askPermToggle") && ($("#askPermToggle").onchange = async (e) => {
+    await post("/api/settings", { WEAVER_ASK_PERMISSION: e.target.checked ? "1" : "0" });
+    $("#settingsMsg").textContent = e.target.checked
+      ? "🔐 وضع الإذن مُفعّل — سيسألك قبل الأدوات الحسّاسة."
+      : "▶️ وضع الإذن معطّل — تنفيذ تلقائي.";
+  });
   $("#keyToggle").onclick = () => { const k = $("#keyInput"); k.type = k.type === "password" ? "text" : "password"; };
   $("#providerSel").onchange = async (e) => { if (!e.target.value) return; await post("/api/command", { command: "/provider " + e.target.value }); loadSettings(); refreshStatus(); };
   $("#saveSettings").onclick = async () => {

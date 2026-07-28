@@ -5,6 +5,7 @@ registry.py — سجل الأدوات المدمجة في WeaverCode
 """
 
 import os
+import shutil
 import subprocess
 import glob as _glob
 import asyncio
@@ -244,6 +245,24 @@ class ToolRegistry:
             },
             fn=self._bash,
             requires_permission=True,
+        ))
+
+        self._add(Tool(
+            name="Screenshot",
+            description=("التقاط لقطة شاشة لصفحة ويب أو ملف HTML محلي (PNG). "
+                         "استخدمها للمهام المرئية المهمة فقط (بناء واجهة/صفحة) "
+                         "لتقديم دليل بصري لما أنجزت — لا لكل مهمة. "
+                         "target: رابط http(s) أو مسار ملف .html محلي."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "رابط أو مسار ملف HTML"},
+                    "width": {"type": "integer", "default": 1280},
+                    "height": {"type": "integer", "default": 900},
+                },
+                "required": ["target"],
+            },
+            fn=self._screenshot,
         ))
 
         self._add(Tool(
@@ -1359,6 +1378,71 @@ class ToolRegistry:
             if re.search(pat, command):
                 return pat
         return None
+
+    def _find_chromium(self) -> Optional[str]:
+        """يبحث عن متصفّح Chromium متاح (بلا Playwright) — لأداة Screenshot."""
+        cand = [os.environ.get("WEAVER_CHROMIUM", "")]
+        pw = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")
+        if pw:
+            cand += _glob.glob(os.path.join(pw, "chromium*/chrome-linux/chrome"))
+            cand += _glob.glob(os.path.join(pw, "chromium*/chrome-linux/headless_shell"))
+        for name in ("chromium", "chromium-browser", "google-chrome", "chrome"):
+            w = shutil.which(name)
+            if w:
+                cand.append(w)
+        # مسار Termux الشائع
+        cand.append("/data/data/com.termux/files/usr/bin/chromium")
+        for c in cand:
+            if c and os.path.exists(c):
+                return c
+        return None
+
+    def _screenshot(self, target: str, width: int = 1280, height: int = 900) -> str:
+        """لقطة شاشة (PNG) لصفحة/ملف HTML عبر Chromium headless (بلا مكتبات).
+
+        عند غياب المتصفّح: رسالة واضحة (لا كسر). يحفظ في مجلد العمل ليظهر ويُعرَض.
+        """
+        chrome = self._find_chromium()
+        if not chrome:
+            return ("📷 تعذّرت لقطة الشاشة: لا يوجد متصفّح Chromium على هذا الجهاز.\n"
+                    "   للتفعيل على Termux: pkg install chromium (أو حدّد WEAVER_CHROMIUM=<مسار>).")
+        # هدف: رابط http(s) أو ملف محلي → file://
+        t = (target or "").strip()
+        if not (t.startswith("http://") or t.startswith("https://") or t.startswith("file://")):
+            p = Path(t)
+            if not p.is_absolute():
+                p = Path(self.work_dir) / t
+            if not p.exists():
+                return f"📷 تعذّرت لقطة الشاشة: الهدف غير موجود: {t}"
+            t = "file://" + str(p.resolve())
+        shots = Path(self.work_dir) / ".weaver_shots"
+        shots.mkdir(parents=True, exist_ok=True)
+        self._bg_counter += 1
+        out = shots / f"shot_{self._bg_counter}.png"
+        try:
+            r = subprocess.run(
+                [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
+                 "--hide-scrollbars", f"--window-size={int(width)},{int(height)}",
+                 f"--screenshot={out}", t],
+                capture_output=True, text=True, timeout=60, cwd=self.work_dir)
+            if not out.exists() or out.stat().st_size == 0:
+                # بعض النسخ تحتاج --headless القديمة
+                subprocess.run(
+                    [chrome, "--headless", "--disable-gpu", "--no-sandbox",
+                     "--hide-scrollbars", f"--window-size={int(width)},{int(height)}",
+                     f"--screenshot={out}", t],
+                    capture_output=True, text=True, timeout=60, cwd=self.work_dir)
+            if out.exists() and out.stat().st_size > 0:
+                rel = str(out.relative_to(self.work_dir))
+                if rel not in self._created_files:
+                    self._created_files.append(rel)
+                return f"✅ التقطت لقطة الشاشة: {rel} ({out.stat().st_size // 1024}KB)"
+            err = (r.stderr or r.stdout or "").strip()[:300]
+            return f"📷 تعذّرت لقطة الشاشة (لم يُنشأ ملف). {err}"
+        except subprocess.TimeoutExpired:
+            return "📷 تعذّرت لقطة الشاشة: انتهت المهلة (60ث)."
+        except Exception as e:
+            return f"📷 تعذّرت لقطة الشاشة: {e}"
 
     def _bash(self, command: str, timeout: int = 120,
               work_dir: Optional[str] = None,

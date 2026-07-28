@@ -123,7 +123,22 @@ class WeaverDaemon:
             memory=memory,
             system_prompt=get_system_prompt(mode),
         )
-        if self.auto_approve:
+        # ── وضع الإذن (اختياري): يسأل قبل الأدوات الحسّاسة كواجهة Claude Code ──
+        # افتراضياً معطّل (WEAVER_ASK_PERMISSION=0) فيبقى التنفيذ التلقائي كما هو،
+        # فلا يتغيّر شيء. عند تفعيله: نعطّل auto_approve ونمرّر on_permission يسأل الويب.
+        _ask_mode = os.environ.get("WEAVER_ASK_PERMISSION", "0").strip().lower() in (
+            "1", "true", "yes", "on")
+        _on_permission = None
+        if _ask_mode:
+            engine.auto_approve = False
+            def _on_permission(name, args):   # noqa: E306 (يُستدعى من خيط المحرّك)
+                from background import permissions as _perm
+                arg = ""
+                if isinstance(args, dict):
+                    arg = str(args.get("path") or args.get("command")
+                              or args.get("url") or args.get("query") or "")
+                return _perm.request(name, arg)
+        elif self.auto_approve:
             engine.auto_approve = True
 
         loop = asyncio.get_event_loop()
@@ -189,7 +204,8 @@ class WeaverDaemon:
         _persist("")   # حفظ فوري لرسالة المستخدم قبل بدء التنفيذ
 
         try:
-            result = await engine.run(prompt, history=hist_msgs, on_tool=on_tool)
+            result = await engine.run(prompt, history=hist_msgs, on_tool=on_tool,
+                                       on_permission=_on_permission)
         except Exception as exc:
             # عطل غير متوقّع: احفظ ما لدينا (رسالة المستخدم على الأقل) ثم أبلغ
             _persist("")
