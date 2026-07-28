@@ -376,6 +376,8 @@
     const b = $("#chatSend");
     if (b) { b.classList.toggle("running", on); b.disabled = false; b.title = on ? "توقيف" : "إرسال"; }
     const spin = $("#effortSpin"); if (spin) spin.style.display = on ? "inline-block" : "none";
+    const inp = $("#chatInput");
+    if (inp) inp.placeholder = on ? "أضف ملاحظة للطابور… (Enter)" : "أضف ملاحظة أو تابع…";
     if (!on) updateSendEnabled();
   }
   function updateSendEnabled() {
@@ -393,22 +395,26 @@
   }
   $("#chatSend").onclick = () => { if (taskRunning) stopTask(); else sendFollow(); };
   $("#chatInput").addEventListener("input", () => { autoGrow($("#chatInput")); updateSendEnabled(); });
+  // Enter يُرسل دائماً — أثناء العمل تُدرَج الرسالة في الطابور (Queue feedback)،
+  // وزر التوقيف ■ يوقف المهمة الحالية (كواجهة Claude Code).
   $("#chatInput").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!taskRunning) sendFollow(); }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendFollow(); }
   });
   async function sendFollow() {
     const v = $("#chatInput").value.trim();
     const files = chatAttached.filter((a) => a.path);
     if (!v && !files.length) return;
+    const queued = taskRunning;   // يعمل الآن → هذه ملاحظة تُدرَج للطابور
     let prompt = v;
     if (files.length) prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" + files.map((a) => "- " + a.path).join("\n");
-    chatAppend(bubble("user", attachCardsHtml(files) +
+    chatAppend(bubble("user",
+      (queued ? '<div class="who">⏳ مُدرَج في الطابور</div>' : "") +
+      attachCardsHtml(files) +
       (v ? '<div class="msg-txt">' + escapeHtml(v) + "</div>" : "")));
     $("#chatInput").value = ""; autoGrow($("#chatInput"));
     if (!currentSessionId) currentSessionId = uuid();
     rememberSession(currentSessionId);
-    setRunning(true);
-    pendingBlocks = [];
+    if (!queued) { setRunning(true); pendingBlocks = []; }
     // أرسل سياق المحادثة السابق ليفهم المتابعة (بنفس معرّف المحادثة)
     await post("/api/task", { prompt: prompt, mode: "main", history: chatHistory.slice(), session_id: currentSessionId });
     chatHistory.push({ role: "user", content: prompt });
@@ -820,9 +826,12 @@
     const diff = hasDiff
       ? '<span class="ab-removed">' + removed + '-</span> <span class="ab-added">+' + added + '</span>&nbsp;&nbsp;'
       : "";
+    const failed = ops.some((o) => o.failed);
     const idx = actionBlocks.push({ desc: desc, ops: ops, added: added, removed: removed }) - 1;
-    const clickable = ops.length ? ' clickable" data-ab="' + idx : '"';
-    return '<div class="action-block' + clickable + '"><span class="ab-arrow">‹</span> ' + diff +
+    const cls = "action-block" + (failed ? " failed" : "") + (ops.length ? " clickable" : "");
+    const attr = ops.length ? ' data-ab="' + idx + '"' : "";
+    return '<div class="' + cls + '"' + attr + '>' +
+      (failed ? '<span class="ab-warn">⚠️</span> ' : '<span class="ab-arrow">‹</span> ') + diff +
       '<span class="ab-desc">' + escapeHtml(desc) + '</span>' +
       (ops.length ? '<span class="ab-more">⌄</span>' : '') + "</div>";
   }
@@ -903,9 +912,11 @@
         ? '<span class="adx-rm">' + (op.lines_removed || 0) + '-</span> <span class="adx-add">+' + (op.lines_added || 0) + '</span>'
         : '<span class="adx-none">──</span>';
       const can = opHasDetail(op);
-      return '<div class="adx-row' + (can ? ' has-detail" data-op="' + i : '') + '">' +
-        '<span class="adx-ic">' + abSvg(op.tool_name) + '</span>' +
-        '<span class="adx-act">' + escapeHtml(label) + '</span>' +
+      const rowCls = "adx-row" + (op.failed ? " failed" : "") + (can ? " has-detail" : "");
+      const attr = can ? ' data-op="' + i + '"' : "";
+      return '<div class="' + rowCls + '"' + attr + '>' +
+        '<span class="adx-ic">' + (op.failed ? "⚠️" : abSvg(op.tool_name)) + '</span>' +
+        '<span class="adx-act">' + escapeHtml(label) + (op.failed ? " · فشل" : "") + '</span>' +
         '<span class="adx-name" title="' + escapeHtml(arg) + '">' + name + '</span>' +
         '<span class="adx-diff">' + diff + (can ? ' <span class="adx-caret">›</span>' : '') + '</span></div>';
     }).join("");
@@ -937,6 +948,17 @@
 
   // مؤشر الحالة الحيّ يظهر داخل مجرى المحادثة أسفل آخر رسالة (كما في Claude Code)
   // — لا مثبّتاً في الأسفل قرب لوحة الكتابة.
+  // كلمات حالة متبدّلة (بأسلوب Claude Code) — مع إبقاء أيقونة WeaverCode المتحركة
+  const LIVE_ROTATE = ["يفكّر", "يحلّل", "ينسج الخيوط", "يخطّط", "يتأمّل",
+    "يرتّب الأفكار", "يبتكر", "يدقّق", "يعالج", "يستكشف", "يوصّل الأطراف"];
+  let _liveTimer = null, _liveIdx = 0;
+  function _liveWordText(t) {
+    const w = document.querySelector("#inlineLive .live-word");
+    if (w) w.textContent = t;
+    const dl = $("#dashLive");
+    if (dl && t) dl.innerHTML = '<img class="live-icon" src="' + LIVE_GIF + '"/> ' + escapeHtml(t) + "…";
+  }
+  function _stopRotate() { if (_liveTimer) { clearInterval(_liveTimer); _liveTimer = null; } }
   function setLive(word) {
     const msgs = $("#chatMsgs");
     let row = $("#inlineLive");
@@ -944,23 +966,27 @@
       if (!row && msgs) {
         row = document.createElement("div");
         row.id = "inlineLive"; row.className = "inline-live";
+        row.innerHTML = '<img class="live-icon" src="' + LIVE_GIF + '"/>' +
+          '<span class="live-word"></span><span class="live-dots"></span>';
         msgs.appendChild(row);
       }
-      if (row) {
-        msgs.appendChild(row); // أبقِه دائماً في الأسفل
-        row.innerHTML = '<img class="live-icon" src="' + LIVE_GIF + '"/>' +
-          '<span class="live-word">' + escapeHtml(word) + '</span>' +
-          '<span class="live-dots"></span>';
+      if (row) msgs.appendChild(row);   // أبقِه دائماً في الأسفل
+      _liveWordText(word);
+      // ابدأ تدوير الكلمات (كل ~2.6ث) إن لم يكن يعمل
+      if (!_liveTimer) {
+        _liveIdx = 0;
+        _liveTimer = setInterval(() => {
+          _liveIdx = (_liveIdx + 1) % LIVE_ROTATE.length;
+          _liveWordText(LIVE_ROTATE[_liveIdx]);
+        }, 2600);
       }
       scrollChat();
-    } else if (row) {
-      row.remove();
+    } else {
+      _stopRotate();
+      if (row) row.remove();
+      const dl = $("#dashLive");
+      if (dl) dl.innerHTML = '<img class="live-icon" src="' + IDLE_PNG + '"/> <span class="muted small">لا مهمة قيد التنفيذ.</span>';
     }
-    // مرآة الحالة في اللوحة (إن كانت مفتوحة)
-    const dl = $("#dashLive");
-    if (dl) dl.innerHTML = word
-      ? '<img class="live-icon" src="' + LIVE_GIF + '"/> ' + escapeHtml(word) + "…"
-      : '<img class="live-icon" src="' + IDLE_PNG + '"/> <span class="muted small">لا مهمة قيد التنفيذ.</span>';
   }
   // يُدرِج محتوى المحادثة قبل مؤشر الحالة الحيّ ليبقى المؤشر دائماً في الأسفل.
   function chatAppend(html) {

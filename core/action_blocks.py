@@ -319,6 +319,19 @@ def _compute_diff(tool_name: str, args: dict,
     return 0, 0
 
 
+def _op_failed(tool_name: str, result: str) -> bool:
+    """هل فشلت العملية؟ (لعرضها بالأحمر + ⚠️ كواجهة Claude Code)."""
+    r = (result or "").lstrip()
+    if not r:
+        return False
+    if tool_name in ("Bash", "PythonRun"):
+        return ("[EXIT CODE]:" in r or r.startswith("🛑")
+                or r.startswith("خطأ") or r.startswith("انتهت المهلة"))
+    # بقية الأدوات تُرجع نصّ خطأ يبدأ بعلامة واضحة
+    return (r.startswith("❌") or r.startswith("🛑") or r.startswith("خطأ")
+            or r.startswith("تعذّر") or r.startswith("لم يُوجد") or r.startswith("Error"))
+
+
 def serialize_ops(block, cap: int = 8000) -> list:
     """يحوّل عمليات ActionBlock إلى قوائم قابلة للحفظ/النقل (SSE + الجلسة).
 
@@ -335,6 +348,7 @@ def serialize_ops(block, cap: int = 8000) -> list:
             "arg": getattr(op, "primary_arg", "") or "",
             "lines_added": getattr(op, "lines_added", 0) or 0,
             "lines_removed": getattr(op, "lines_removed", 0) or 0,
+            "failed": _op_failed(tn, res),
         }
         if tn in ("Bash", "PythonRun"):
             d["command"] = str(a.get("command") or a.get("code") or "")[:cap]
