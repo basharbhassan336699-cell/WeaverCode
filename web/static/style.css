@@ -545,23 +545,9 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 .perm-btn.always { background: var(--text); color: var(--bg); border: none; }
 .perm-btn:active { opacity: .85; }
 
-/* رقاقة «N · Pull requests» + لوحتها (كواجهة Claude Code) */
-.pr-chip-row { align-self: center; margin: 2px 0 4px; }
-.pr-chip { background: var(--card); border: 1px solid var(--line); color: var(--text);
-  font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 12px; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 8px; }
-.pr-chip:active { background: var(--card-2); }
-.pr-chip .pr-branch { color: var(--muted); }
-.pr-panel { position: fixed; z-index: 10001; inset-inline: 0; bottom: 0; margin-inline: auto;
-  width: min(100%, 560px); max-height: 82vh; background: var(--bg); border: 1px solid var(--line);
-  border-radius: 18px 18px 0 0; padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
-  box-shadow: 0 -8px 34px rgba(0,0,0,.5); overflow-y: auto; animation: adx-up .2s ease-out; }
-.pr-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
-  position: sticky; top: 0; background: var(--bg); padding-bottom: 6px; }
-.pr-h-title { color: var(--text); font-weight: 700; font-size: 16px; }
-.pr-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer;
-  width: 30px; height: 30px; border-radius: 8px; }
-.pr-list { display: flex; flex-direction: column; gap: 10px; }
+/* (أُزيلت رقاقة «N · commits/Pull requests» ولوحتها — كانت سجل Git لا نتيجة
+   حقيقية. البديل: بطاقة ملخّص الإنجاز + لقطة شاشة للناتج. سجل Git في شريط
+   «نشاط Git/GitHub» باللوحة.) */
 
 /* ── popup تفاصيل Action Block (بأيقونات عصرية كواجهة Claude Code) ── */
 .adx-pop { position: fixed; z-index: 9999; inset-inline: 0; margin-inline: auto;

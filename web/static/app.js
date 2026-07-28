@@ -162,7 +162,6 @@
       if (m.blocks && m.blocks.length) html += completionSummaryHtml(m.blocks);
       return html;
     }).join("") || bubble("agent", "(محادثة فارغة)");
-    maybeAddPrChip();   // رقاقة PRs عند فتح المحادثة أيضاً
     $("#chatAttachList").innerHTML = ""; chatAttached = [];
     scrollChat();
   }
@@ -825,52 +824,11 @@
   let actionBlocks = [];
   let pendingBlocks = [];   // كتل العمليات للدور الحالي (تُرفَق برد المساعد للحفظ)
   let turnBlocks = [];      // كتل الدور الحالي (لبطاقة ملخّص الإنجاز عند الاكتمال)
-  // ── رقاقة «N · Pull requests» بعد الاكتمال + لوحة عرضها (كواجهة Claude Code) ──
-  function closePrPanel() {
-    ["prPanel", "prBackdrop"].forEach((id) => { const e = document.getElementById(id); if (e) e.remove(); });
-  }
-  function openPrPanel(items, title) {
-    closePrPanel();
-    const bd = document.createElement("div"); bd.id = "prBackdrop"; bd.className = "adx-backdrop";
-    bd.onclick = closePrPanel; document.body.appendChild(bd);
-    const el = document.createElement("div"); el.id = "prPanel"; el.className = "pr-panel";
-    el.innerHTML = '<div class="pr-head"><span class="pr-h-title">' + escapeHtml(title || "Pull requests") + "</span>" +
-      '<button class="pr-close" aria-label="إغلاق">✕</button></div>' +
-      '<div class="pr-list">' + items.map(gitCard).join("") + "</div>";
-    document.body.appendChild(el);
-    el.querySelector(".pr-close").onclick = closePrPanel;
-    el.querySelectorAll("[data-url]").forEach((c) => c.onclick = () => window.open(c.dataset.url, "_blank"));
-  }
-  async function maybeAddPrChip() {
-    try {
-      const r = await api("/api/git-activity?limit=100");
-      const acts = r.activity || [];
-      // العمل الحديث في WeaverCode يذهب إلى main كـ commits (لا PRs)، لذا نعرض
-      // رقاقة تعكس ما أُنجِز فعلاً: الطلبات المفتوحة إن وُجدت، وإلا آخر commits.
-      // (سابقاً كنا نُظهر PRs مدموجة قديمة «وهمية»، ثم أخفيناها كلياً — كلاهما خطأ.)
-      const openPrs = acts.filter((a) => a.kind === "pr" && (a.state === "open" || a.pending));
-      const commits = acts.filter((a) => a.kind === "commit").slice(0, 10);
-      const old = document.querySelector(".pr-chip-row"); if (old) old.remove();
-      let items, label, title;
-      if (openPrs.length) {
-        items = openPrs; title = "Pull requests";
-        label = openPrs.length + " · Pull requests";
-      } else if (commits.length) {
-        items = commits; title = "آخر النشاط";
-        label = commits.length + " · commits";
-      } else {
-        return;   // لا نشاط بعد → لا رقاقة
-      }
-      const el = document.createElement("div"); el.className = "pr-chip-row";
-      el.innerHTML = '<button class="pr-chip"><span class="pr-branch">⑂</span> ' +
-        escapeHtml(label) + "</button>";
-      const live = $("#inlineLive");
-      if (live) live.insertAdjacentElement("beforebegin", el);
-      else $("#chatMsgs").appendChild(el);
-      el.querySelector(".pr-chip").onclick = () => openPrPanel(items, title);
-      scrollChat();
-    } catch (e) {}
-  }
+  // ملاحظة: أُزيلت رقاقة «N · commits/Pull requests» ولوحتها بعد الاكتمال.
+  // كانت مجرد سجل Git (بيانات) لا «نتيجة حقيقية» لما نُفّذ — فأشار المستخدم إليها
+  // كالطلبات الوهمية القديمة. البديل الصادق (كواجهة Claude Code): بطاقة ملخّص
+  // الإنجاز + لقطة شاشة حقيقية للناتج. وسجل Git يبقى في شريط «نشاط Git/GitHub»
+  // داخل اللوحة (gitCard/loadGitActivity) — مكانه الصحيح، لا رقاقة بعد المحادثة.
   // بطاقة ملخّص الإنجاز — تظهر بعد اكتمال العمل بدل كلمة «اكتملت» (كواجهة Claude Code)
   function completionSummaryHtml(blocks) {
     let added = 0, removed = 0, cmds = 0, reads = 0, commits = 0, failed = 0;
@@ -1111,7 +1069,6 @@
         // بدل «اكتملت»: بطاقة ملخّص إنجاز (ملفات + أسطر + أوامر) كواجهة Claude Code
         chatAppend(completionSummaryHtml(turnBlocks));
         pendingBlocks = []; turnBlocks = [];
-        maybeAddPrChip();   // رقاقة «N · Pull requests» إن وُجدت PRs
       } else if (d.type === "action_block") {
         // ملخص جولة الأدوات (قابل للضغط → المستوى الثالث). يُتراكم للحفظ + الملخّص.
         const blk = { desc: d.detail || d.message, ops: d.ops || [],
