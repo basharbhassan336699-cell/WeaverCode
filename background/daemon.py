@@ -165,14 +165,18 @@ class WeaverDaemon:
         # ── حفظ الجلسة (تدريجي): يُستدعى مبكّراً + عند الخطأ + عند الانتهاء ──────
         # يمنع ضياع المحادثة عند 404/مهلة/إغلاق التطبيق أثناء العمل: رسالة المستخدم
         # تُحفَظ فوراً قبل التنفيذ، ثم تُحدَّث بالردّ لاحقاً.
-        def _persist(resp_text: str = "") -> None:
+        def _persist(resp_text: str = "", blocks=None) -> None:
             if not session_id:
                 return
             try:
+                # نحافظ على كتل العمليات (blocks) من الأدوار السابقة إن أرسلها الويب
                 msgs = list(history or [])
                 msgs.append({"role": "user", "content": prompt})
                 if resp_text:
-                    msgs.append({"role": "assistant", "content": resp_text})
+                    a_msg = {"role": "assistant", "content": resp_text}
+                    if blocks:
+                        a_msg["blocks"] = blocks   # سجل العمليات (لاسترجاعه بعد التحديث)
+                    msgs.append(a_msg)
                 first_user = next((m.get("content", "") for m in msgs
                                    if m.get("role") == "user"), prompt)
                 name = (first_user or prompt)[:50]
@@ -221,8 +225,14 @@ class WeaverDaemon:
             response_text = text
             await event_bus.emit(WeaverEvent(EventType.RESPONSE, text[:200], text))
 
-        # ── حفظ المحادثة كاملةً (السجل + رسالة المستخدم + الرد) في صفّ واحد ────
-        _persist(response_text)
+        # ── حفظ المحادثة كاملةً + سجل العمليات (blocks) لاسترجاعه بعد التحديث ──
+        _saved_blocks = None
+        try:
+            from core.action_blocks import serialize_block
+            _saved_blocks = [serialize_block(b) for b in (result.blocks or [])]
+        except Exception:
+            _saved_blocks = None
+        _persist(response_text, _saved_blocks)
 
         # ── تذكير التحقق الذاتي: فقط إن كُتبت ملفات ولم يذكر النموذج تحقّقاً ─────
         # (لا نُزعج المحادثات العادية بلا كتابة كود — تفادياً لتذكير بعد «هلا».)

@@ -146,11 +146,20 @@
       const r = await api("/api/session?id=" + encodeURIComponent(meta.id));
       msgs = r.messages || [];
     } catch (e) {}
-    chatHistory = msgs.map((m) => ({ role: m.role, content: m.content || "" }));
-    $("#chatMsgs").innerHTML = msgs.map((m) =>
-      bubble(m.role === "user" ? "user" : "agent",
-             m.role === "user" ? escapeHtml(m.content || "") : md(m.content || ""))
-    ).join("") || bubble("agent", "(محادثة فارغة)");
+    // نحافظ على كتل العمليات (blocks) في السجل لإعادة إرسالها وحفظها في الأدوار التالية
+    chatHistory = msgs.map((m) => {
+      const e = { role: m.role, content: m.content || "" };
+      if (m.blocks) e.blocks = m.blocks;
+      return e;
+    });
+    pendingBlocks = [];
+    $("#chatMsgs").innerHTML = msgs.map((m) => {
+      if (m.role === "user") return bubble("user", escapeHtml(m.content || ""));
+      // المساعد: اعرض سجل العمليات (إن حُفظ) قبل نصّ الرد — كما كان لحظياً
+      let html = "";
+      (m.blocks || []).forEach((b) => { html += actionBlockHtml(b); });
+      return html + bubble("agent", md(m.content || ""));
+    }).join("") || bubble("agent", "(محادثة فارغة)");
     $("#chatAttachList").innerHTML = ""; chatAttached = [];
     scrollChat();
   }
@@ -347,6 +356,7 @@
     currentSessionId = uuid(); // معرّف جديد ثابت لهذه المحادثة
     rememberSession(currentSessionId);
     setRunning(true);
+    pendingBlocks = [];
     await post("/api/task", { prompt: prompt, mode: $("#buildMode").value, history: [], session_id: currentSessionId, repo: (activeRepo && activeRepo.full_name) || "" });
     chatHistory.push({ role: "user", content: prompt });
     $("#chatTitle").textContent = (v || "ملفات مرفقة").slice(0, 30);
@@ -398,6 +408,7 @@
     if (!currentSessionId) currentSessionId = uuid();
     rememberSession(currentSessionId);
     setRunning(true);
+    pendingBlocks = [];
     // أرسل سياق المحادثة السابق ليفهم المتابعة (بنفس معرّف المحادثة)
     await post("/api/task", { prompt: prompt, mode: "main", history: chatHistory.slice(), session_id: currentSessionId });
     chatHistory.push({ role: "user", content: prompt });
@@ -797,6 +808,24 @@
 
   // ── تفاصيل Action Block: popup بأيقونات SVG عصرية (كواجهة Claude Code) ──
   let actionBlocks = [];
+  let pendingBlocks = [];   // كتل العمليات للدور الحالي (تُرفَق برد المساعد للحفظ)
+  // يبني HTML لسطر Action Block ويُسجّل تفاصيله (للنقر → المستوى الثالث).
+  // يقبل شكلَي البيانات: SSE (detail/diff_added) والمحفوظ (desc/added).
+  function actionBlockHtml(b) {
+    const desc = b.desc || b.detail || b.message || "";
+    const added = (b.added != null ? b.added : b.diff_added) || 0;
+    const removed = (b.removed != null ? b.removed : b.diff_removed) || 0;
+    const ops = b.ops || [];
+    const hasDiff = removed > 0 || added > 0;
+    const diff = hasDiff
+      ? '<span class="ab-removed">' + removed + '-</span> <span class="ab-added">+' + added + '</span>&nbsp;&nbsp;'
+      : "";
+    const idx = actionBlocks.push({ desc: desc, ops: ops, added: added, removed: removed }) - 1;
+    const clickable = ops.length ? ' clickable" data-ab="' + idx : '"';
+    return '<div class="action-block' + clickable + '"><span class="ab-arrow">‹</span> ' + diff +
+      '<span class="ab-desc">' + escapeHtml(desc) + '</span>' +
+      (ops.length ? '<span class="ab-more">⌄</span>' : '') + "</div>";
+  }
   const AB_ACTION = { Write: "Created", Edit: "Edited", MultiEdit: "Edited", Read: "Read",
     Bash: "Ran", PythonRun: "Ran", DirectoryList: "Listed", Glob: "Searched", Grep: "Searched",
     GitCommit: "Committed", GitPush: "Pushed", GitClone: "Cloned", GitStatus: "Checked",
@@ -955,25 +984,18 @@
       if (d.type === "response") {
         const txt = d.detail || d.message;
         chatAppend(bubble("agent", md(txt)));
-        chatHistory.push({ role: "assistant", content: txt });
+        // أرفق كتل العمليات المتراكمة بردّ المساعد ليُحفَظ ويُسترجَع بعد التحديث
+        const entry = { role: "assistant", content: txt };
+        if (pendingBlocks.length) { entry.blocks = pendingBlocks.slice(); pendingBlocks = []; }
+        chatHistory.push(entry);
       } else if (d.type === "done") {
         chatAppend('<div class="bubble event">✅ اكتملت</div>');
+        pendingBlocks = [];
       } else if (d.type === "action_block") {
-        // ملخص جولة الأدوات بصيغة Claude Code:  ‹ 2- +11  edited a file, read a file
-        // قابل للضغط → popup تفصيلي بكل عملية (بأيقونات عصرية).
-        const hasDiff = (d.diff_removed || 0) > 0 || (d.diff_added || 0) > 0;
-        const diff = hasDiff
-          ? '<span class="ab-removed">' + (d.diff_removed || 0) + '-</span> '
-            + '<span class="ab-added">+' + (d.diff_added || 0) + '</span>&nbsp;&nbsp;'
-          : "";
-        const idx = actionBlocks.push({
-          desc: d.detail || d.message, ops: d.ops || [],
-          added: d.diff_added || 0, removed: d.diff_removed || 0,
-        }) - 1;
-        const clickable = (d.ops && d.ops.length) ? ' clickable" data-ab="' + idx + '"' : '"';
-        chatAppend('<div class="action-block' + clickable + '><span class="ab-arrow">‹</span> ' + diff +
-          '<span class="ab-desc">' + escapeHtml(d.detail || d.message) + '</span>' +
-          ((d.ops && d.ops.length) ? '<span class="ab-more">⌄</span>' : '') + '</div>');
+        // ملخص جولة الأدوات (قابل للضغط → المستوى الثالث). يُتراكم للحفظ أيضاً.
+        pendingBlocks.push({ desc: d.detail || d.message, ops: d.ops || [],
+          added: d.diff_added || 0, removed: d.diff_removed || 0 });
+        chatAppend(actionBlockHtml(d));
       } else if (d.type !== "status") {
         const ic = EV_ICON[d.type] || "•";
         chatAppend('<div class="bubble event">' + ic + " " + escapeHtml(d.message) + (d.detail ? " · " + escapeHtml(d.detail.slice(0, 50)) : "") + "</div>");

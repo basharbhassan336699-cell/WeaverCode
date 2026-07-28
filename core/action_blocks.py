@@ -317,3 +317,52 @@ def _compute_diff(tool_name: str, args: dict,
         return total_r, total_a
 
     return 0, 0
+
+
+def serialize_ops(block, cap: int = 8000) -> list:
+    """يحوّل عمليات ActionBlock إلى قوائم قابلة للحفظ/النقل (SSE + الجلسة).
+
+    يضمّن تفاصيل «ماذا فعل»: الأمر/المخرجات (Bash)، المحتوى (Write)، الفرق (Edit)،
+    محتوى القراءة (Read) — بحدّ آمن لكل حقل. مصدر واحد موحّد لتفادي التكرار.
+    """
+    out = []
+    for op in getattr(block, "ops", []):
+        tn = getattr(op, "tool_name", "")
+        a = getattr(op, "args", {}) or {}
+        res = str(getattr(op, "result", "") or "")
+        d = {
+            "tool_name": tn,
+            "arg": getattr(op, "primary_arg", "") or "",
+            "lines_added": getattr(op, "lines_added", 0) or 0,
+            "lines_removed": getattr(op, "lines_removed", 0) or 0,
+        }
+        if tn in ("Bash", "PythonRun"):
+            d["command"] = str(a.get("command") or a.get("code") or "")[:cap]
+            d["output"] = res[:cap]
+        elif tn == "Write":
+            d["path"] = str(a.get("path", "") or "")
+            d["content"] = str(a.get("content", "") or "")[:cap]
+        elif tn == "Edit":
+            d["path"] = str(a.get("path", "") or "")
+            d["before"] = str(a.get("old_string", "") or "")[:cap]
+            d["after"] = str(a.get("new_string", "") or "")[:cap]
+        elif tn == "MultiEdit":
+            d["path"] = str(a.get("path", "") or "")
+            _edits = a.get("edits") or []
+            d["before"] = "\n".join(str(e.get("old_string", "")) for e in _edits)[:cap]
+            d["after"] = "\n".join(str(e.get("new_string", "")) for e in _edits)[:cap]
+        elif tn in ("Read", "Glob", "Grep", "DirectoryList"):
+            d["path"] = str(a.get("path") or getattr(op, "primary_arg", "") or "")
+            d["content"] = res[:cap]
+        out.append(d)
+    return out
+
+
+def serialize_block(block, cap: int = 8000) -> dict:
+    """يحوّل ActionBlock كاملاً إلى dict قابل للحفظ في الجلسة (للاسترجاع لاحقاً)."""
+    return {
+        "desc": block._build_description(),
+        "added": block.lines_added,
+        "removed": block.lines_removed,
+        "ops": serialize_ops(block, cap),
+    }
