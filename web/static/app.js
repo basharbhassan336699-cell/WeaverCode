@@ -162,7 +162,14 @@
       if (m.blocks && m.blocks.length) html += completionSummaryHtml(m.blocks);
       return html;
     }).join("") || bubble("agent", "(محادثة فارغة)");
-    maybeAddPrChip();   // رقاقة PRs عند فتح المحادثة أيضاً
+    // رقاقة «آخر النشاط» لهذه المحادثة: كتل آخر رسالة مساعد فيها عمليات فعلية
+    let _lastBlocks = null;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "assistant" && msgs[i].blocks && msgs[i].blocks.length) {
+        _lastBlocks = msgs[i].blocks; break;
+      }
+    }
+    maybeAddPrChip(_lastBlocks);
     $("#chatAttachList").innerHTML = ""; chatAttached = [];
     scrollChat();
   }
@@ -825,49 +832,71 @@
   let actionBlocks = [];
   let pendingBlocks = [];   // كتل العمليات للدور الحالي (تُرفَق برد المساعد للحفظ)
   let turnBlocks = [];      // كتل الدور الحالي (لبطاقة ملخّص الإنجاز عند الاكتمال)
-  // ── رقاقة «N · Pull requests» بعد الاكتمال + لوحة عرضها (كواجهة Claude Code) ──
+  // ── رقاقة «آخر النشاط» — تعكس عمليات آخر رسالة في «هذه المحادثة» بالذات ──────
+  // كانت تقرأ /api/git-activity (سجل المستودع النشط) فتعرض النشاط نفسه في كل
+  // محادثة بلا علاقة بما نُفِّذ هنا. الآن تُشتَقّ من كتل العمليات الفعلية لآخر رسالة
+  // في هذه المحادثة — فتختلف بحقٍّ من محادثة لأخرى وتقرأ «النتيجة الفعلية للرسالة».
   function closePrPanel() {
     ["prPanel", "prBackdrop"].forEach((id) => { const e = document.getElementById(id); if (e) e.remove(); });
   }
-  function openPrPanel(items, title) {
+  // بطاقة عملية واحدة فعلية (ملف/أمر/commit/لقطة) من كتل آخر رسالة
+  function opCard(op) {
+    const tn = op.tool_name || "";
+    const verb = AB_ACTION[tn] || "•";
+    const add = op.lines_added ? '<span class="ab-added">+' + op.lines_added + "</span>" : "";
+    const rem = op.lines_removed ? '<span class="ab-removed">-' + op.lines_removed + "</span>" : "";
+    let main = "", shot = "";
+    if (tn === "Bash" || tn === "PythonRun") main = op.command || op.arg || "";
+    else if (tn === "Screenshot") {
+      main = "لقطة شاشة للناتج";
+      if (op.image_path) shot = '<img class="cs-shot" src="/api/shot?path=' +
+        encodeURIComponent(op.image_path) + '" alt="لقطة"/>';
+    } else main = (op.path || op.arg || "").split("/").pop() || op.arg || "";
+    return '<div class="git-card op-card' + (op.failed ? " failed" : "") + '">' +
+      '<div class="git-card-top"><span class="git-num">' + escapeHtml(verb) + "</span>" +
+      (op.failed ? '<span class="git-badge closed">فشل</span>' : "") + "</div>" +
+      '<div class="git-card-msg">' + escapeHtml(String(main).slice(0, 90)) + "</div>" +
+      (shot ? '<div class="op-card-shot">' + shot + "</div>" : "") +
+      '<div class="git-card-meta">' + add + " " + rem + "</div></div>";
+  }
+  function openPrPanel(ops, title) {
     closePrPanel();
     const bd = document.createElement("div"); bd.id = "prBackdrop"; bd.className = "adx-backdrop";
     bd.onclick = closePrPanel; document.body.appendChild(bd);
     const el = document.createElement("div"); el.id = "prPanel"; el.className = "pr-panel";
-    el.innerHTML = '<div class="pr-head"><span class="pr-h-title">' + escapeHtml(title || "Pull requests") + "</span>" +
+    el.innerHTML = '<div class="pr-head"><span class="pr-h-title">' + escapeHtml(title || "آخر النشاط") + "</span>" +
       '<button class="pr-close" aria-label="إغلاق">✕</button></div>' +
-      '<div class="pr-list">' + items.map(gitCard).join("") + "</div>";
+      '<div class="pr-list">' + ops.map(opCard).join("") + "</div>";
     document.body.appendChild(el);
     el.querySelector(".pr-close").onclick = closePrPanel;
-    el.querySelectorAll("[data-url]").forEach((c) => c.onclick = () => window.open(c.dataset.url, "_blank"));
   }
-  async function maybeAddPrChip() {
+  // تُستدعى بكتل «آخر رسالة» في هذه المحادثة (turnBlocks حيّاً أو كتل آخر رسالة محفوظة)
+  function maybeAddPrChip(blocks) {
     try {
-      const r = await api("/api/git-activity?limit=100");
-      const acts = r.activity || [];
-      // العمل الحديث في WeaverCode يذهب إلى main كـ commits (لا PRs)، لذا نعرض
-      // رقاقة تعكس ما أُنجِز فعلاً: الطلبات المفتوحة إن وُجدت، وإلا آخر commits.
-      // (سابقاً كنا نُظهر PRs مدموجة قديمة «وهمية»، ثم أخفيناها كلياً — كلاهما خطأ.)
-      const openPrs = acts.filter((a) => a.kind === "pr" && (a.state === "open" || a.pending));
-      const commits = acts.filter((a) => a.kind === "commit").slice(0, 10);
       const old = document.querySelector(".pr-chip-row"); if (old) old.remove();
-      let items, label, title;
-      if (openPrs.length) {
-        items = openPrs; title = "Pull requests";
-        label = openPrs.length + " · Pull requests";
-      } else if (commits.length) {
-        items = commits; title = "آخر النشاط";
-        label = commits.length + " · commits";
-      } else {
-        return;   // لا نشاط بعد → لا رقاقة
-      }
+      const ops = [];
+      (blocks || []).forEach((b) => (b.ops || []).forEach((o) => ops.push(o)));
+      if (!ops.length) return;   // لا عمليات فعلية في آخر رسالة → لا رقاقة
+      let files = 0, cmds = 0, commits = 0, shots = 0;
+      ops.forEach((o) => {
+        const tn = o.tool_name;
+        if (tn === "Write" || tn === "Edit" || tn === "MultiEdit") files++;
+        else if (tn === "Bash" || tn === "PythonRun") cmds++;
+        else if (tn === "GitCommit" || tn === "GitPush") commits++;
+        else if (tn === "Screenshot") shots++;
+      });
+      const parts = [];
+      if (files) parts.push(files + " ملف");
+      if (cmds) parts.push(cmds + (cmds > 2 ? " أوامر" : " أمر"));
+      if (commits) parts.push(commits + " commit");
+      if (shots) parts.push(shots + " لقطة");
+      const label = "آخر النشاط" + (parts.length ? " · " + parts.join(" · ") : " · " + ops.length + " عملية");
       const el = document.createElement("div"); el.className = "pr-chip-row";
-      el.innerHTML = '<button class="pr-chip"><span class="pr-branch">⑂</span> ' +
-        escapeHtml(label) + "</button>";
+      el.innerHTML = '<button class="pr-chip"><span class="pr-branch">⑂</span> ' + escapeHtml(label) + "</button>";
       const live = $("#inlineLive");
       if (live) live.insertAdjacentElement("beforebegin", el);
       else $("#chatMsgs").appendChild(el);
-      el.querySelector(".pr-chip").onclick = () => openPrPanel(items, title);
+      el.querySelector(".pr-chip").onclick = () => openPrPanel(ops, "آخر النشاط");
       scrollChat();
     } catch (e) {}
   }
@@ -1110,8 +1139,8 @@
       } else if (d.type === "done") {
         // بدل «اكتملت»: بطاقة ملخّص إنجاز (ملفات + أسطر + أوامر) كواجهة Claude Code
         chatAppend(completionSummaryHtml(turnBlocks));
+        maybeAddPrChip(turnBlocks);   // رقاقة «آخر النشاط» = عمليات هذه الرسالة فعلاً
         pendingBlocks = []; turnBlocks = [];
-        maybeAddPrChip();   // رقاقة «N · Pull requests» إن وُجدت PRs
       } else if (d.type === "narration") {
         // نصّ المساعد المُتخلِّل بين الأدوات (كواجهة Claude Code): «يفكّر بصوت
         // مسموع» — يظهر قبل صندوق أداة الجولة، نثراً خفيفاً مميّزاً عن الردّ النهائي.
