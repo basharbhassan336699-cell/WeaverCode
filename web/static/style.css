@@ -126,6 +126,14 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 .bubble.agent { background: var(--card); border: 1px solid var(--line); align-self: flex-end; border-bottom-inline-end-radius: 4px; }
 .bubble.event { background: none; border: none; color: var(--muted); font-size: 13px; align-self: center; padding: 2px; }
 .bubble .who { font-size: 11px; opacity: .7; margin-bottom: 4px; }
+/* نصّ المساعد المُتخلِّل بين الأدوات (كواجهة Claude Code): نثر خفيف، بلا بطاقة،
+   بشارة برتقالية جانبية — يميّزه عن الردّ النهائي دون أن يزاحمه. */
+.bubble.agent.narr { background: none; border: none; align-self: stretch; max-width: 100%;
+  color: var(--muted); font-size: 14.5px; padding: 2px 2px 2px 12px;
+  border-inline-start: 2px solid var(--orange); border-radius: 0;
+  opacity: .96; animation: narrIn .18s ease-out; }
+.bubble.agent.narr code { font-size: .88em; }
+@keyframes narrIn { from { opacity: 0; transform: translateY(3px); } to { opacity: .96; transform: none; } }
 /* ── لوحة الكتابة (بأسلوب Claude Code): إدخال + زر إرسال/توقيف + شريط سفلي ── */
 .chat-composer { position: fixed; inset-inline: 0; bottom: 0; z-index: 6;
   padding: 10px 14px calc(10px + env(safe-area-inset-bottom));

@@ -23,6 +23,7 @@ class EventType(Enum):
     DONE = "done"                # انتهى
     STATUS = "status"            # تغيّر حالة الـ daemon
     ACTION_BLOCK = "action_block"  # ملخص جولة أدوات (diff + وصف)
+    NARRATION = "narration"      # نصّ المساعد المُتخلِّل بين الأدوات (كواجهة Claude Code)
 
 
 @dataclass

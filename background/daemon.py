@@ -167,6 +167,16 @@ class WeaverDaemon:
             asyncio.run_coroutine_threadsafe(
                 event_bus.emit(WeaverEvent(etype, msg, detail)), loop)
 
+        # ── نصّ المساعد المُتخلِّل (narration) — كواجهة Claude Code ─────────────
+        # يبثّ شرح النموذج القصير بين صناديق الأدوات ليتابع المستخدم «تفكيره» حيّاً
+        # (يفكّر بصوت مسموع): «الآن سأتحقّق…» ← صندوق أداة ← «اكتمل، التالي…».
+        def _on_narration(text):   # يُستدعى من خيط المحرّك؛ نجدول البثّ في الحلقة
+            t = (text or "").strip()
+            if not t:
+                return
+            asyncio.run_coroutine_threadsafe(
+                event_bus.emit(WeaverEvent(EventType.NARRATION, t[:200], t)), loop)
+
         # تحويل سجل المحادثة (إن وُجد) إلى رسائل لتستمر المحادثة بسياق
         hist_msgs = None
         if history:
@@ -205,7 +215,8 @@ class WeaverDaemon:
 
         try:
             result = await engine.run(prompt, history=hist_msgs, on_tool=on_tool,
-                                       on_permission=_on_permission)
+                                       on_permission=_on_permission,
+                                       on_narration=_on_narration)
         except Exception as exc:
             # عطل غير متوقّع: احفظ ما لدينا (رسالة المستخدم على الأقل) ثم أبلغ
             _persist("")

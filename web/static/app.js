@@ -1112,6 +1112,11 @@
         chatAppend(completionSummaryHtml(turnBlocks));
         pendingBlocks = []; turnBlocks = [];
         maybeAddPrChip();   // رقاقة «N · Pull requests» إن وُجدت PRs
+      } else if (d.type === "narration") {
+        // نصّ المساعد المُتخلِّل بين الأدوات (كواجهة Claude Code): «يفكّر بصوت
+        // مسموع» — يظهر قبل صندوق أداة الجولة، نثراً خفيفاً مميّزاً عن الردّ النهائي.
+        const txt = d.detail || d.message;
+        chatAppend('<div class="bubble agent narr">' + md(txt) + "</div>");
       } else if (d.type === "action_block") {
         // ملخص جولة الأدوات (قابل للضغط → المستوى الثالث). يُتراكم للحفظ + الملخّص.
         const blk = { desc: d.detail || d.message, ops: d.ops || [],

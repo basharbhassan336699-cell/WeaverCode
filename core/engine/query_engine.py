@@ -810,6 +810,7 @@ class QueryEngine:
         on_tool: Optional[Callable[[str, Dict], None]] = None,
         on_permission: Optional[Callable[[str, Dict], str]] = None,
         on_plan: Optional[Callable[[str], bool]] = None,
+        on_narration: Optional[Callable[[str], None]] = None,
     ) -> QueryResult:
         """
         تشغيل الحلقة الوكيلية الكاملة
@@ -1065,6 +1066,17 @@ class QueryEngine:
             # (DeepSeek/NVIDIA/GLM) تُرجع finish_reason="stop" رغم وجود
             # tool_calls — ننفّذها بدل التوقف. نتوقف فقط عند غياب الأدوات.
             has_tools = bool(msg.get("tool_calls"))
+            # نصّ المساعد المُتخلِّل: إن كتب النموذج شرحاً «قبل» استدعاء الأدوات في
+            # هذه الجولة، نبثّه كـ narration ليظهر بين صناديق الأدوات (كواجهة Claude
+            # Code). للجولات الوسيطة فقط (has_tools) — أمّا النصّ النهائي (بلا أدوات)
+            # فيبقى result.text ويُعرَض كردٍّ نهائي، فلا ازدواج.
+            if has_tools and on_narration:
+                _narr = (msg.get("content") or "").strip()
+                if _narr:
+                    try:
+                        on_narration(_narr)
+                    except Exception:
+                        pass
             if not has_tools:
                 content = msg.get("content") or ""
                 # رد فارغ تماماً: أعد المحاولة مرة واحدة بطلب مبسّط (بلا أدوات)
