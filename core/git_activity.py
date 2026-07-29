@@ -27,9 +27,23 @@ import time
 from typing import Dict, List, Optional
 
 
-def _activity_file() -> str:
+def _activity_file(cwd: str = "") -> str:
+    """ملف كاش النشاط. مفتاح لكل مشروع (cwd) كي لا تختلط سجلات مستودع بآخر.
+
+    المشكلة سابقاً: ملف كاش عالمي واحد → عند التبديل بين المشاريع تُعرَض بيانات
+    المشروع السابق (لا المشروع النشط). الآن لكل مساحة عمل ملفها الخاص، فتعرض
+    اللوحة دائماً سجل «المشروع الذي نعمل عليه».
+    """
     base = os.path.dirname(os.path.expanduser(
         os.environ.get("WEAVER_DB_PATH", "~/.weaver/memory.db")))
+    if cwd:
+        try:
+            key = os.path.realpath(cwd)
+        except Exception:
+            key = cwd
+        import hashlib
+        h = hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+        return os.path.join(base, "git_activity_" + h + ".jsonl")
     return os.path.join(base, "git_activity.jsonl")
 
 
@@ -208,13 +222,13 @@ def collect_activity(cwd: str, commit_limit: int = 30, pr_limit: int = 20,
         except Exception:
             pass
     items.sort(key=lambda x: x.get("ts", 0), reverse=True)
-    _cache_write(items)
+    _cache_write(items, cwd)
     return items
 
 
-def _cache_write(items: List[dict]) -> None:
+def _cache_write(items: List[dict], cwd: str = "") -> None:
     try:
-        f = _activity_file()
+        f = _activity_file(cwd)
         os.makedirs(os.path.dirname(f), exist_ok=True)
         with open(f, "w", encoding="utf-8") as fh:
             for it in items:
@@ -223,10 +237,13 @@ def _cache_write(items: List[dict]) -> None:
         pass
 
 
-def read_cached(limit: int = 50) -> List[dict]:
-    """يقرأ آخر نشاط مُخزَّن (بلا استدعاء git/شبكة) — للاستجابة السريعة."""
+def read_cached(limit: int = 50, cwd: str = "") -> List[dict]:
+    """يقرأ آخر نشاط مُخزَّن لمشروع محدّد (بلا git/شبكة) — للاستجابة السريعة.
+
+    cwd يحدّد المشروع؛ فلا تُقرأ بيانات مشروع آخر. بلا cwd → الملف العالمي القديم.
+    """
     try:
-        with open(_activity_file(), "r", encoding="utf-8") as fh:
+        with open(_activity_file(cwd), "r", encoding="utf-8") as fh:
             items = [json.loads(l) for l in fh if l.strip()]
         items.sort(key=lambda x: x.get("ts", 0), reverse=True)
         return items[:limit]
@@ -242,7 +259,7 @@ def log_pending_commit(cwd: str, message: str, added: int = 0, removed: int = 0)
              "added": int(added), "removed": int(removed),
              "ts": int(time.time()), "pending": True}
     try:
-        f = _activity_file()
+        f = _activity_file(cwd)   # لكل مشروع (نفس مفتاح القراءة)
         os.makedirs(os.path.dirname(f), exist_ok=True)
         with open(f, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")

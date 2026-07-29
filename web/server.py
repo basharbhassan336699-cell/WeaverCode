@@ -970,7 +970,9 @@ def _api_git_activity(limit: int = 20, offset: int = 0, refresh: bool = False) -
         if refresh:
             items = ga.collect_activity(cwd)
         else:
-            items = ga.read_cached(200) or ga.collect_activity(cwd)
+            # كاش المشروع النشط فقط (cwd) — فلا تُعرَض بيانات مشروع سابق. إن كان
+            # فارغاً (أول مرة لهذا المشروع) نجمع حديثاً لنفس المشروع.
+            items = ga.read_cached(200, cwd) or ga.collect_activity(cwd)
         total = len(items)
         page = items[offset:offset + limit]
         return {"activity": page, "total": total,

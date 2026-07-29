@@ -83,7 +83,7 @@ def test_activity_cached_and_read(repo):
     from core import git_activity as ga
     _commit(repo, "f.py", "a\nb\n", "c1")
     ga.collect_activity(repo, with_prs=False)
-    cached = ga.read_cached()
+    cached = ga.read_cached(cwd=repo)
     assert cached and cached[0]["message"] == "c1"
 
 
@@ -91,7 +91,30 @@ def test_pending_commit_marked(repo):
     from core import git_activity as ga
     e = ga.log_pending_commit(repo, "سيتم الإنشاء", 12, 0)
     assert e["pending"] is True and e["hash"] == "pending"
-    assert any(x.get("pending") for x in ga.read_cached())
+    assert any(x.get("pending") for x in ga.read_cached(cwd=repo))
+
+
+def test_cache_is_per_project(repo, tmp_path):
+    """كاش النشاط لكل مشروع: لا تُعرَض بيانات مستودع في مستودع آخر."""
+    from core import git_activity as ga
+    import subprocess
+    _commit(repo, "a.py", "x\n", "من المشروع A")
+    ga.collect_activity(repo, with_prs=False)
+    # مشروع ثانٍ منفصل
+    repo_b = tmp_path / "proj_b"
+    repo_b.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo_b)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo_b)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo_b)
+    (repo_b / "b.py").write_text("y\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo_b)
+    subprocess.run(["git", "commit", "-qm", "من المشروع B"], cwd=repo_b)
+    ga.collect_activity(str(repo_b), with_prs=False)
+    # كلٌّ يرى سجلّه فقط
+    a = ga.read_cached(cwd=repo)
+    b = ga.read_cached(cwd=str(repo_b))
+    assert a and a[0]["message"] == "من المشروع A"
+    assert b and b[0]["message"] == "من المشروع B"
 
 
 # ── endpoint + الترقيم ───────────────────────────────────────────────────────
