@@ -61,6 +61,15 @@ You → WeaverCode → [Any AI Model] → Result
 
 ---
 
+> ### 📇 Command Reference Card
+> A shareable, cross-platform reference for **every** command, agent flag and
+> environment variable — with a light/dark, mobile-friendly layout:
+> **[→ Open the Command Reference Card](https://claude.ai/code/artifact/24aef1a1-4582-470c-8186-018b18e43a3c)**
+>
+> Prefer plain text? The same reference lives in [`docs/CLI.md`](docs/CLI.md).
+
+---
+
 ## Quick Start
 
 ```bash
