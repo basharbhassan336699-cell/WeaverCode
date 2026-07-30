@@ -21,7 +21,8 @@
 html, body { background: var(--bg); color: var(--text); }
 body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   min-height: 100vh; font-size: 15px; -webkit-font-smoothing: antialiased; }
-.serif, .display, .model-pick, .chat-title { font-family: Georgia, "Times New Roman", "Noto Serif", serif; }
+/* خط النظام موحّد sans-serif (لا serif) — العناوين تستخدم نفس خط الجسم */
+.serif, .display, .model-pick, .chat-title { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 
 /* شريط علوي */
 .topbar { display: flex; align-items: center; justify-content: space-between;
