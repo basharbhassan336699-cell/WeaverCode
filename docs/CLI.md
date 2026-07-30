@@ -1,64 +1,188 @@
-# WeaverCode — Command Line (all systems) 🕸️
+# WeaverCode — Command Line Reference (all systems) 🕸️
 
-One management command that works on **Android (Termux), Windows, macOS and
-Linux**. It only uses Python's standard library, so it runs anywhere Python
-3.8+ runs.
+Two command-line tools:
 
-## Run it
+1. **`weaver-cli.py`** — the **management** tool (install / run / update / fix).
+2. **`weaver.py`** — the **agent** itself (run a task, interactive chat, web).
 
-```bash
-python weaver-cli.py <command>
-```
+Both use only Python's standard library for management, so they run on
+**Android (Termux), Windows, macOS and Linux** — anywhere Python 3.8+ runs.
 
-Or use the launcher for your system (from the project folder):
+---
 
-- Termux / Linux / macOS: `./weaver <command>`
-- Windows (cmd): `weaver <command>`
-- Windows (PowerShell): `.\weaver.ps1 <command>`
+## 1) Management commands — `weaver-cli.py`
 
-After `install`, the `weaver` command is available from anywhere (POSIX).
+Run with `python weaver-cli.py <command>`, or the launcher for your system:
 
-## Commands
+| System | How to run |
+|---|---|
+| Termux / Linux / macOS | `./weaver <command>` |
+| Windows (cmd) | `weaver <command>` |
+| Windows (PowerShell) | `.\weaver.ps1 <command>` |
 
+After `install`, the `weaver` command works from anywhere (POSIX).
+
+### Setup
 | Command | What it does |
 |---|---|
 | `install` | Install dependencies, create `~/.weaver` dirs, `config/.env`, and a global `weaver` command |
+
+### Run & control
+| Command | What it does |
+|---|---|
 | `start` · `up` · `web` | Start the dashboard + daemon in the background and **print the login URL** |
 | `stop` · `down` | Stop all WeaverCode servers |
-| `restart` · `restore` | Restart — **use this after closing the device or terminal** |
-| `status` | Show what's running + the web URL + provider/model/key |
+| `restart` · `restore` | Restart — **use after closing the device or terminal** |
+| `status` | Show what's running + URL + provider/model/key |
 | `url` | Print the web login URL(s) |
 | `open` | Print the URL and open it in a browser |
+| `logs [N]` | Show the last N lines of the server log (default 40) |
+
+### Update
+| Command | What it does |
+|---|---|
 | `update [branch]` | Pull latest code (keeps your `.env`), update deps, restart, verify |
-| `provider <name>` | Switch AI provider (openrouter/groq/deepseek/anthropic/openai/…) |
+
+### Provider / key / model
+| Command | What it does |
+|---|---|
+| `provider <name>` | Switch provider (openrouter/groq/deepseek/anthropic/openai/…) |
 | `key <API_KEY>` | Set the API key (auto-detects the provider from the key prefix) |
 | `model <name>` | Set the model |
-| `doctor` · `diagnose` | Health checks (Python, git, deps, `.env`, key, provider reachability, port) |
-| `fix` | Auto-fix common problems (missing dirs/`.env`, stuck port, missing deps, stale flags) |
-| `logs [N]` | Show the last N lines of the server log |
-| `version` | Print the WeaverCode version and platform |
+
+### Troubleshooting
+| Command | What it does |
+|---|---|
+| `doctor` · `diagnose` | Health checks: Python, git, deps, `.env`, key, provider reachability, port |
+| `fix` | Auto-fix common problems (dirs, `.env`, stuck port, deps, stale flags) |
+
+### Info
+| Command | What it does |
+|---|---|
+| `version` | WeaverCode version + platform |
 | `help` | Show help |
+
+---
+
+## 2) Agent commands — `weaver.py`
+
+Run a task directly, chat interactively, or launch the web dashboard.
+
+```bash
+python weaver.py "your task here"
+python weaver.py -i                       # interactive chat
+python weaver.py --bg                     # web dashboard in the background
+```
+
+| Flag | What it does |
+|---|---|
+| `<prompt>` | The task to run (positional) |
+| `--mode <m>` | Agent mode: `main` · `coding` · `project` · `security` · `autonomous` · `analysis` |
+| `--interactive` · `-i` | Interactive chat mode |
+| `--stream` | Streaming mode |
+| `--plan` | Plan mode: plans and asks before any change |
+| `--background` · `--bg` · `-b` | Web dashboard + background (http://localhost:8080) |
+| `--web` · `-w` | Web dashboard in the foreground only |
+| `--daemon` | Run the background daemon without the web UI |
+| `--model <name>` | Model (overrides `WEAVER_MODEL`) |
+| `--key <key>` | API key (overrides `WEAVER_API_KEY`) |
+| `--url <url>` | API base URL (overrides `WEAVER_BASE_URL`) |
+| `--yes` · `-y` | Auto-approve all tools without asking (careful) |
+| `--resume [SESSION]` · `-r` | Resume a session (no value = interactive picker) |
+| `--rename <NAME>` | Name the current session |
+| `--sessions` | List saved sessions |
+| `--add-dir <DIR>` | Add an extra working directory (repeatable) |
+| `--work-dir <DIR>` · `-C` | Agent working directory (default: current folder) |
+| `--init` | Analyze the project and generate a `CLAUDE.md` |
+| `--print-system` | Print the actual system prompt sent to the model |
+| `--version` · `-v` | Show version and exit |
+
+### Interactive slash commands (inside `weaver.py -i`)
+| Command | What it does |
+|---|---|
+| `/help` · `/commands` | List all commands |
+| `/model [name]` · `/models` | Show/choose the model / list models |
+| `/key <k>` | Set the API key |
+| `/provider <name>` | Switch provider |
+| `/mode <m>` | Switch agent mode |
+| `/mcp` | List MCP servers |
+| `/agents` | List available agents |
+| `/add-dir <path>` | Add a working directory |
+| `/init` | Generate a `CLAUDE.md` for the project |
+| `/context` · `/messages` | Show context / message history |
+| `/compact` | Summarize the conversation to save context |
+| `/rewind` | Undo to a previous checkpoint |
+| `/clear` | Clear the conversation |
+| `/stats` · `/cost` | Show usage / token cost |
+| `/vim` | Toggle vim editing mode |
+| `exit` · `quit` | Leave interactive mode |
+
+---
+
+## 3) Environment variables
+
+Set these in `config/.env` (or your shell). Only the common ones are listed;
+defaults are shown in brackets.
+
+### Provider (core)
+| Variable | Meaning |
+|---|---|
+| `WEAVER_API_KEY` | Your provider API key |
+| `WEAVER_BASE_URL` | Provider base URL (e.g. `https://openrouter.ai/api/v1`) |
+| `WEAVER_MODEL` | Model name |
+| `WEAVER_MAX_TOKENS` | Max output tokens `[model default]` |
+| `WEAVER_TEMPERATURE` | Sampling temperature `[0.7]` |
+| `WEAVER_EFFORT` | Effort preset (faster ↔ smarter) `[auto]` |
+
+### Fallback provider (used if the main one fails)
+| Variable | Meaning |
+|---|---|
+| `WEAVER_FALLBACK_API_KEY` · `WEAVER_FALLBACK_BASE_URL` · `WEAVER_FALLBACK_MODEL` | Backup provider |
+
+### Web dashboard
+| Variable | Meaning |
+|---|---|
+| `WEAVER_WEB_PORT` | Dashboard port `[8080]` |
+| `WEAVER_WEB_HOST` | Bind host `[0.0.0.0]` · set `127.0.0.1` to limit to this device |
+
+### Behavior & safety
+| Variable | Meaning |
+|---|---|
+| `WEAVER_ASK_PERMISSION` | Ask before sensitive tools (Bash/write/push) `[0]` |
+| `WEAVER_AUTO_APPROVE` | Approve every tool without asking `[0]` |
+| `WEAVER_PLAN_MODE` | Start in plan mode `[0]` |
+| `WEAVER_MAX_TURNS` | Max agent turns per task `[20]` |
+| `WEAVER_LOOP_LIMIT` | Stop if a tool repeats with no progress `[8]` (0 = off) |
+| `WEAVER_TASK_BUDGET` | Time budget per task, seconds `[1800]` (0 = off) |
+| `WEAVER_TIMEOUT` | Per-request timeout, seconds `[120]` |
+| `WEAVER_RETRIES` | Provider retries `[2]` |
+| `WEAVER_REQUEST_DELAY` | Delay between requests, seconds `[0.0]` |
+| `WEAVER_CONTEXT_WINDOW` | Context window size `[200000]` |
+| `WEAVER_PROMPT_CACHE` | Enable prompt caching `[0]` |
+
+### Paths, tools & integrations
+| Variable | Meaning |
+|---|---|
+| `WEAVER_DB_PATH` | Memory database path `[~/.weaver/memory.db]` |
+| `WEAVER_WORK_DIR` · `WEAVER_ADD_DIRS` | Working directory / extra dirs |
+| `WEAVER_OUTPUTS` | Where generated files go |
+| `WEAVER_CHROMIUM` | Path to Chromium (for the Screenshot tool) |
+| `WEAVER_GITHUB_TOKEN` · `GITHUB_TOKEN` | GitHub token (activity + push) |
+| `GITHUB_OAUTH_CLIENT_ID` · `GITHUB_OAUTH_CLIENT_SECRET` | One-tap GitHub OAuth app |
+| `WEAVER_NO_RESTART` | `1` = `update` won't restart the server |
+
+---
 
 ## Typical flow
 
 ```bash
 python weaver-cli.py install            # first time
-python weaver-cli.py key sk-...          # set your API key
+python weaver-cli.py key sk-...          # set your API key (auto-detects provider)
 python weaver-cli.py start               # → prints http://127.0.0.1:8080
 # ...open the URL in your browser...
 
-# after closing the device/terminal, bring it back:
-python weaver-cli.py restore
-
-# something wrong?
+python weaver-cli.py restore             # after closing the device/terminal
 python weaver-cli.py doctor              # find problems
 python weaver-cli.py fix                 # fix common ones
-
-# get the newest version:
-python weaver-cli.py update
+python weaver-cli.py update              # get the newest version
 ```
-
-## Environment
-
-- `WEAVER_WEB_PORT` (default `8080`) — dashboard port.
-- `WEAVER_WEB_HOST` (default `0.0.0.0`) — set to `127.0.0.1` to limit access to this device.
