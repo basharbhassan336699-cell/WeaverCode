@@ -711,6 +711,13 @@ async def interactive_mode(initial_history=None, session_id=None,
     engine, provider, mcp = await build_engine("main")
     commands = SlashCommands()
 
+    # شعار WeaverCode (Hello / WEAVER CODE + الرسمة) — يظهر على Termux وكل الأنظمة
+    try:
+        from core import banner
+        if sys.stdout.isatty():
+            banner.show()
+    except Exception:
+        pass
     draw_welcome(provider.config.model, provider.config.base_url)
     print(f"{GRAY}Type 'exit' to quit | '/model' models | '/key <k>' API key | "
           f"'/provider <name>' provider | '/mcp' | '/' for all commands{RESET}")

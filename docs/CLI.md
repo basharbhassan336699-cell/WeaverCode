@@ -37,6 +37,7 @@ After `install`, the `weaver` command works from anywhere (POSIX).
 | `url` | Print the web login URL(s) |
 | `open` | Print the URL and open it in a browser |
 | `logs [N]` | Show the last N lines of the server log (default 40) |
+| `banner` · `hello` | Show the WeaverCode hero banner (Hello / WEAVER CODE + artwork) |
 
 ### Update
 | Command | What it does |

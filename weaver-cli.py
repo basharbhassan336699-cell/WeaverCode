@@ -24,6 +24,7 @@ Commands:
     doctor | diagnose    Run health checks and report problems
     fix                  Auto-fix common problems (dirs, .env, stuck port, deps)
     logs [N]             Show the last N lines of the server log (default 40)
+    banner | hello       Show the WeaverCode hero banner
     version              Print the WeaverCode version
     help                 Show this help
 
@@ -678,6 +679,16 @@ def version(_args=None) -> int:
     return 0
 
 
+def banner_cmd(_args=None) -> int:
+    """Show the WeaverCode hero banner (Hello / WEAVER CODE + artwork)."""
+    try:
+        from core import banner
+        banner.show()
+    except Exception:
+        say("WeaverCode 🕸️")
+    return 0
+
+
 def help_cmd(_args=None) -> int:
     print(__doc__)
     return 0
@@ -699,6 +710,7 @@ COMMANDS = {
     "doctor": doctor, "diagnose": doctor,
     "fix": fix,
     "logs": logs,
+    "banner": banner_cmd, "hello": banner_cmd,
     "version": version, "--version": version, "-v": version,
     "help": help_cmd, "--help": help_cmd, "-h": help_cmd,
 }
