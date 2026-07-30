@@ -59,12 +59,12 @@
       const dot = $("#stateDot");
       const state = (s.daemon && s.daemon.state) || "offline";
       dot.className = "state-dot " + (state === "working" ? "working" : state === "idle" ? "idle" : "");
-      $("#menuStatus").textContent = "النموذج: " + (s.model || "—") + " · " + (s.provider || "") +
-        (s.key_set ? " · المفتاح ✓" : " · المفتاح ✗");
+      $("#menuStatus").textContent = "Model: " + (s.model || "—") + " · " + (s.provider || "") +
+        (s.key_set ? " · Key ✓" : " · Key ✗");
       const cm = $("#cbarModel"); if (cm && s.model) cm.textContent = shortModel(s.model);
     } catch (e) {}
   }
-  function shortModel(m) { return String(m || "").split("/").pop() || m || "النموذج"; }
+  function shortModel(m) { return String(m || "").split("/").pop() || m || "Model"; }
   setInterval(refreshStatus, 4000); refreshStatus();
   // عرض إصدار الخادم الفعلي (لتتأكد أنك تشغّل أحدث كود)
   api("/api/version").then((r) => { if (r && r.version) $("#verBadge").textContent = r.version; }).catch(() => {});
@@ -81,17 +81,17 @@
   function group(ts) {
     const day = new Date(); day.setHours(0, 0, 0, 0);
     const t0 = day.getTime() / 1000, d = Date.now() / 1000 - ts;
-    if (ts >= t0) return "اليوم";
-    if (d < 7 * 86400) return "هذا الأسبوع";
-    if (d < 31 * 86400) return "هذا الشهر";
-    return "أقدم";
+    if (ts >= t0) return "Today";
+    if (d < 7 * 86400) return "This week";
+    if (d < 31 * 86400) return "This month";
+    return "Older";
   }
   async function loadSessions() {
     const r = await api("/api/sessions?limit=100");
     const convs = r.sessions || [];
     const box = $("#sessions");
     if (!convs.length) {
-      box.innerHTML = '<div class="empty-note">لا محادثات بعد.<br>اضغط «محادثة جديدة» للبدء.</div>';
+      box.innerHTML = '<div class="empty-note">No conversations yet.<br>Tap "New conversation" to start.</div>';
       return;
     }
     box.innerHTML = "";
@@ -101,19 +101,19 @@
       if (g !== last) { last = g; const h = document.createElement("div"); h.className = "date-h"; h.textContent = g; box.appendChild(h); }
       const card = document.createElement("div");
       card.className = "sess-card";
-      const repo = ghRepo || "المستودع المحلي";
-      const isToday = g === "اليوم";
+      const repo = ghRepo || "Local repository";
+      const isToday = g === "Today";
       card.innerHTML =
         '<div class="sess-time">' + rel(c.timestamp) + "</div>" +
-        '<div class="sess-main"><div class="sess-title">' + escapeHtml((c.prompt || "محادثة").slice(0, 60)) + "</div>" +
+        '<div class="sess-main"><div class="sess-title">' + escapeHtml((c.prompt || "Conversation").slice(0, 60)) + "</div>" +
         '<div class="sess-sub"><span class="ellip">' + escapeHtml(repo) + '</span> ☁</div></div>' +
-        '<button class="sess-del" title="حذف المحادثة" data-del="' + escapeHtml(c.id) + '">🗑️</button>';
+        '<button class="sess-del" title="Delete conversation" data-del="' + escapeHtml(c.id) + '">🗑️</button>';
       card.onclick = (e) => { if (e.target.closest("[data-del]")) return; openSession(c); };
       box.appendChild(card);
     });
     $$("#sessions [data-del]").forEach((b) => b.onclick = async (e) => {
       e.stopPropagation();
-      if (!confirm("حذف هذه المحادثة نهائياً؟")) return;
+      if (!confirm("Delete this conversation permanently?")) return;
       await post("/api/session/delete", { id: b.dataset.del });
       loadSessions();
     });
@@ -121,8 +121,9 @@
 
   // ── فتح محادثة سابقة ──
   function bubble(role, html) {
-    const who = role === "user" ? "أنت" : "🕸️ WeaverCode";
-    return '<div class="bubble ' + role + '"><div class="who">' + who + "</div>" + html + "</div>";
+    const who = role === "user" ? "You" : "🕸️ WeaverCode";
+    // dir="auto" ليتّبع اتجاه المحتوى: عربي → RTL، إنجليزي → LTR (والواجهة إنجليزية)
+    return '<div class="bubble ' + role + '" dir="auto"><div class="who">' + who + "</div>" + html + "</div>";
   }
   let chatHistory = []; // سياق المحادثة الحالية (يُرسَل مع كل متابعة)
   // معرّف المحادثة الحالية — يُسترجَع من localStorage ليصمد عبر تحديث الصفحة
@@ -153,6 +154,10 @@
       return e;
     });
     pendingBlocks = [];
+    // لغة المحتوى = لغة آخر رسالة مستخدم في هذه المحادثة
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "user" && (msgs[i].content || "").trim()) { uiLang = detectLang(msgs[i].content); break; }
+    }
     $("#chatMsgs").innerHTML = msgs.map((m) => {
       if (m.role === "user") return bubble("user", escapeHtml(m.content || ""));
       // المساعد: سجل العمليات (إن حُفظ) قبل النصّ، ثم بطاقة ملخّص الإنجاز — كما كان لحظياً
@@ -161,7 +166,7 @@
       html += bubble("agent", md(m.content || ""));
       if (m.blocks && m.blocks.length) html += completionSummaryHtml(m.blocks);
       return html;
-    }).join("") || bubble("agent", "(محادثة فارغة)");
+    }).join("") || bubble("agent", "(Empty conversation)");
     // رقاقة «آخر النشاط» لهذه المحادثة: كتل آخر رسالة مساعد فيها عمليات فعلية
     let _lastBlocks = null;
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -363,13 +368,14 @@
         "بمسارات نسبية (استخدم Glob/Read لاستكشافها أولاً)، ولا تخترع مسارات.]\n\n" + prompt;
     }
     chatHistory = []; // محادثة جديدة
+    uiLang = detectLang(v);   // لغة المحتوى = لغة رسالة المستخدم
     currentSessionId = uuid(); // معرّف جديد ثابت لهذه المحادثة
     rememberSession(currentSessionId);
     setRunning(true);
     pendingBlocks = []; turnBlocks = [];
     await post("/api/task", { prompt: prompt, mode: $("#buildMode").value, history: [], session_id: currentSessionId, repo: (activeRepo && activeRepo.full_name) || "" });
     chatHistory.push({ role: "user", content: prompt });
-    $("#chatTitle").textContent = (v || "ملفات مرفقة").slice(0, 30);
+    $("#chatTitle").textContent = (v || "Attached files").slice(0, 30);
     updateCtxSub();
     $("#chatMsgs").innerHTML = bubble("user", attachCardsHtml(files) +
       (v ? '<div class="msg-txt">' + escapeHtml(v) + "</div>" : ""));
@@ -384,10 +390,10 @@
   function setRunning(on) {
     taskRunning = on;
     const b = $("#chatSend");
-    if (b) { b.classList.toggle("running", on); b.disabled = false; b.title = on ? "توقيف" : "إرسال"; }
+    if (b) { b.classList.toggle("running", on); b.disabled = false; b.title = on ? "Stop" : "Send"; }
     const spin = $("#effortSpin"); if (spin) spin.style.display = on ? "inline-block" : "none";
     const inp = $("#chatInput");
-    if (inp) inp.placeholder = on ? "أضف ملاحظة للطابور… (Enter)" : "أضف ملاحظة أو تابع…";
+    if (inp) inp.placeholder = on ? "Add a note to the queue… (Enter)" : "Add a note or follow up…";
     if (!on) updateSendEnabled();
   }
   function updateSendEnabled() {
@@ -415,10 +421,11 @@
     const files = chatAttached.filter((a) => a.path);
     if (!v && !files.length) return;
     const queued = taskRunning;   // يعمل الآن → هذه ملاحظة تُدرَج للطابور
+    uiLang = detectLang(v);       // لغة المحتوى = لغة رسالة المستخدم
     let prompt = v;
     if (files.length) prompt += "\n\n[ملفات مرفقة يمكنك قراءتها بأداة Read]:\n" + files.map((a) => "- " + a.path).join("\n");
     chatAppend(bubble("user",
-      (queued ? '<div class="who">⏳ مُدرَج في الطابور</div>' : "") +
+      (queued ? '<div class="who">⏳ Queued</div>' : "") +
       attachCardsHtml(files) +
       (v ? '<div class="msg-txt">' + escapeHtml(v) + "</div>" : "")));
     $("#chatInput").value = ""; autoGrow($("#chatInput"));
@@ -441,7 +448,7 @@
       txt = "📦 " + repo;
     } else if ($("#v-chat") && $("#v-chat").classList.contains("active")) {
       const t = (($("#chatTitle") && $("#chatTitle").textContent) || "").trim();
-      if (t && t !== "محادثة") txt = "💬 " + t;
+      if (t && t !== "Conversation") txt = "💬 " + t;
     }
     el.textContent = txt;
   }
@@ -456,9 +463,9 @@
       const lvl = (r.level == null ? 3 : r.level);
       const sl = $("#effortSlider"); if (sl) sl.value = lvl;
       updateEffortLabels(lvl);
-      const model = r.model || "النموذج";
+      const model = r.model || "Model";
       const cm = $("#cbarModel"); if (cm) cm.textContent = shortModel(model);
-      const pm = $("#effortPopModel"); if (pm) pm.textContent = "النموذج: " + model;
+      const pm = $("#effortPopModel"); if (pm) pm.textContent = "Model: " + model;
     } catch (e) {}
   }
   function effortEn(lvl) { return (effortLevels[lvl] && effortLevels[lvl].en) || EFFORT_EN[lvl] || "High"; }
@@ -821,9 +828,32 @@
   // ملاحظة (streaming): المزوّد عبر daemon لا يبثّ توكِناً بتوكِن، لكن أحداث
   // التفكير/الأدوات تصل لحظياً عبر SSE — فنعرض مؤشراً حيّاً «✻ يفكّر…» كما في
   // Claude Code، ويختفي عند اكتمال الرد (بديل صادق عن انتظار صامت).
+  // كشف لغة المستخدم من رسالته: عربي (RTL) أو إنجليزي (LTR). المحتوى (النصّ
+  // المُتخلِّل + أسطر الأدوات) يتبع لغة المستخدم؛ أمّا واجهة النظام والكلمات الحيّة
+  // فبالإنجليزية دائماً (كما طُلب).
+  function detectLang(s) { return /[؀-ۿ]/.test(String(s == null ? "" : s)) ? "ar" : "en"; }
+  let uiLang = "en";   // لغة محتوى المحادثة الحالية (من آخر رسالة مستخدم)
+  // أيقونة SVG عصرية لكل حدث (نعيد استخدام مجموعة AB_ICON بدل الإيموجي)
+  const EV_ICON_KEY = { thinking: "tool", tool_start: "tool", file_view: "read",
+    file_edit: "edit", file_create: "doc", bash_run: "run", error: "tool", done: "git" };
+  function evSvg(type) {
+    return '<svg viewBox="0 0 24 24" class="ev-svg" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+      (AB_ICON[EV_ICON_KEY[type] || "tool"] || AB_ICON.tool) + "</svg>";
+  }
+  // نصوص أسطر الأدوات بلغتَي المستخدم (تُختار حسب uiLang، بمحاذاة صحيحة)
+  const EV_LABEL = {
+    ar: { thinking: "يفكّر", tool_start: "يستخدم أداة", file_view: "يقرأ ملفاً",
+      file_edit: "يعدّل ملفاً", file_create: "ينشئ ملفاً", bash_run: "ينفّذ أمراً",
+      error: "خطأ", done: "تم" },
+    en: { thinking: "Thinking", tool_start: "Using a tool", file_view: "Reading a file",
+      file_edit: "Editing a file", file_create: "Creating a file", bash_run: "Running a command",
+      error: "Error", done: "Done" },
+  };
   const EV_ICON = { thinking: "⟳", tool_start: "🔧", file_view: "📄", file_edit: "✏️", file_create: "📄", bash_run: "💻", error: "❌", done: "✅" };
-  const LIVE_WORD = { thinking: "يفكّر", tool_start: "يستخدم أداة", file_view: "يقرأ",
-                      file_edit: "يعدّل", file_create: "ينشئ", bash_run: "ينفّذ" };
+  // الكلمات الحيّة بالإنجليزية دائماً (بجوار أيقونة WeaverCode المتحركة)
+  const LIVE_WORD = { thinking: "Thinking", tool_start: "Using a tool", file_view: "Reading",
+                      file_edit: "Editing", file_create: "Creating", bash_run: "Running" };
   // أثناء العمل: شبكة WeaverCode «المتحركة» (GIF بكامل حركتها) + كلمة الحالة.
   // عند التوقف: الشبكة «الثابتة» (PNG) وحدها — كما طلب المستخدم.
   const LIVE_GIF = "/static/weaver-live.gif", IDLE_PNG = "/static/weaver-idle.png";
@@ -1071,8 +1101,9 @@
   // مؤشر الحالة الحيّ يظهر داخل مجرى المحادثة أسفل آخر رسالة (كما في Claude Code)
   // — لا مثبّتاً في الأسفل قرب لوحة الكتابة.
   // كلمات حالة متبدّلة (بأسلوب Claude Code) — مع إبقاء أيقونة WeaverCode المتحركة
-  const LIVE_ROTATE = ["يفكّر", "يحلّل", "ينسج الخيوط", "يخطّط", "يتأمّل",
-    "يرتّب الأفكار", "يبتكر", "يدقّق", "يعالج", "يستكشف", "يوصّل الأطراف"];
+  // كلمات إنجليزية دائماً (كما طُلب) — تظهر بخطّ sans-serif مائل بجوار الأيقونة
+  const LIVE_ROTATE = ["Thinking", "Analyzing", "Weaving threads", "Planning", "Reflecting",
+    "Organizing ideas", "Creating", "Reviewing", "Processing", "Exploring", "Connecting the dots"];
   let _liveTimer = null, _liveIdx = 0;
   function _liveWordText(t) {
     const w = document.querySelector("#inlineLive .live-word");
@@ -1092,6 +1123,9 @@
           '<span class="live-word"></span><span class="live-dots"></span>';
         msgs.appendChild(row);
       }
+      // الموضع حسب لغة المستخدم: عربي → يسار، إنجليزي → يمين (كما طُلب)
+      if (row) { row.classList.toggle("live-left", uiLang === "ar");
+        row.classList.toggle("live-right", uiLang !== "ar"); }
       if (row) msgs.appendChild(row);   // أبقِه دائماً في الأسفل
       _liveWordText(word);
       // ابدأ تدوير الكلمات (كل ~2.6ث) إن لم يكن يعمل
@@ -1142,10 +1176,10 @@
         maybeAddPrChip(turnBlocks);   // رقاقة «آخر النشاط» = عمليات هذه الرسالة فعلاً
         pendingBlocks = []; turnBlocks = [];
       } else if (d.type === "narration") {
-        // نصّ المساعد المُتخلِّل بين الأدوات (كواجهة Claude Code): «يفكّر بصوت
-        // مسموع» — يظهر قبل صندوق أداة الجولة، نثراً خفيفاً مميّزاً عن الردّ النهائي.
+        // نصّ المساعد المُتخلِّل بين الأدوات — يتبع لغة نصّه (RTL للعربي، LTR للإنجليزي).
         const txt = d.detail || d.message;
-        chatAppend('<div class="bubble agent narr">' + md(txt) + "</div>");
+        const dir = detectLang(txt) === "ar" ? "rtl" : "ltr";
+        chatAppend('<div class="bubble agent narr" dir="' + dir + '">' + md(txt) + "</div>");
       } else if (d.type === "action_block") {
         // ملخص جولة الأدوات (قابل للضغط → المستوى الثالث). يُتراكم للحفظ + الملخّص.
         const blk = { desc: d.detail || d.message, ops: d.ops || [],
@@ -1153,8 +1187,13 @@
         pendingBlocks.push(blk); turnBlocks.push(blk);
         chatAppend(actionBlockHtml(d));
       } else if (d.type !== "status") {
-        const ic = EV_ICON[d.type] || "•";
-        chatAppend('<div class="bubble event">' + ic + " " + escapeHtml(d.message) + (d.detail ? " · " + escapeHtml(d.detail.slice(0, 50)) : "") + "</div>");
+        // سطر أداة بأيقونة SVG عصرية + نصّ بلغة المستخدم + محاذاة صحيحة
+        const label = (EV_LABEL[uiLang] || EV_LABEL.en)[d.type] || d.message || "";
+        const dir = uiLang === "ar" ? "rtl" : "ltr";
+        chatAppend('<div class="bubble event" dir="' + dir + '">' + evSvg(d.type) +
+          '<span class="ev-txt">' + escapeHtml(label) +
+          (d.detail ? ' · <span class="ev-detail">' + escapeHtml(d.detail.slice(0, 50)) + "</span>" : "") +
+          "</span></div>");
       }
       scrollChat();
     };

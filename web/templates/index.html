@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
@@ -10,24 +10,24 @@
 </head>
 <body>
 
-<!-- شريط علوي -->
+<!-- Top bar -->
 <header class="topbar">
-  <button id="menuBtn" class="ic" title="القائمة">☰</button>
+  <button id="menuBtn" class="ic" title="Menu">☰</button>
   <div class="top-center"><img src="/static/weaver-icon.png" class="brand-logo" alt="WeaverCode"/>
     <div class="brand-block">
-      <div class="brand-row"><span class="brand-name">WeaverCode</span><span id="stateDot" class="state-dot" title="الحالة"></span><span id="verBadge" class="ver-badge"></span></div>
+      <div class="brand-row"><span class="brand-name">WeaverCode</span><span id="stateDot" class="state-dot" title="Status"></span><span id="verBadge" class="ver-badge"></span></div>
       <div id="ctxSub" class="ctx-sub"></div>
     </div></div>
-  <button id="filterBtn" class="ic" title="أدوات">⚙️</button>
+  <button id="filterBtn" class="ic" title="Tools">⚙️</button>
 </header>
 
-<!-- ══════════ شاشة الجلسات ══════════ -->
+<!-- ══════════ Sessions screen ══════════ -->
 <section id="v-sessions" class="view active">
   <h1 class="display">WeaverCode</h1>
   <div id="sessions" class="sessions"></div>
 </section>
 
-<!-- ══════════ شاشة محادثة جديدة ══════════ -->
+<!-- ══════════ New conversation screen ══════════ -->
 <section id="v-compose" class="view">
   <div class="sub-head">
     <button class="ic" data-back>‹</button>
@@ -37,56 +37,56 @@
   <div class="center-chip"><span id="provChip" class="prov-chip">…</span></div>
 
   <div class="sug-wrap">
-    <div class="sug-label">اقتراحات</div>
-    <button class="sug" data-sug="أنشئ أو حدّث ملف CLAUDE.md لهذا المشروع">أنشئ أو حدّث ملف <code>CLAUDE.md</code></button>
-    <button class="sug" data-sug="ابحث عن تعليق TODO في الكود وأصلحه">ابحث عن تعليق <code>TODO</code> وأصلحه</button>
-    <button class="sug" data-sug="اقترح مناطق لتحسين الاختبارات في المشروع">اقترح تحسينات للاختبارات</button>
+    <div class="sug-label">Suggestions</div>
+    <button class="sug" data-sug="Create or update the CLAUDE.md file for this project">Create or update <code>CLAUDE.md</code></button>
+    <button class="sug" data-sug="Find a TODO comment in the code and fix it">Find a <code>TODO</code> comment and fix it</button>
+    <button class="sug" data-sug="Suggest areas to improve the project's tests">Suggest test improvements</button>
   </div>
 
   <div class="composer">
-    <div class="repo-chip" id="repoChip" title="المستودع المحلي على جهازك"><span class="ellip">…</span></div>
+    <div class="repo-chip" id="repoChip" title="Local repository on your device"><span class="ellip">…</span></div>
     <div class="build-box">
       <div id="attachList" class="attach-list"></div>
-      <textarea id="buildInput" rows="2" placeholder="صِف ما تريد بناءه…"></textarea>
+      <textarea id="buildInput" rows="2" placeholder="Describe what you want to build…"></textarea>
       <div class="build-actions">
-        <button id="attachBtn" class="ic" title="إرفاق ملفات">📎</button>
+        <button id="attachBtn" class="ic" title="Attach files">📎</button>
         <input id="fileInput" type="file" multiple hidden/>
-        <select id="buildMode" class="mode-sel" title="الوضع">
-          <option value="main">عام</option><option value="coding">برمجة</option>
-          <option value="project">مشروع</option><option value="security">أمن</option>
-          <option value="analysis">تحليل</option><option value="autonomous">مستقل</option>
+        <select id="buildMode" class="mode-sel" title="Mode">
+          <option value="main">General</option><option value="coding">Coding</option>
+          <option value="project">Project</option><option value="security">Security</option>
+          <option value="analysis">Analysis</option><option value="autonomous">Autonomous</option>
         </select>
-        <button id="buildSend" class="accept">إرسال ›</button>
+        <button id="buildSend" class="accept">Send ›</button>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ══════════ شاشة المحادثة ══════════ -->
+<!-- ══════════ Chat screen ══════════ -->
 <section id="v-chat" class="view">
   <div class="sub-head">
     <button class="ic" data-back>‹</button>
-    <div class="chat-title" id="chatTitle">محادثة</div>
+    <div class="chat-title" id="chatTitle">Conversation</div>
     <span class="ic-spacer"></span>
   </div>
-  <!-- مؤشر الحالة الحيّ يظهر داخل مجرى المحادثة (أسفل آخر رسالة) لا مثبّتاً في الأسفل -->
+  <!-- Live status indicator appears inside the chat stream (below last message), not pinned to the bottom -->
   <div id="chatMsgs" class="chat-msgs"></div>
   <div class="chat-composer">
     <div class="composer-panel">
       <div id="chatAttachList" class="attach-list chat-attach"></div>
       <div class="composer-input-row">
-        <textarea id="chatInput" rows="1" placeholder="أضف ملاحظة أو تابع…"></textarea>
-        <button id="chatSend" class="send-btn" title="إرسال" aria-label="إرسال">
+        <textarea id="chatInput" rows="1" placeholder="Add a note or follow up…"></textarea>
+        <button id="chatSend" class="send-btn" title="Send" aria-label="Send">
           <svg class="ic-send" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 20V5M12 5l-6 6M12 5l6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <svg class="ic-stop" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></svg>
         </button>
       </div>
       <div class="composer-bar">
         <div class="composer-bar-left">
-          <button id="chatAttachBtn" class="cbar-ic" title="إرفاق ملفات">📎</button>
+          <button id="chatAttachBtn" class="cbar-ic" title="Attach files">📎</button>
           <input id="chatFileInput" type="file" multiple hidden/>
         </div>
-        <button id="effortBtn" class="effort-btn" title="النموذج ومستوى الجهد">
+        <button id="effortBtn" class="effort-btn" title="Model and effort level">
           <span id="cbarModel" class="cbar-model">…</span>
           <span id="effortBadge" class="effort-badge">High</span>
           <span id="effortSpin" class="effort-spin" style="display:none"></span>
@@ -95,207 +95,207 @@
     </div>
   </div>
 
-  <!-- نافذة شريط الجهد (Effort) — أسرع ↔ أذكى، مبرمج ليعمل فعلياً -->
+  <!-- Effort slider popup — faster ↔ smarter, wired to actually work -->
   <div id="effortPop" class="effort-pop">
     <div class="effort-pop-head">
-      <span class="effort-pop-title">الجهد <b id="effortPopName">High</b></span>
-      <span class="effort-help" title="أعلى = ذكاء ودقّة أكثر (توكنات أكثر، حرارة أقل). أدنى = أسرع وأخفّ.">?</span>
+      <span class="effort-pop-title">Effort <b id="effortPopName">High</b></span>
+      <span class="effort-help" title="Higher = more intelligence and accuracy (more tokens, lower temperature). Lower = faster and lighter.">?</span>
     </div>
-    <div class="effort-pop-labels"><span>أسرع</span><span>أذكى</span></div>
+    <div class="effort-pop-labels"><span>Faster</span><span>Smarter</span></div>
     <input id="effortSlider" class="effort-slider" type="range" min="0" max="5" step="1" value="3"/>
     <div id="effortPopModel" class="effort-pop-model"></div>
   </div>
 </section>
 
-<!-- ══════════ لوحة القائمة (ملفات/إعدادات/GitHub) ══════════ -->
+<!-- ══════════ Menu panel (files/settings/GitHub) ══════════ -->
 <div id="menu" class="menu">
   <div class="menu-panel">
     <div class="menu-head"><span>WeaverCode</span><button class="ic" data-close="menu">✕</button></div>
-    <button class="menu-item" data-view="dashboard">📊 اللوحة</button>
-    <button class="menu-item" data-view="files">📁 الملفات</button>
-    <button class="menu-item" data-view="integrations">🔌 الارتباطات</button>
-    <button class="menu-item" data-view="settings">⚙️ الإعدادات</button>
+    <button class="menu-item" data-view="dashboard">📊 Dashboard</button>
+    <button class="menu-item" data-view="files">📁 Files</button>
+    <button class="menu-item" data-view="integrations">🔌 Integrations</button>
+    <button class="menu-item" data-view="settings">⚙️ Settings</button>
     <button class="menu-item" data-view="github">🔗 GitHub</button>
     <div class="menu-sep"></div>
     <div id="menuStatus" class="muted small"></div>
   </div>
 </div>
 
-<!-- اللوحة (Dashboard): وضع التخطيط + سجل التعديلات + الحالة الحيّة -->
+<!-- Dashboard: plan mode + operations log + live status -->
 <section id="v-dashboard" class="view">
-  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">اللوحة</div><span class="ic-spacer"></span></div>
+  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">Dashboard</div><span class="ic-spacer"></span></div>
 
   <div class="dash-card">
-    <div class="dash-title">🗺️ وضع التخطيط</div>
+    <div class="dash-title">🗺️ Plan mode</div>
     <div class="row" style="align-items:center">
       <span id="planState" class="intg-state off">…</span>
-      <button id="planToggle" class="chip-btn">تبديل</button>
+      <button id="planToggle" class="chip-btn">Toggle</button>
     </div>
     <div id="pendingPlanBox" style="display:none">
-      <div class="dash-sub">خطة معلّقة بانتظار الاعتماد:</div>
+      <div class="dash-sub">Plan pending approval:</div>
       <pre id="pendingPlanText" class="output"></pre>
-      <button id="planApprove" class="accept">🚀 اعتماد وتنفيذ</button>
+      <button id="planApprove" class="accept">🚀 Approve and run</button>
     </div>
     <div id="planMsg" class="muted small"></div>
   </div>
 
   <div class="dash-card">
-    <div class="dash-title">📈 الحالة الحيّة</div>
+    <div class="dash-title">📈 Live status</div>
     <div id="dashLive" class="dash-live">
-      <span class="muted small">لا مهمة قيد التنفيذ.</span>
+      <span class="muted small">No task running.</span>
     </div>
   </div>
 
   <div class="dash-card">
-    <div class="dash-title">✏️ سجل العمليات</div>
-    <!-- المستوى 1: ملخّصات الدفعات القابلة للطي -->
-    <div id="opsBatches" class="ops-batches"><span class="muted small">…جارٍ التحميل</span></div>
+    <div class="dash-title">✏️ Operations log</div>
+    <!-- Level 1: collapsible batch summaries -->
+    <div id="opsBatches" class="ops-batches"><span class="muted small">Loading…</span></div>
   </div>
 
-  <!-- شريط نشاط Git/GitHub (commits + PRs) — قابل للطي -->
+  <!-- Git/GitHub activity bar (commits + PRs) — collapsible -->
   <div class="dash-card">
     <button id="gitActToggle" class="git-act-head">
       <span class="op-caret" id="gitActCaret">▾</span>
-      <span class="dash-title" style="margin:0">🔀 نشاط Git/GitHub</span>
+      <span class="dash-title" style="margin:0">🔀 Git/GitHub activity</span>
       <span id="gitActMeta" class="muted small"></span>
     </button>
     <div id="gitActBody" class="git-act-body">
-      <div id="gitActBar" class="git-act-bar"><span class="muted small">…جارٍ التحميل</span></div>
+      <div id="gitActBar" class="git-act-bar"><span class="muted small">Loading…</span></div>
       <button id="gitActMore" class="chip-btn" style="display:none"></button>
     </div>
   </div>
 </section>
 
-<!-- المستوى 3: نافذة تفاصيل عملية واحدة -->
+<!-- Level 3: single operation detail modal -->
 <div id="opDetailModal" class="modal">
   <div class="modal-box op-detail-box">
     <div class="modal-head">
-      <button class="ic" id="opDetailBack" title="رجوع">‹</button>
-      <span id="opDetailTitle">تفاصيل العملية</span>
+      <button class="ic" id="opDetailBack" title="Back">‹</button>
+      <span id="opDetailTitle">Operation details</span>
       <button class="ic" data-opclose>✕</button>
     </div>
     <div id="opDetailBody" class="op-detail-body"></div>
   </div>
 </div>
 
-<!-- ملفات -->
+<!-- Files -->
 <section id="v-files" class="view">
-  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">الملفات</div>
+  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">Files</div>
     <a class="chip-btn" href="/api/files/download-zip">⬇️ ZIP</a></div>
   <div id="outputsDir" class="muted small"></div>
   <div id="fileList" class="file-list"></div>
 </section>
 
-<!-- إعدادات -->
+<!-- Settings -->
 <section id="v-settings" class="view">
-  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">الإعدادات</div><span class="ic-spacer"></span></div>
-  <label class="field"><span>المزود</span>
+  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">Settings</div><span class="ic-spacer"></span></div>
+  <label class="field"><span>Provider</span>
     <select id="providerSel">
-      <option value="">— اختر —</option>
+      <option value="">— Choose —</option>
       <option value="aerolink">aerolink</option><option value="groq">groq</option>
       <option value="deepseek">deepseek</option><option value="openrouter">openrouter</option>
       <option value="anthropic">anthropic</option><option value="openai">openai</option>
     </select></label>
-  <label class="field"><span>النموذج</span><input id="modelInput" type="text" placeholder="claude-fable-5"/></label>
-  <div class="row"><button id="discoverModels" class="chip-btn">🔍 اكتشاف النماذج المتاحة</button></div>
+  <label class="field"><span>Model</span><input id="modelInput" type="text" placeholder="claude-fable-5"/></label>
+  <div class="row"><button id="discoverModels" class="chip-btn">🔍 Discover available models</button></div>
   <div id="modelsList" class="models-list"></div>
-  <label class="field"><span>رابط المزود</span><input id="baseUrlInput" type="text" placeholder="https://…/v1" inputmode="url"/></label>
-  <label class="field"><span>الحد الأقصى للتوكنات</span><input id="maxTokensInput" type="number" placeholder="8192" inputmode="numeric"/></label>
-  <label class="field"><span>المفتاح</span>
+  <label class="field"><span>Provider URL</span><input id="baseUrlInput" type="text" placeholder="https://…/v1" inputmode="url"/></label>
+  <label class="field"><span>Max tokens</span><input id="maxTokensInput" type="number" placeholder="8192" inputmode="numeric"/></label>
+  <label class="field"><span>API key</span>
     <div class="key-row"><input id="keyInput" type="password" placeholder="WEAVER_API_KEY"/>
     <button id="keyToggle" class="ic">👁️</button></div></label>
-  <label class="check-row"><input id="askPermToggle" type="checkbox"/><span>🔐 اسألني قبل الأدوات الحسّاسة (Bash/كتابة/رفع) — كواجهة Claude Code</span></label>
-  <div class="row"><button id="saveSettings" class="accept">حفظ</button>
-    <button id="testConn" class="chip-btn">اختبر الاتصال</button></div>
+  <label class="check-row"><input id="askPermToggle" type="checkbox"/><span>🔐 Ask me before sensitive tools (Bash/write/push) — like Claude Code</span></label>
+  <div class="row"><button id="saveSettings" class="accept">Save</button>
+    <button id="testConn" class="chip-btn">Test connection</button></div>
   <div id="settingsMsg" class="muted small"></div>
 </section>
 
 <!-- GitHub -->
 <section id="v-github" class="view">
   <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">GitHub</div><span class="ic-spacer"></span></div>
-  <div class="note">🔒 يقرأ مستودع <b>git المحلي على جهازك</b> فقط — لا يدخل حسابك.</div>
+  <div class="note">🔒 Reads your <b>local git repository</b> only — it does not access your account.</div>
   <div id="ghInfo" class="muted small"></div>
   <div id="ghCommits" class="commits"></div>
   <div class="row"><input id="ghMsg" type="text" value="🕸️ WeaverCode update"/>
-    <button id="ghPush" class="accept">رفع</button></div>
+    <button id="ghPush" class="accept">Push</button></div>
   <pre id="ghOutput" class="output"></pre>
 </section>
 
-<!-- الارتباطات -->
+<!-- Integrations -->
 <section id="v-integrations" class="view">
-  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">الارتباطات</div>
-    <button id="addIntg" class="ic" title="إضافة">＋</button></div>
-  <div class="note">🔌 «اتصال» بـ GitHub يعمل مباشرةً للجميع (Authorize برمز قصير، بلا إعداد). تظهر «متصل» الخضراء <b>فقط</b> عند اتصال حقيقي. ⏻ لقطع الاتصال. <a href="#" id="ghAdvancedSetup">إعداد متقدّم: ضغطة واحدة بتطبيقك الخاص</a>.</div>
+  <div class="sub-head"><button class="ic" data-back>‹</button><div class="chat-title">Integrations</div>
+    <button id="addIntg" class="ic" title="Add">＋</button></div>
+  <div class="note">🔌 "Connect" to GitHub works instantly for everyone (Authorize with a short code, no setup). The green "Connected" shows <b>only</b> on a real connection. ⏻ to disconnect. <a href="#" id="ghAdvancedSetup">Advanced setup: one-tap with your own app</a>.</div>
   <div id="intgList" class="intg-list"></div>
 </section>
 
-<!-- نافذة تعديل/إضافة ارتباط -->
+<!-- Edit/add integration modal -->
 <div id="intgModal" class="modal">
   <div class="modal-box">
-    <div class="modal-head"><span id="intgModalTitle">تعديل ارتباط</span><button class="ic" data-mclose>✕</button></div>
+    <div class="modal-head"><span id="intgModalTitle">Edit integration</span><button class="ic" data-mclose>✕</button></div>
     <div id="mHint" class="modal-hint" style="display:none"></div>
-    <label class="field"><span>الاسم</span><input id="mName" type="text" placeholder="مثل Notion"/></label>
-    <label class="field"><span>الرابط</span><input id="mUrl" type="url" placeholder="https://…" inputmode="url"/></label>
-    <label class="field"><span>مفتاح / توكِن (اختياري)</span><input id="mToken" type="text" placeholder="اتركه فارغاً إن لم يلزم"/></label>
-    <div class="row"><button id="mSave" class="accept">حفظ</button><button class="chip-btn" data-mclose>إلغاء</button></div>
+    <label class="field"><span>Name</span><input id="mName" type="text" placeholder="e.g. Notion"/></label>
+    <label class="field"><span>URL</span><input id="mUrl" type="url" placeholder="https://…" inputmode="url"/></label>
+    <label class="field"><span>Key / token (optional)</span><input id="mToken" type="text" placeholder="Leave empty if not needed"/></label>
+    <div class="row"><button id="mSave" class="accept">Save</button><button class="chip-btn" data-mclose>Cancel</button></div>
   </div>
 </div>
 
-<!-- نافذة تفويض «Allow» الحقيقي (Device Flow) -->
+<!-- Real "Allow" authorization modal (Device Flow) -->
 <div id="deviceModal" class="modal">
   <div class="modal-box">
-    <div class="modal-head"><span id="devTitle">تفويض الاتصال</span><button class="ic" data-dvclose>✕</button></div>
-    <div class="modal-hint">اضغط «فتح صفحة GitHub» ثم أدخل الرمز أدناه واضغط <b>Authorize</b>. سيتصل النظام تلقائياً — بلا توكن.</div>
+    <div class="modal-head"><span id="devTitle">Authorize connection</span><button class="ic" data-dvclose>✕</button></div>
+    <div class="modal-hint">Tap "Open GitHub page", enter the code below and press <b>Authorize</b>. The system will connect automatically — no token.</div>
     <div class="dev-code" id="devCode">————</div>
-    <div class="dev-status" id="devStatus">بانتظار التفويض…</div>
+    <div class="dev-status" id="devStatus">Waiting for authorization…</div>
     <div class="row">
-      <button id="devOpen" class="accept">فتح صفحة GitHub</button>
-      <button id="devCopy" class="chip-btn">نسخ الرمز</button>
-      <button class="chip-btn" data-dvclose>إلغاء</button>
+      <button id="devOpen" class="accept">Open GitHub page</button>
+      <button id="devCopy" class="chip-btn">Copy code</button>
+      <button class="chip-btn" data-dvclose>Cancel</button>
     </div>
   </div>
 </div>
 
-<!-- نافذة إعداد GitHub OAuth (مرة واحدة، دائمة) -->
+<!-- GitHub OAuth setup modal (one time, permanent) -->
 <div id="ghSetupModal" class="modal">
   <div class="modal-box">
-    <div class="modal-head"><span>إعداد اتصال GitHub (مرة واحدة)</span><button class="ic" data-ghclose>✕</button></div>
+    <div class="modal-head"><span>Set up GitHub connection (one time)</span><button class="ic" data-ghclose>✕</button></div>
     <div class="modal-hint">
-      لتفعيل زر «Authorize» بضغطة واحدة، أدخل بيانات تطبيق OAuth الخاص بك (يُحفظ على جهازك فقط).<br>
-      1) افتح <a id="ghDevLink" href="https://github.com/settings/developers" target="_blank" rel="noopener">github.com/settings/developers</a> → New OAuth App.<br>
-      2) Callback URL: <code>http://localhost:8080/oauth/callback</code> — وفعّل Device Flow (اختياري).<br>
-      3) انسخ Client ID، وولّد Client Secret، والصقهما هنا.
+      To enable the one-tap "Authorize" button, enter your own OAuth app details (stored on your device only).<br>
+      1) Open <a id="ghDevLink" href="https://github.com/settings/developers" target="_blank" rel="noopener">github.com/settings/developers</a> → New OAuth App.<br>
+      2) Callback URL: <code>http://localhost:8080/oauth/callback</code> — and enable Device Flow (optional).<br>
+      3) Copy the Client ID, generate a Client Secret, and paste them here.
     </div>
     <label class="field"><span>Client ID</span><input id="ghCid" type="text" placeholder="Ov23li…" inputmode="text"/></label>
-    <label class="field"><span>Client Secret</span><input id="ghSec" type="text" placeholder="يُحفظ محلياً — لا يُرفع"/></label>
-    <div class="row"><button id="ghSave" class="accept">حفظ واتصال</button><button class="chip-btn" data-ghclose>إلغاء</button></div>
+    <label class="field"><span>Client Secret</span><input id="ghSec" type="text" placeholder="Stored locally — never uploaded"/></label>
+    <div class="row"><button id="ghSave" class="accept">Save and connect</button><button class="chip-btn" data-ghclose>Cancel</button></div>
   </div>
 </div>
 
-<!-- نافذة اختيار المستودع الحقيقي من GitHub -->
+<!-- Choose a real repository from GitHub modal -->
 <div id="repoModal" class="modal">
   <div class="modal-box">
-    <div class="modal-head"><span>اختر مستودعاً من GitHub</span><button class="ic" data-rpclose>✕</button></div>
-    <div class="modal-hint">مستودعاتك الحقيقية من حسابك — اضغط أيّها لتكملة مشروعك عليه.</div>
+    <div class="modal-head"><span>Choose a repository from GitHub</span><button class="ic" data-rpclose>✕</button></div>
+    <div class="modal-hint">Your real repositories from your account — tap any to continue your project on it.</div>
     <div class="repo-quick">
-      <button id="repoNone" class="repo-quick-btn">💬 محادثة بدون مستودع</button>
-      <button id="repoNew" class="repo-quick-btn accent">＋ إنشاء مستودع جديد</button>
+      <button id="repoNone" class="repo-quick-btn">💬 Chat without a repository</button>
+      <button id="repoNew" class="repo-quick-btn accent">＋ Create a new repository</button>
     </div>
     <div id="repoNewForm" class="repo-new" style="display:none">
-      <label class="field"><span>اسم المستودع</span><input id="rnName" type="text" placeholder="my-project" autocomplete="off"/></label>
-      <label class="field"><span>الوصف (اختياري)</span><input id="rnDesc" type="text" placeholder="وصف قصير"/></label>
-      <label class="check-row"><input id="rnPrivate" type="checkbox" checked/><span>مستودع خاص 🔒</span></label>
+      <label class="field"><span>Repository name</span><input id="rnName" type="text" placeholder="my-project" autocomplete="off"/></label>
+      <label class="field"><span>Description (optional)</span><input id="rnDesc" type="text" placeholder="Short description"/></label>
+      <label class="check-row"><input id="rnPrivate" type="checkbox" checked/><span>Private repository 🔒</span></label>
       <div id="rnMsg" class="muted small"></div>
-      <div class="row"><button id="rnCreate" class="accept">إنشاء واختيار</button><button id="rnCancel" class="chip-btn">إلغاء</button></div>
+      <div class="row"><button id="rnCreate" class="accept">Create and select</button><button id="rnCancel" class="chip-btn">Cancel</button></div>
     </div>
-    <input id="repoSearch" type="text" placeholder="🔍 بحث…" autocomplete="off"/>
-    <div id="repoList" class="repo-list"><div class="muted small">…جارٍ التحميل</div></div>
-    <div class="row"><button class="chip-btn" data-rpclose>إغلاق</button></div>
+    <input id="repoSearch" type="text" placeholder="🔍 Search…" autocomplete="off"/>
+    <div id="repoList" class="repo-list"><div class="muted small">Loading…</div></div>
+    <div class="row"><button class="chip-btn" data-rpclose>Close</button></div>
   </div>
 </div>
 
-<!-- زر محادثة جديدة -->
-<button id="newBtn" class="new-pill">محادثة جديدة <span class="plus">+</span></button>
+<!-- New conversation button -->
+<button id="newBtn" class="new-pill">New conversation <span class="plus">+</span></button>
 
 <script src="/static/app.js?v=__CACHEBUST__"></script>
 </body>

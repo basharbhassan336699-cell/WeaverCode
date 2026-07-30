@@ -125,7 +125,12 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   word-break: break-word; font-size: 15px; line-height: 1.6; }
 .bubble.user { background: var(--orange); color: #fff; align-self: flex-start; border-bottom-inline-start-radius: 4px; }
 .bubble.agent { background: var(--card); border: 1px solid var(--line); align-self: flex-end; border-bottom-inline-end-radius: 4px; }
-.bubble.event { background: none; border: none; color: var(--muted); font-size: 13px; align-self: center; padding: 2px; }
+.bubble.event { background: none; border: none; color: var(--muted); font-size: 13px;
+  align-self: stretch; padding: 3px 2px; display: flex; align-items: center; gap: 7px; }
+.bubble.event[dir="rtl"] { flex-direction: row-reverse; text-align: right; }
+.bubble.event[dir="ltr"] { flex-direction: row; text-align: left; }
+.ev-svg { width: 15px; height: 15px; flex: none; color: var(--muted); opacity: .9; }
+.bubble.event .ev-detail { color: var(--muted-2); }
 .bubble .who { font-size: 11px; opacity: .7; margin-bottom: 4px; }
 /* نصّ المساعد المُتخلِّل بين الأدوات (كواجهة Claude Code): نثر خفيف، بلا بطاقة،
    بشارة برتقالية جانبية — يميّزه عن الردّ النهائي دون أن يزاحمه. */
@@ -392,7 +397,12 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
 /* مؤشر الحالة الحيّ داخل مجرى المحادثة (أسفل آخر رسالة) — كما في Claude Code */
 .inline-live { align-self: flex-end; display: flex; align-items: center; gap: 8px;
   color: var(--orange); font-size: 14px; padding: 2px 4px; }
-.inline-live .live-word { color: var(--orange); }
+/* الموضع حسب لغة المستخدم: عربي → يسار، إنجليزي → يمين (كما طُلب) */
+.inline-live.live-left { align-self: flex-start; direction: ltr; }
+.inline-live.live-right { align-self: flex-end; direction: ltr; }
+/* الكلمات الحيّة: إنجليزية دائماً بخطّ sans-serif مائل */
+.inline-live .live-word { color: var(--orange); font-style: italic;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 .live-icon { width: 32px; height: 32px; object-fit: contain; vertical-align: middle; }
 .live-dots::after { content: ""; animation: live-dots 1.5s steps(4, end) infinite; }
 @keyframes live-dots { 0% { content: ""; } 25% { content: "."; }

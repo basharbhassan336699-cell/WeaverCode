@@ -269,5 +269,11 @@ def get_system_prompt(mode: str = "main") -> str:
         "analysis": ANALYSIS_SYSTEM,
     }
     base = prompts.get(mode, MAIN_SYSTEM)
-    # قلب الهوية أولاً (بلطف) ثم بروموه الوضع
-    return IDENTITY_CORE + "\n" + base
+    # قاعدة اللغة: ردّ دائماً بلغة المستخدم (عربي↔عربي، إنجليزي↔إنجليزي) — يشمل
+    # النصّ المُتخلِّل بين الأدوات. EN: always reply in the user's own language.
+    lang_rule = ("\n\n## Language\nAlways reply in the SAME language the user "
+                 "writes in — if they write in Arabic, answer in Arabic; if in "
+                 "English, answer in English. This includes the short narration "
+                 "you write between tool calls. Never switch languages on your own.")
+    # قلب الهوية أولاً (بلطف) ثم بروموه الوضع ثم قاعدة اللغة
+    return IDENTITY_CORE + "\n" + base + lang_rule
