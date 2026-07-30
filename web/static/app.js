@@ -894,7 +894,7 @@
     const bd = document.createElement("div"); bd.id = "prBackdrop"; bd.className = "adx-backdrop";
     bd.onclick = closePrPanel; document.body.appendChild(bd);
     const el = document.createElement("div"); el.id = "prPanel"; el.className = "pr-panel";
-    el.innerHTML = '<div class="pr-head"><span class="pr-h-title">' + escapeHtml(title || "آخر النشاط") + "</span>" +
+    el.innerHTML = '<div class="pr-head"><span class="pr-h-title">' + escapeHtml(title || "Recent activity") + "</span>" +
       '<button class="pr-close" aria-label="إغلاق">✕</button></div>' +
       '<div class="pr-list">' + ops.map(opCard).join("") + "</div>";
     document.body.appendChild(el);
@@ -916,17 +916,17 @@
         else if (tn === "Screenshot") shots++;
       });
       const parts = [];
-      if (files) parts.push(files + " ملف");
-      if (cmds) parts.push(cmds + (cmds > 2 ? " أوامر" : " أمر"));
+      if (files) parts.push(files + (files > 1 ? " files" : " file"));
+      if (cmds) parts.push(cmds + (cmds > 1 ? " commands" : " command"));
       if (commits) parts.push(commits + " commit");
-      if (shots) parts.push(shots + " لقطة");
-      const label = "آخر النشاط" + (parts.length ? " · " + parts.join(" · ") : " · " + ops.length + " عملية");
+      if (shots) parts.push(shots + (shots > 1 ? " shots" : " shot"));
+      const label = "Recent activity" + (parts.length ? " · " + parts.join(" · ") : " · " + ops.length + " ops");
       const el = document.createElement("div"); el.className = "pr-chip-row";
       el.innerHTML = '<button class="pr-chip"><span class="pr-branch">⑂</span> ' + escapeHtml(label) + "</button>";
       const live = $("#inlineLive");
       if (live) live.insertAdjacentElement("beforebegin", el);
       else $("#chatMsgs").appendChild(el);
-      el.querySelector(".pr-chip").onclick = () => openPrPanel(ops, "آخر النشاط");
+      el.querySelector(".pr-chip").onclick = () => openPrPanel(ops, "Recent activity");
       scrollChat();
     } catch (e) {}
   }
@@ -945,20 +945,20 @@
       else if (tn === "Read" || tn === "Glob" || tn === "Grep" || tn === "DirectoryList") reads++;
       else if (tn === "GitCommit" || tn === "GitPush") commits++;
     }));
-    if (!blocks || !blocks.length) return '<div class="bubble event">✅ تم</div>';
+    if (!blocks || !blocks.length) return '<div class="bubble event">✅ Done</div>';
     const parts = [];
-    if (files.length) parts.push(files.length + " ملف");
+    if (files.length) parts.push(files.length + (files.length > 1 ? " files" : " file"));
     if (added || removed) parts.push('<span class="cs-add">+' + added + '</span> <span class="cs-rm">-' + removed + '</span>');
-    if (cmds) parts.push(cmds + (cmds > 2 ? " أوامر" : " أمر"));
-    if (reads) parts.push(reads + " قراءة");
+    if (cmds) parts.push(cmds + (cmds > 1 ? " commands" : " command"));
+    if (reads) parts.push(reads + (reads > 1 ? " reads" : " read"));
     if (commits) parts.push(commits + " commit");
     const fileChips = files.slice(0, 6).map((f) =>
       '<span class="cs-file">📄 ' + escapeHtml(f.split("/").pop()) + "</span>").join("");
     const shotImgs = shots.map((s) =>
-      '<img class="cs-shot" src="/api/shot?path=' + encodeURIComponent(s) + '" alt="لقطة شاشة"/>').join("");
+      '<img class="cs-shot" src="/api/shot?path=' + encodeURIComponent(s) + '" alt="screenshot"/>').join("");
     return '<div class="complete-card' + (failed ? " has-fail" : "") + '">' +
       '<div class="cs-head"><span class="cs-mark">' + (failed ? "⚠️" : "✅") + '</span>' +
-      '<span class="cs-title">' + (failed ? "اكتمل مع تنبيهات" : "اكتمل العمل") + '</span>' +
+      '<span class="cs-title">' + (failed ? "Completed with warnings" : "Work complete") + '</span>' +
       (parts.length ? '<span class="cs-stats">' + parts.join(" · ") + "</span>" : "") + "</div>" +
       (fileChips ? '<div class="cs-files">' + fileChips + (files.length > 6 ? '<span class="cs-more">+' + (files.length - 6) + "</span>" : "") + "</div>" : "") +
       (shotImgs ? '<div class="cs-shots">' + shotImgs + "</div>" : "") +
@@ -1074,7 +1074,7 @@
     }).join("");
     const ta = ops.reduce((s, o) => s + (o.lines_added || 0), 0);
     const tr = ops.reduce((s, o) => s + (o.lines_removed || 0), 0);
-    const stats = ops.length ? '<div class="adx-stats">' + ops.length + ' عملية · +' + ta + ' -' + tr + ' سطر</div>' : '';
+    const stats = ops.length ? '<div class="adx-stats">' + ops.length + ' ops · +' + ta + ' -' + tr + ' lines</div>' : '';
     pop.innerHTML =
       '<div class="adx-head"><span class="adx-title">' + escapeHtml(block.desc || "تفاصيل العمليات") + '</span>' +
       '<button class="adx-close" aria-label="إغلاق">✕</button></div>' +

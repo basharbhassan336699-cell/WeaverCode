@@ -56,13 +56,13 @@ def make_plan_handler(spinner=None):
         if spinner is not None:
             spinner.clear()
         print(f"\n{ORANGE}{'─' * 50}{RESET}")
-        print(f"  {ORANGE}📋 الخطة المقترحة:{RESET}")
+        print(f"  {ORANGE}📋 Proposed plan:{RESET}")
         print(f"{plan_text}")
         print(f"{ORANGE}{'─' * 50}{RESET}")
         if not sys.stdin.isatty():
             return False  # سياق غير تفاعلي → لا تعتمد تلقائياً
         try:
-            choice = input(f"  {ORANGE}اعتماد الخطة والتنفيذ؟ [y/n]:{RESET} ").strip().lower()
+            choice = input(f"  {ORANGE}Approve and run the plan? [y/n]:{RESET} ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
         return choice in ("y", "yes", "نعم", "ن")
@@ -83,7 +83,7 @@ def make_permission_handler(spinner=None):
             spinner.clear()
         draw_permission_request(name, _permission_preview(args))
         try:
-            choice = input(f"  {ORANGE}اختيارك [y/a/n]:{RESET} ").strip().lower()
+            choice = input(f"  {ORANGE}Your choice [y/a/n]:{RESET} ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             return "deny"
         if choice in ("y", "yes", "نعم", "ن"):
@@ -371,7 +371,7 @@ def _show_empty_diagnostic(provider) -> None:
     raw = (getattr(provider, "last_raw", "") or "").strip()
     draw_error("النموذج أرجع رداً فارغاً.")
     if raw:
-        print(f"{GRAY}🔎 آخر استجابة خام من المزوّد (شخّص بها الشكل):{RESET}")
+        print(f"{GRAY}🔎 Last raw response from the provider (use it to diagnose the format):{RESET}")
         print(raw[:1200])
         print(f"{GRAY}شغّل الفاحص لمعرفة الصيغة الصحيحة:  "
               f"bash scripts/weaver-doctor.sh{RESET}")
@@ -447,13 +447,13 @@ def _load_models(current: str = "", live: bool = True) -> list:
 
 def _pick_model_numbered(current: str, models: list):
     """اختيار نموذج بقائمة مرقّمة (يعمل في أي طرفية)."""
-    print(f"\n{ORANGE}اختر النموذج:{RESET}")
+    print(f"\n{ORANGE}Choose a model:{RESET}")
     for i, m in enumerate(models, 1):
         mark = f" {ORANGE}✓{RESET}" if m["name"] == current else ""
         print(f"  {ORANGE}{i:>2}.{RESET} {m['name']}{mark}   {GRAY}{m.get('desc','')}{RESET}")
-    print(f"  {GRAY}(اكتب رقماً أو اسم نموذج مخصّص · Enter للإبقاء){RESET}")
+    print(f"  {GRAY}(type a number or a custom model name · Enter to keep){RESET}")
     try:
-        c = input(f"  {ORANGE}اختيارك:{RESET} ").strip()
+        c = input(f"  {ORANGE}Your choice:{RESET} ").strip()
     except (EOFError, KeyboardInterrupt):
         return None
     if not c:
@@ -712,8 +712,8 @@ async def interactive_mode(initial_history=None, session_id=None,
     commands = SlashCommands()
 
     draw_welcome(provider.config.model, provider.config.base_url)
-    print(f"{GRAY}اكتب 'خروج' للإنهاء | '/model' النماذج | '/key <k>' المفتاح | "
-          f"'/provider <name>' المنصة | '/mcp' | '/' لكل الأوامر{RESET}")
+    print(f"{GRAY}Type 'exit' to quit | '/model' models | '/key <k>' API key | "
+          f"'/provider <name>' provider | '/mcp' | '/' for all commands{RESET}")
     draw_separator()
 
     from core.engine.provider import Message
@@ -743,7 +743,7 @@ async def interactive_mode(initial_history=None, session_id=None,
             else:
                 prompt = draw_prompt()
         except (EOFError, KeyboardInterrupt):
-            print(f"\n\n{ORANGE}🕸️  إلى اللقاء!{RESET}")
+            print(f"\n\n{ORANGE}🕸️  Goodbye!{RESET}")
             break
 
         if not prompt:
@@ -757,7 +757,7 @@ async def interactive_mode(initial_history=None, session_id=None,
                           f"{provider.config.base_url}")
 
         if prompt.lower() in ("خروج", "exit", "quit"):
-            print(f"{ORANGE}🕸️  إلى اللقاء!{RESET}")
+            print(f"{ORANGE}🕸️  Goodbye!{RESET}")
             break
 
         if prompt.startswith("/mode "):
@@ -871,7 +871,7 @@ async def interactive_mode(initial_history=None, session_id=None,
                 draw_info("مجلدات العمل الحالية:")
                 for d in dirs:
                     print(f"  {ORANGE}•{RESET} {d}")
-                print(f"  {GRAY}الاستخدام: /add-dir <المسار>{RESET}")
+                print(f"  {GRAY}Usage: /add-dir <path>{RESET}")
             else:
                 msg = engine.tools.add_dir(arg)
                 # أعِد تحميل تعليمات CLAUDE.md المتداخلة للمجلد الجديد
@@ -932,9 +932,9 @@ async def interactive_mode(initial_history=None, session_id=None,
             filled = int(bar_len * st["percent"] / 100)
             bar = "█" * filled + "░" * (bar_len - filled)
             draw_info("حجم السياق الحالي:")
-            print(f"  الرسائل:  {st['messages']}")
-            print(f"  التوكنات: ~{st['tokens']:,} / {st['window']:,}")
-            print(f"  الامتلاء: {GRAY}{bar}{RESET} {st['percent']:.1f}%")
+            print(f"  Messages:  {st['messages']}")
+            print(f"  Tokens:   ~{st['tokens']:,} / {st['window']:,}")
+            print(f"  Fill:     {GRAY}{bar}{RESET} {st['percent']:.1f}%")
             continue
 
         # ── /clear: مسح سجل المحادثة ─────────────────────────────────────────
@@ -1087,14 +1087,14 @@ async def _show_sessions():
     if not sessions:
         draw_info("لا توجد جلسات محفوظة بعد.")
         return
-    print(f"\n{ORANGE}الجلسات المحفوظة:{RESET}")
+    print(f"\n{ORANGE}Saved sessions:{RESET}")
     for i, s in enumerate(sessions, 1):
         dt = datetime.datetime.fromtimestamp(
             s["updated_at"]).strftime("%Y-%m-%d %H:%M")
         name = s["name"] or s["id"][:8]
         prompt = (s["last_prompt"] or "")[:60]
         print(f"  {ORANGE}{i}.{RESET} [{name}] {GRAY}{dt}{RESET} — {prompt}")
-    print(f"\n{GRAY}للاستئناف: python weaver.py --resume <الاسم أو ID>{RESET}")
+    print(f"\n{GRAY}To resume: python weaver.py --resume <name or ID>{RESET}")
 
 
 async def resume_session(session_ref=None):
@@ -1110,7 +1110,7 @@ async def resume_session(session_ref=None):
             draw_error("لا توجد جلسات محفوظة.")
             return
         import datetime
-        print(f"\n{ORANGE}الجلسات المحفوظة:{RESET}")
+        print(f"\n{ORANGE}Saved sessions:{RESET}")
         for i, s in enumerate(sessions, 1):
             dt = datetime.datetime.fromtimestamp(
                 s["updated_at"]).strftime("%Y-%m-%d %H:%M")
@@ -1119,7 +1119,7 @@ async def resume_session(session_ref=None):
             print(f"  {ORANGE}{i}.{RESET} [{name}] {GRAY}{dt}{RESET} — {prompt}")
         print()
         try:
-            choice = input(f"  {ORANGE}اختر رقماً أو اكتب ID/اسم الجلسة:{RESET} ").strip()
+            choice = input(f"  {ORANGE}Choose a number or type the session ID/name:{RESET} ").strip()
         except (EOFError, KeyboardInterrupt):
             return
         if choice.isdigit() and 1 <= int(choice) <= len(sessions):
@@ -1176,7 +1176,7 @@ def main():
     parser.add_argument("--yes", "-y", action="store_true",
                         help="الموافقة التلقائية على كل الأدوات دون سؤال (احذر)")
     parser.add_argument("--version", "-v", action="store_true",
-                        help="عرض إصدار WeaverCode والخروج")
+                        help="Show WeaverCode version and exit")
     parser.add_argument("--print-system", action="store_true",
                         help="طباعة البروموه النظامي الفعلي المُرسَل للنموذج (تشخيص الهوية)")
     parser.add_argument("--resume", "-r", nargs="?", const="__picker__",
@@ -1219,11 +1219,11 @@ def main():
         guard = "مفعّل" if os.environ.get("WEAVER_IDENTITY_GUARD", "1").lower() \
             not in ("0", "false", "off", "no") else "معطّل"
         print(f"🕸️  WeaverCode {get_version()} (base {WEAVER_VERSION})")
-        print(f"    النموذج:  {os.environ.get('WEAVER_MODEL', 'غير محدد')}")
-        print(f"    المزود:   {os.environ.get('WEAVER_BASE_URL', 'غير محدد')}")
-        print(f"    حارس الهوية: {guard}")
+        print(f"    Model:  {os.environ.get('WEAVER_MODEL', 'not set')}")
+        print(f"    Provider: {os.environ.get('WEAVER_BASE_URL', 'not set')}")
+        print(f"    Identity guard: {guard}")
         auto = os.environ.get("WEAVER_AUTO_APPROVE", "0").lower() in ("1", "true", "yes", "on", "نعم")
-        print(f"    الصلاحيات: {'موافقة تلقائية (بلا سؤال)' if auto else 'تسأل قبل الأدوات الخطرة'}")
+        print(f"    الصلاحيات: {'auto-approve (no prompt)' if auto else 'ask before risky tools'}")
         return
 
     # ── تشخيص: طباعة البروموه النظامي الفعلي ────────────────────────────────

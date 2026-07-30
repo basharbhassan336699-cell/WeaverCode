@@ -51,7 +51,7 @@ GRAY   = GRY
 RESET  = RST
 BOLD   = BLD
 
-WEAVER_VERSION = "v4.40.0"
+WEAVER_VERSION = "v4.40.1"
 
 # قائمة كل رموز الـ ANSI لإزالتها عند حساب العرض الحقيقي
 _ANSI = [OR, OR2, DRK, WHT, GRY, GR2, GRN, RED, CYN, RST, BLD, DIM,
@@ -247,37 +247,37 @@ def draw_welcome(model: str = "", provider: str = ""):
 
     left_lines = []
     user = os.environ.get("USER") or os.environ.get("USERNAME") or "Bashar"
-    left_lines.append(f"  {OR2}{BLD}أهلاً {user}!{RST}")
+    left_lines.append(f"  {OR2}{BLD}Welcome {user}!{RST}")
     left_lines.append("")
     for line in _spider_art():
         left_lines.append(f"  {line}")
     left_lines.append("")
-    left_lines.append(f"  {GRY}النموذج:{RST}  {OR}{env['model']}{RST}")
-    left_lines.append(f"  {GRY}المزود: {RST}  {GR2}{env['provider']}{RST}")
-    left_lines.append(f"  {GRY}المفتاح:{RST}  " +
+    left_lines.append(f"  {GRY}Model:{RST}  {OR}{env['model']}{RST}")
+    left_lines.append(f"  {GRY}Provider:{RST}  {GR2}{env['provider']}{RST}")
+    left_lines.append(f"  {GRY}Key:{RST}  " +
                       (f"{GRN}✓ {env.get('key_preview', '···')}{RST}" if env['key_set']
-                       else f"{RED}✗ غير محدد{RST}"))
-    left_lines.append(f"  {GRY}المسار: {RST}  {DIM}{Path.cwd()}{RST}")
-    left_lines.append(f"  {GRY}المحادثات:{RST} {OR}{stats}{RST}")
+                       else f"{RED}✗ not set{RST}"))
+    left_lines.append(f"  {GRY}Path:{RST}  {DIM}{Path.cwd()}{RST}")
+    left_lines.append(f"  {GRY}Conversations:{RST} {OR}{stats}{RST}")
 
     right_lines = []
-    right_lines.append(f"{OR2}{BLD}آخر النشاطات{RST}")
+    right_lines.append(f"{OR2}{BLD}Recent activity{RST}")
     right_lines.append(f"{OR}{'─' * 28}{RST}")
     for age, act in activities[:5]:
         right_lines.append(f"  {GRY}{age:<4}{RST}  {GR2}{act}{RST}")
     right_lines.append("")
-    right_lines.append(f"{OR2}{BLD}ما الجديد{RST}")
+    right_lines.append(f"{OR2}{BLD}What's new{RST}")
     right_lines.append(f"{OR}{'─' * 28}{RST}")
     for n in [
-        "🕸️  44 أداة مدمجة",
-        "🔧  دعم كل المزودين",
-        "🧠  ذاكرة SQLite دائمة",
-        "⚡  وضع Anthropic + OpenAI",
-        "🔑  /weaver-key لتغيير المفتاح",
+        "🕸️  44 built-in tools",
+        "🔧  Support for all providers",
+        "🧠  Persistent SQLite memory",
+        "⚡  Anthropic + OpenAI modes",
+        "🔑  /weaver-key to change the key",
     ]:
         right_lines.append(f"  {GR2}{n}{RST}")
     right_lines.append("")
-    right_lines.append(f"{GRY}/weaver-help للمزيد{RST}")
+    right_lines.append(f"{GRY}/weaver-help for more{RST}")
 
     # ── طباعة العمودين جنباً إلى جنب ───────────────────────────────────────
     max_lines = max(len(left_lines), len(right_lines))
@@ -303,10 +303,10 @@ def draw_welcome(model: str = "", provider: str = ""):
     # ── الشريط السفلي (الاختصارات) ─────────────────────────────────────────
     print()
     status_bar = (
-        f"  {OR}[k]{RST}{GRY} مفتاح  {RST}"
-        f"{OR}[m]{RST}{GRY} الوضع  {RST}"
-        f"{OR}[h]{RST}{GRY} مساعدة {RST}"
-        f"{OR}[q]{RST}{GRY} خروج   {RST}"
+        f"  {OR}[k]{RST}{GRY} Key  {RST}"
+        f"{OR}[m]{RST}{GRY} Mode  {RST}"
+        f"{OR}[h]{RST}{GRY} Help {RST}"
+        f"{OR}[q]{RST}{GRY} Quit   {RST}"
     )
     print(status_bar)
     print(f"{OR}{'·' * W}{RST}")
@@ -439,12 +439,12 @@ def draw_stats(turns: int, tools: list, blocks: list = None):
         total_r = sum(getattr(b, "lines_removed", 0) for b in blocks)
         total_a = sum(getattr(b, "lines_added", 0) for b in blocks)
         if total_r or total_a:
-            print(f"\n{GRY}📊 {turns} دورة │ {RED}{total_r}-{RST}{GRY} "
+            print(f"\n{GRY}📊 {turns} turns │ {RED}{total_r}-{RST}{GRY} "
                   f"{GRN}+{total_a}{RST}{GRY} │ "
                   f"{', '.join(dict.fromkeys(tools))}{RST}")
             return
     if tools:
-        print(f"\n{GRY}📊 {turns} دورة │ {', '.join(dict.fromkeys(tools))}{RST}")
+        print(f"\n{GRY}📊 {turns} turns │ {', '.join(dict.fromkeys(tools))}{RST}")
 
 
 def draw_prompt() -> str:
@@ -461,13 +461,13 @@ def draw_permission_request(name: str, preview: str = ""):
     w = max(44, min(term_width(), 64))
     p = f"  {DIM}{preview[:80]}{RST}" if preview else ""
     print(f"\n{OR}{'─' * w}{RST}")
-    print(f"  {OR}{BLD}🔐 طلب صلاحية{RST}")
-    print(f"  {GRY}الأداة:{RST} {OR}{name}{RST}")
+    print(f"  {OR}{BLD}🔐 Permission request{RST}")
+    print(f"  {GRY}Tool:{RST} {OR}{name}{RST}")
     if p:
         print(p)
-    print(f"  {GRN}[y]{RST} سماح مرة   "
-          f"{OR}[a]{RST} سماح دائم   "
-          f"{RED}[n]{RST} رفض")
+    print(f"  {GRN}[y]{RST} Allow once   "
+          f"{OR}[a]{RST} Allow always   "
+          f"{RED}[n]{RST} Deny")
     print(f"{OR}{'─' * w}{RST}")
 
 
@@ -612,6 +612,6 @@ if __name__ == "__main__":
     print()
     draw_tool_call("Read", "weaver.py")
     draw_tool_call("Bash", "python3 --version")
-    draw_response("مرحباً! أنا WeaverCode جاهز للعمل 🕸️")
+    draw_response("Hello! I'm WeaverCode, ready to work 🕸️")
     draw_stats(2, ["Read", "Bash"])
     draw_separator()
