@@ -75,3 +75,14 @@ def test_urls_and_platform(monkeypatch, tmp_path):
 def test_provider_bad_usage(monkeypatch, tmp_path):
     mod = _load(monkeypatch, tmp_path)
     assert mod.main(["provider"]) == 1     # missing name → error
+
+
+def test_requirements_strip_inline_comments(monkeypatch, tmp_path):
+    """requirements.txt فيه تعليقات داخل السطر — يجب ألّا تُمرَّر لـ pip (كانت تكسر install)."""
+    mod = _load(monkeypatch, tmp_path)
+    pkgs = mod._requirements()
+    assert pkgs, "no packages parsed"
+    for p in pkgs:
+        assert "#" not in p                 # لا تعليقات
+        assert p == p.strip()               # لا فراغات على الأطراف
+        assert " " not in p or p.startswith("-")  # اسم حزمة واحد نظيف

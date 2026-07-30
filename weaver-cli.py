@@ -431,13 +431,16 @@ _DEPS = ["httpx", "python-dotenv", "rich", "nbformat", "watchdog", "pyflakes"]
 
 
 def _requirements() -> list:
-    """Package list from config/requirements.txt, or the safe default set."""
+    """Package list from config/requirements.txt, or the safe default set.
+
+    Strips inline comments (``pkg>=1.0  # note``) which pip would reject.
+    """
     req = ROOT / "config" / "requirements.txt"
     if req.exists():
         pkgs = []
         for raw in req.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if line and not line.startswith("#"):
+            line = raw.split("#", 1)[0].strip()   # drop inline + full-line comments
+            if line:
                 pkgs.append(line)
         if pkgs:
             return pkgs
