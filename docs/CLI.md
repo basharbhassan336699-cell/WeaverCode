@@ -10,6 +10,24 @@ Both use only Python's standard library for management, so they run on
 
 ---
 
+## 0) Install from scratch — one command
+
+On a brand-new device (downloads WeaverCode, installs deps, starts, prints URL):
+
+```bash
+# Termux / Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/basharbhassan336699-cell/WeaverCode/main/install.sh | bash
+```
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/basharbhassan336699-cell/WeaverCode/main/install.ps1 | iex
+```
+
+It installs a global `weaver` command, so afterwards you can run `weaver start`,
+`weaver stop`, `weaver restore`, `weaver key <API_KEY>`, `weaver help` from anywhere.
+
+---
+
 ## 1) Management commands — `weaver-cli.py`
 
 Run with `python weaver-cli.py <command>`, or the launcher for your system:

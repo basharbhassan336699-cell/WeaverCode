@@ -1,5 +1,25 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## v4.43.0 — تثبيت من الصفر بأمر واحد (install.sh / install.ps1)
+
+المشكلة الجذرية: `weaver-cli.py` يتطلّب أن يكون الكود موجوداً أصلاً — لكن على
+**جهاز جديد لا يوجد شيء**، فلا يعرف المستخدم من أين يبدأ. الآن **أمر واحد** يفعل
+كل شيء من الصفر:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/basharbhassan336699-cell/WeaverCode/main/install.sh | bash
+```
+
+- **`install.sh`** (Termux/Linux/macOS): يثبّت المتطلّبات (python+git على Termux
+  تلقائياً) → يُنزّل WeaverCode → يثبّت التبعيات → **يشغّل الدشبورد ويطبع الرابط**
+  → يثبّت أمر `weaver` عاماً (يعمل من أي مكان). إعادة تشغيله = تحديث.
+- **`install.ps1`** (Windows/PowerShell): `irm …/install.ps1 | iex`.
+- README محدّث ليعرض أمر التثبيت الواحد في الأعلى.
+
+**تحقّق من الصفر**: تشغيل `install.sh` (نسخة نظيفة + HOME نظيف) → تنزيل → تثبيت
+التبعيات → `start` → الدشبورد يستجيب **HTTP 200** → أمر `weaver` العام يعمل.
+(لم يُمَسّ `provider.py`.)
+
 ## v4.42.1 — إصلاح: `install` يفشل في تثبيت التبعيات على جهاز جديد
 
 كان أمر `weaver-cli.py install` يقرأ `config/requirements.txt` ويمرّر كل سطر

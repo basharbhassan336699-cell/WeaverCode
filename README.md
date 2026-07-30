@@ -72,26 +72,39 @@ You → WeaverCode → [Any AI Model] → Result
 
 ## Quick Start
 
+### ⚡ One command — install everything from scratch
+
+On a **brand-new device** (Termux on Android, Linux, or macOS), paste this single
+line. It installs the prerequisites, downloads WeaverCode, installs its
+dependencies, starts the dashboard, and prints the login URL:
+
 ```bash
-# Clone
+curl -fsSL https://raw.githubusercontent.com/basharbhassan336699-cell/WeaverCode/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/basharbhassan336699-cell/WeaverCode/main/install.ps1 | iex
+```
+
+After it finishes you get a global **`weaver`** command:
+
+```bash
+weaver key <YOUR_API_KEY>   # set your API key (or set it in the dashboard Settings)
+weaver start                # start the dashboard + print the URL
+weaver restore              # restart after closing the device/terminal
+weaver stop | weaver doctor | weaver fix | weaver help
+```
+
+<details><summary>Manual install (if you prefer)</summary>
+
+```bash
 git clone https://github.com/basharbhassan336699-cell/WeaverCode
 cd WeaverCode
-
-# Install
-pip install -r config/requirements.txt --break-system-packages
-
-# Configure
-cp config/.env.example config/.env
-nano config/.env    # Add your API key
-
-# Run
-python3 weaver.py "Your task here"
+python weaver-cli.py install     # deps + setup
+python weaver-cli.py start       # → prints the login URL
 ```
-
-### Android / Termux
-```bash
-bash scripts/install_termux.sh
-```
+</details>
 
 ### 🌐 Web Dashboard + Background Mode
 ```bash
