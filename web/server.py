@@ -1607,8 +1607,8 @@ def main():
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"🕸️ WeaverCode Dashboard {WEAVER_VERSION} — http://{host}:{port}")
     if host == "0.0.0.0":
-        print("   ⚠️  متاح على شبكتك المحلية. لحصره بجهازك: WEAVER_WEB_HOST=127.0.0.1")
-    print("   (خادم مدمج بلا تبعيات — يعمل على Termux مباشرةً)")
+        print("   ⚠️  Reachable on your local network. To limit to this device: WEAVER_WEB_HOST=127.0.0.1")
+    print("   (Built-in server, no dependencies — runs on Termux directly)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
