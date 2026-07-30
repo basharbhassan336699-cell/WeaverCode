@@ -1556,8 +1556,53 @@
   function iconFor(t) { return { py: "🐍", json: "📋", db: "🗄️", zip: "📦", md: "📝", txt: "📄", png: "🖼️", jpg: "🖼️", sh: "⚙️", js: "📜" }[t] || "📄"; }
   function humanSize(n) { if (n < 1024) return n + " B"; if (n < 1048576) return (n / 1024).toFixed(1) + " KB"; if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB"; return (n / 1073741824).toFixed(2) + " GB"; }
   function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  // جداول Markdown (GFM): «| عمود | عمود |» + سطر فاصل «|---|---|» → جدول HTML
+  // أنيق (رأس ملوّن، صفوف متناوبة، تمرير أفقي للجداول العريضة). مصون كبطاقة عبر put.
+  function renderMdTables(text, put) {
+    const lines = text.split("\n");
+    const sepRe = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
+    const isRow = (l) => l.indexOf("|") >= 0 && /\S/.test(l);
+    const splitRow = (l) => {
+      let s = l.trim();
+      if (s.startsWith("|")) s = s.slice(1);
+      if (s.endsWith("|")) s = s.slice(0, -1);
+      return s.split("|").map((c) => c.trim());
+    };
+    const out = [];
+    let i = 0;
+    while (i < lines.length) {
+      if (i + 1 < lines.length && isRow(lines[i]) &&
+          sepRe.test(lines[i + 1]) && lines[i + 1].indexOf("-") >= 0) {
+        const header = splitRow(lines[i]);
+        const aligns = splitRow(lines[i + 1]).map((c) => {
+          const l = c.startsWith(":"), r = c.endsWith(":");
+          return (l && r) ? "center" : r ? "right" : l ? "left" : "";
+        });
+        let j = i + 2; const rows = [];
+        while (j < lines.length && isRow(lines[j]) && !sepRe.test(lines[j])) {
+          rows.push(splitRow(lines[j])); j++;
+        }
+        const th = (v, k) => '<th' + (aligns[k] ? ' style="text-align:' + aligns[k] + '"' : "") + ">" + v + "</th>";
+        const td = (v, k) => '<td' + (aligns[k] ? ' style="text-align:' + aligns[k] + '"' : "") + ">" + v + "</td>";
+        let html = '<div class="mdtable-wrap"><table class="mdtable"><thead><tr>' +
+          header.map(th).join("") + "</tr></thead><tbody>";
+        rows.forEach((r) => {
+          html += "<tr>" + header.map((_, k) => td(r[k] || "", k)).join("") + "</tr>";
+        });
+        html += "</tbody></table></div>";
+        out.push(put(html));
+        i = j;
+      } else {
+        out.push(lines[i]); i++;
+      }
+    }
+    return out.join("\n");
+  }
   function md(s) {
     let t = escapeHtml(String(s == null ? "" : s));
+    // مصونات (كود + جداول): تُستبدَل بعلامات مؤقّتة فلا تمسّها بقية التحويلات
+    const stash = [];
+    const put = (html) => { stash.push(html); return " S" + (stash.length - 1) + " "; };
     t = t.replace(/```([\s\S]*?)```/g, (m, c) => {
       let body = c.replace(/^\n/, "");
       // سطر اللغة الأول (مثل ```bash)
@@ -1568,18 +1613,25 @@
         lang = firstLine; body = body.slice(nl + 1);
       }
       const label = { bash: "Bash", sh: "Shell", py: "Python", python: "Python", js: "JavaScript", json: "JSON", ts: "TypeScript" }[lang.toLowerCase()] || lang;
-      return '<div class="codewrap"><div class="codebar">' +
+      return put('<div class="codewrap"><div class="codebar">' +
         '<span class="codebtns"><button class="cbtn" data-expand title="تكبير">⤢</button>' +
         '<button class="cbtn" data-copy title="نسخ">⧉</button></span>' +
         '<span class="codelang">' + escapeHtml(label) + '</span></div>' +
-        '<pre class="code">' + body + "</pre></div>";
+        '<pre class="code">' + body + "</pre></div>");
     });
+    // تنسيقات سطرية قبل الجداول ليُطبَّق داخل الخلايا (كود/عريض/روابط)
     t = t.replace(/`([^`\n]+)`/g, "<code>$1</code>");
-    t = t.replace(/^#{1,6}\s?(.*)$/gm, "<b>$1</b>");
     t = t.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-    t = t.replace(/^\s*[-*]\s+(.*)$/gm, "• $1");
     t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // الجداول ثم الخطوط الأفقية (--- / *** / ___)
+    t = renderMdTables(t, put);
+    t = t.replace(/^\s*([-*_])\1{2,}\s*$/gm, "<hr>");
+    // عناوين + قوائم
+    t = t.replace(/^#{1,6}\s?(.*)$/gm, "<b>$1</b>");
+    t = t.replace(/^\s*[-*]\s+(.*)$/gm, "• $1");
     t = t.replace(/\n/g, "<br>");
+    // استعادة المصونات (بعد تحويل الأسطر كي لا تُكسَر بنيتها)
+    t = t.replace(/ S(\d+) /g, (m, i) => stash[+i]);
     return t;
   }
 

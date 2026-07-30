@@ -242,6 +242,18 @@ pre.code { background: var(--card-2); border: 1px solid var(--line); border-radi
   overflow-x: auto; font-family: monospace; font-size: 12.5px; direction: ltr; text-align: left; margin: 8px 0; white-space: pre; }
 .bubble a { color: var(--orange-2); }
 
+/* جداول Markdown أنيقة (رأس ملوّن، صفوف متناوبة، تمرير أفقي للعريضة) */
+.mdtable-wrap { margin: 10px 0; border: 1px solid var(--line); border-radius: 12px;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.mdtable { border-collapse: collapse; width: 100%; font-size: 13.5px; line-height: 1.5; }
+.mdtable th, .mdtable td { padding: 9px 13px; text-align: start;
+  border-bottom: 1px solid var(--line); border-inline-end: 1px solid var(--line); white-space: nowrap; }
+.mdtable th:last-child, .mdtable td:last-child { border-inline-end: none; }
+.mdtable thead th { background: var(--card-2); color: var(--text); font-weight: 700; }
+.mdtable tbody tr:last-child td { border-bottom: none; }
+.mdtable tbody tr:nth-child(even) td { background: rgba(127, 127, 127, .06); }
+.mdtable code { background: var(--bg); font-size: .9em; white-space: nowrap; }
+
 /* كتلة كود بصيغة Claude Code: شريط علوي + أزرار نسخ/تكبير */
 .codewrap { margin: 8px 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--card-2); }
 .codebar { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px;
