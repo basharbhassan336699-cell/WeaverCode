@@ -1458,6 +1458,39 @@ class ToolRegistry:
             if re.search(r"\bsudo\b", command):
                 return "🛑 وضع sandbox: أوامر sudo ممنوعة."
 
+        # ── Sandbox معزول بـ proot (اختياري، معطّل افتراضياً WEAVER_SANDBOX=0) ──
+        # عند التفعيل: يُشغَّل الأمر في بيئة proot معزولة (بلا وصول لملفات WeaverCode).
+        # مُغلَّف بالكامل: أي عطل في وحدة الـ sandbox لا يكسر التنفيذ العادي أبداً.
+        try:
+            from core.sandbox import is_enabled as _sb_enabled, run_sandboxed
+            _sb_on = _sb_enabled()
+        except Exception:
+            _sb_on = False
+        if _sb_on:
+            import asyncio as _aio
+            try:
+                try:
+                    loop = _aio.get_event_loop()
+                except RuntimeError:
+                    loop = None
+                if loop is not None and loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        fut = pool.submit(
+                            _aio.run,
+                            run_sandboxed(command,
+                                          work_dir=work_dir or self.work_dir,
+                                          timeout=timeout))
+                        sr = fut.result(timeout=timeout + 5)
+                else:
+                    sr = _aio.run(
+                        run_sandboxed(command,
+                                      work_dir=work_dir or self.work_dir,
+                                      timeout=timeout))
+                return sr.output
+            except Exception as e:
+                return f"[sandbox error] {e}"
+
         # ── تشغيل في الخلفية: يُرجع shell_id فوراً ─────────────────────────────
         if run_in_background:
             return self._bash_background(command, work_dir or self.work_dir)

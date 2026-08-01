@@ -178,6 +178,8 @@ defaults are shown in brackets.
 | `WEAVER_REQUEST_DELAY` | Delay between requests, seconds `[0.0]` |
 | `WEAVER_CONTEXT_WINDOW` | Context window size `[200000]` |
 | `WEAVER_PROMPT_CACHE` | Enable prompt caching `[0]` |
+| `WEAVER_SANDBOX` | Run Bash in an isolated proot sandbox `[0]` (needs `proot`) |
+| `WEAVER_SANDBOX_TIMEOUT` | Sandbox command timeout, seconds `[30]` |
 
 ### Paths, tools & integrations
 | Variable | Meaning |
