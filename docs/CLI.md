@@ -180,6 +180,7 @@ defaults are shown in brackets.
 | `WEAVER_PROMPT_CACHE` | Enable prompt caching `[0]` |
 | `WEAVER_SANDBOX` | Run Bash in an isolated proot sandbox `[0]` (needs `proot`) |
 | `WEAVER_SANDBOX_TIMEOUT` | Sandbox command timeout, seconds `[30]` |
+| `WEAVER_AUTO_VERIFY` | After writing code, auto-run `py_compile` (inside the sandbox if enabled) `[0]` |
 
 ### Paths, tools & integrations
 | Variable | Meaning |

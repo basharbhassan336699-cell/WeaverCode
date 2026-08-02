@@ -227,6 +227,40 @@ async def _run_fallback(command: str, work_dir: Optional[str],
         return SandboxResult("", str(e), 1)
 
 
+async def verify_python(files, work_dir: Optional[str] = None):
+    """يتحقّق من صحّة ملفات بايثون المكتوبة (py_compile) — داخل الـ sandbox إن كان
+    مفعّلاً، وإلا تشغيلاً عادياً آمناً (py_compile فقط لا تنفيذ للكود).
+
+    EN: syntax-check written .py files with py_compile, inside the sandbox when
+    enabled. Returns (ok: bool, summary: str). No-op summary if no .py files.
+    """
+    pys = [str(f) for f in (files or []) if str(f).endswith(".py")]
+    if not pys:
+        return True, ""
+    # مسارات نسبية لمجلد العمل ما أمكن (كي تُوجَد داخل الـ sandbox المنسوخ)
+    rel = []
+    for f in pys:
+        try:
+            rel.append(os.path.relpath(f, work_dir) if work_dir else f)
+        except Exception:
+            rel.append(f)
+    quoted = " ".join("'" + r.replace("'", "") + "'" for r in rel)
+    cmd = "python3 -m py_compile " + quoted
+    if is_enabled():
+        r = await run_sandboxed(cmd, work_dir=work_dir, copy_back=False)
+    else:
+        r = await _run_fallback(cmd, work_dir, SANDBOX_TIMEOUT)
+    ok = (r.returncode == 0) and not r.timed_out
+    names = ", ".join(Path(p).name for p in pys)
+    if ok:
+        summary = f"✅ تم التحقق: {len(pys)} ملف بايثون يُصرَّف بلا أخطاء ({names})."
+    else:
+        detail = (r.stderr or r.stdout or "").strip()
+        summary = (f"❌ فشل التحقق: خطأ نحوي في أحد الملفات ({names}).\n"
+                   + detail[:800])
+    return ok, summary
+
+
 def _copy_back(sandbox_work: Path, original: Path) -> None:
     """ينسخ الملفات الجديدة/المُعدَّلة من sandbox لمجلد العمل الأصلي."""
     try:

@@ -272,17 +272,53 @@ class WeaverDaemon:
         # (لا نُزعج المحادثات العادية بلا كتابة كود — تفادياً لتذكير بعد «هلا».)
         _wrote_code = any(t in ("Write", "Edit", "MultiEdit")
                           for t in (getattr(result, "tool_calls_made", None) or []))
+
+        # ── تحقّق ذاتي تلقائي داخل الـ Sandbox (اختياري، WEAVER_AUTO_VERIFY=1) ──
+        # عند التفعيل: بعد كتابة كود، نُصرّف ملفات بايثون تلقائياً (py_compile) —
+        # داخل الـ sandbox إن كان مفعّلاً (WEAVER_SANDBOX=1) — ونُبلغ بالنتيجة.
+        # معطّل افتراضياً فلا يتغيّر أيّ سلوك قائم. مُغلَّف: أي عطل لا يكسر المهمة.
+        _auto_verify = os.environ.get("WEAVER_AUTO_VERIFY", "0").strip().lower() in (
+            "1", "true", "yes", "on")
+        _did_auto_verify = False
+        if _wrote_code and _auto_verify and not getattr(result, "error", None):
+            try:
+                _py_files = self._written_py_files(result)
+                if _py_files:
+                    from core.sandbox import verify_python, is_enabled as _sb_on
+                    ok, summary = await verify_python(_py_files, tools.work_dir)
+                    if summary:
+                        _where = " (داخل الـ Sandbox)" if _sb_on() else ""
+                        await event_bus.emit(WeaverEvent(
+                            EventType.RESPONSE, summary[:200], summary + _where))
+                        _did_auto_verify = True
+            except Exception:
+                _did_auto_verify = False
+
+        # ── تذكير التحقق الذاتي: فقط إن كُتبت ملفات ولم يُتحقَّق (يدوياً أو تلقائياً) ─
+        # (لا نُزعج المحادثات العادية بلا كتابة كود — تفادياً لتذكير بعد «هلا».)
         _verify_kw = ("✅ تم التحقق", "py_compile", "pytest", "الاختبارات تمر",
                       "tests pass", "✅ ok", "اختبار")
         _verified = any(s in (response_text or "").lower() for s in
                         (k.lower() for k in _verify_kw))
-        if _wrote_code and not _verified:
+        if _wrote_code and not _verified and not _did_auto_verify:
             _rem = ("⚠️ تذكير: تحقّق من الملفات المُنشأة (py_compile/pytest) "
                     "قبل اعتبار المهمة منجزة.")
             await event_bus.emit(WeaverEvent(EventType.RESPONSE, _rem, _rem))
 
         await event_bus.emit(WeaverEvent(EventType.DONE, "اكتملت المهمة"))
         st.save_status("idle")
+
+    def _written_py_files(self, result) -> list:
+        """يجمع مسارات ملفات بايثون التي كُتبت/عُدّلت في هذه المهمة (للتحقّق التلقائي)."""
+        seen, out = set(), []
+        for b in (getattr(result, "blocks", None) or []):
+            for op in (getattr(b, "ops", None) or []):
+                if getattr(op, "tool_name", "") in ("Write", "Edit", "MultiEdit"):
+                    p = str((getattr(op, "args", {}) or {}).get("path") or "")
+                    if p.endswith(".py") and p not in seen:
+                        seen.add(p)
+                        out.append(p)
+        return out
 
     async def _auto_shot_result(self, tools, result, loop) -> None:
         """يلتقط تلقائياً لقطة شاشة حقيقية للناتج المرئي عند اكتمال المهمة.

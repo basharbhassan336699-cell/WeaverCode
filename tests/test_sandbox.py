@@ -68,3 +68,38 @@ def test_bash_survives_broken_sandbox(monkeypatch):
     t = ToolRegistry(work_dir=tempfile.mkdtemp())
     out = t._bash("echo still-works")
     assert "still-works" in out
+
+
+# ── التحقّق الذاتي داخل الـ sandbox (verify_python) ─────────────────────────────
+def test_verify_python_pass(tmp_path):
+    f = tmp_path / "good.py"; f.write_text("a = 1 + 1\n")
+    ok, s = asyncio.run(sandbox.verify_python([str(f)], str(tmp_path)))
+    assert ok is True and "تم التحقق" in s
+
+
+def test_verify_python_fail(tmp_path):
+    f = tmp_path / "bad.py"; f.write_text("def broken(:\n    pass\n")
+    ok, s = asyncio.run(sandbox.verify_python([str(f)], str(tmp_path)))
+    assert ok is False and "فشل التحقق" in s
+
+
+def test_verify_python_ignores_non_python(tmp_path):
+    ok, s = asyncio.run(sandbox.verify_python([str(tmp_path / "notes.txt")], str(tmp_path)))
+    assert ok is True and s == ""
+
+
+def test_written_py_files_extraction():
+    from background.daemon import WeaverDaemon
+    from core.action_blocks import ActionBlock, ToolOp
+
+    class _R:
+        pass
+    r = _R()
+    r.blocks = [ActionBlock(ops=[
+        ToolOp(tool_name="Write", args={"path": "a.py"}, result="ok"),
+        ToolOp(tool_name="Edit", args={"path": "b.py"}, result="ok"),
+        ToolOp(tool_name="Write", args={"path": "notes.txt"}, result="ok"),
+        ToolOp(tool_name="Bash", args={"command": "ls"}, result="ok"),
+    ])]
+    files = WeaverDaemon()._written_py_files(r)
+    assert files == ["a.py", "b.py"]
