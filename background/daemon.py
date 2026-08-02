@@ -282,15 +282,16 @@ class WeaverDaemon:
         _did_auto_verify = False
         if _wrote_code and _auto_verify and not getattr(result, "error", None):
             try:
-                _py_files = self._written_py_files(result)
-                if _py_files:
-                    from core.sandbox import verify_python, is_enabled as _sb_on
-                    ok, summary = await verify_python(_py_files, tools.work_dir)
-                    if summary:
-                        _where = " (داخل الـ Sandbox)" if _sb_on() else ""
-                        await event_bus.emit(WeaverEvent(
-                            EventType.RESPONSE, summary[:200], summary + _where))
-                        _did_auto_verify = True
+                _did_auto_verify = await self._verify_and_fix(
+                    engine, tools, result, on_tool, _on_narration, _on_permission)
+                if _did_auto_verify:
+                    # أعِد الحفظ لتضمين كتل الإصلاح ضمن الجلسة
+                    try:
+                        from core.action_blocks import serialize_block
+                        _persist(response_text,
+                                 [serialize_block(b) for b in (result.blocks or [])])
+                    except Exception:
+                        pass
             except Exception:
                 _did_auto_verify = False
 
@@ -307,6 +308,63 @@ class WeaverDaemon:
 
         await event_bus.emit(WeaverEvent(EventType.DONE, "اكتملت المهمة"))
         st.save_status("idle")
+
+    async def _verify_and_fix(self, engine, tools, result,
+                              on_tool, on_narration, on_permission) -> bool:
+        """يتحقّق من الكود المكتوب (بنية py_compile + منطق pytest) ويُصلح الأخطاء
+        تلقائياً عبر الوكيل، ثم يعيد الفحص — حلقة محدودة (WEAVER_AUTO_FIX_MAX).
+
+        داخل الـ Sandbox إن كان مفعّلاً. يُرجع True إن جرى تحقّق. مُغلَّف بالكامل:
+        أي عطل هنا لا يكسر المهمة. لا يُشغَّل شيء إلا عند WEAVER_AUTO_VERIFY=1.
+        """
+        from core.sandbox import verify_code, is_enabled as _sb_on
+        where = " (داخل الـ Sandbox)" if _sb_on() else ""
+        try:
+            max_fix = int(os.environ.get("WEAVER_AUTO_FIX_MAX", "2"))
+        except ValueError:
+            max_fix = 2
+
+        async def _emit(msg: str) -> None:
+            await event_bus.emit(WeaverEvent(EventType.RESPONSE, str(msg)[:200], str(msg)))
+
+        did = False
+        for attempt in range(max_fix + 1):
+            files = self._written_py_files(result)
+            if not files:
+                return did
+            ok, summary, _kind = await verify_code(files, tools.work_dir)
+            did = True
+            if ok:
+                await _emit(summary + where)
+                return True
+            # فشل الفحص
+            if attempt >= max_fix:
+                await _emit(f"⚠️ تعذّر الإصلاح التلقائي بعد {max_fix} محاولة — "
+                            f"راجعه يدوياً:\n{summary}")
+                return True
+            await _emit(f"🔧 وجدتُ خطأً — أُصلحه تلقائياً "
+                        f"(محاولة {attempt + 1}/{max_fix}){where}…")
+            fix_prompt = (
+                "الكود الذي كتبته للتوّ فيه خطأ يمنع صحّته. نتيجة الفحص:\n\n"
+                + summary +
+                "\n\nأصلح الخطأ مباشرةً في الملف/الملفات المذكورة (اقرأها بـ Read "
+                "ثم عدّلها بـ Edit)، ثم توقّف. لا تشرح — فقط أصلح.")
+            try:
+                fix_res = await engine.run(
+                    fix_prompt, on_tool=on_tool,
+                    on_permission=on_permission, on_narration=on_narration)
+            except Exception as exc:
+                await _emit("تعذّر تشغيل الإصلاح التلقائي: " + str(exc))
+                return True
+            # ادمج كتل الإصلاح + الأدوات ليظهر في السجل ويُحفَظ
+            try:
+                for b in (getattr(fix_res, "blocks", None) or []):
+                    result.blocks.append(b)
+                if getattr(result, "tool_calls_made", None) is not None:
+                    result.tool_calls_made.extend(getattr(fix_res, "tool_calls_made", None) or [])
+            except Exception:
+                pass
+        return did
 
     def _written_py_files(self, result) -> list:
         """يجمع مسارات ملفات بايثون التي كُتبت/عُدّلت في هذه المهمة (للتحقّق التلقائي)."""

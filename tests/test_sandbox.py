@@ -103,3 +103,56 @@ def test_written_py_files_extraction():
     ])]
     files = WeaverDaemon()._written_py_files(r)
     assert files == ["a.py", "b.py"]
+
+
+def test_verify_code_catches_logic_error(tmp_path):
+    """فحص المنطق: كود يُصرَّف لكن اختباره يفشل → verify_code يكشفه."""
+    (tmp_path / "mod.py").write_text("def add(a, b):\n    return a - b\n")   # منطق خاطئ
+    (tmp_path / "test_mod.py").write_text(
+        "from mod import add\ndef test_add():\n    assert add(2, 3) == 5\n")
+    ok, s, kind = asyncio.run(sandbox.verify_code([str(tmp_path / "mod.py")], str(tmp_path)))
+    assert ok is False and kind == "tests"
+
+
+def test_verify_and_fix_auto_repairs(tmp_path):
+    """حلقة الإصلاح: ملف فيه خطأ نحوي → engine يصلحه → إعادة الفحص تنجح."""
+    from background.daemon import WeaverDaemon
+    from core.action_blocks import ActionBlock, ToolOp
+
+    f = tmp_path / "x.py"
+    f.write_text("def broken(:\n    pass\n")            # خطأ نحوي
+
+    class _Tools:
+        work_dir = str(tmp_path)
+
+    class _Res:
+        def __init__(self):
+            self.blocks = [ActionBlock(ops=[ToolOp(
+                tool_name="Write", args={"path": str(f)}, result="ok")])]
+            self.tool_calls_made = ["Write"]
+            self.error = None
+
+    class _FixResult:
+        def __init__(self):
+            self.blocks = [ActionBlock(ops=[ToolOp(
+                tool_name="Edit", args={"path": str(f)}, result="ok")])]
+            self.tool_calls_made = ["Edit"]
+            self.text = "fixed"
+
+    class _Engine:
+        def __init__(self):
+            self.calls = 0
+
+        async def run(self, prompt, **kw):
+            self.calls += 1
+            f.write_text("def fixed():\n    return 1\n")  # يصلح الخطأ
+            return _FixResult()
+
+    eng, res = _Engine(), _Res()
+    did = asyncio.run(WeaverDaemon()._verify_and_fix(
+        eng, _Tools(), res, lambda *a: None, lambda *a: None, None))
+    assert did is True
+    assert eng.calls == 1                       # محاولة إصلاح واحدة كفت
+    assert len(res.blocks) == 2                 # أُضيفت كتلة الإصلاح
+    import py_compile
+    py_compile.compile(str(f), doraise=True)    # الملف صار سليماً

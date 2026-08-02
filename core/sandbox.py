@@ -261,6 +261,53 @@ async def verify_python(files, work_dir: Optional[str] = None):
     return ok, summary
 
 
+async def _run_check(cmd: str, work_dir: Optional[str], timeout: int):
+    """يشغّل أمر فحص داخل الـ sandbox إن كان مفعّلاً، وإلا عادياً (بلا copy_back)."""
+    if is_enabled():
+        return await run_sandboxed(cmd, work_dir=work_dir, timeout=timeout, copy_back=False)
+    return await _run_fallback(cmd, work_dir, timeout)
+
+
+def _has_tests(work_dir: Optional[str]) -> bool:
+    """هل في مجلد العمل اختبارات (tests/ أو test_*.py) لفحص المنطق؟"""
+    if not work_dir:
+        return False
+    try:
+        p = Path(work_dir)
+        if (p / "tests").is_dir():
+            return True
+        for pat in ("test_*.py", "*_test.py"):
+            if next(p.glob(pat), None) is not None:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+async def verify_code(files, work_dir: Optional[str] = None):
+    """تحقّق كامل: **البنية** (py_compile) ثم **المنطق** (pytest إن وُجدت اختبارات).
+
+    داخل الـ Sandbox إن كان مفعّلاً. يُرجع (ok, summary, kind) حيث kind ∈
+    {"none","syntax","tests"} — يشير لآخر فحص جرى. الفحص المنطقي يعتمد على وجود
+    اختبارات؛ بدونها نكتفي بالبنية (بصدق: لا ندّعي فحص منطق غير موجود).
+    """
+    ok, summary = await verify_python(files, work_dir)
+    if not ok:
+        return False, summary, "syntax"          # خطأ نحوي — لا نكمل للمنطق
+    if _has_tests(work_dir):
+        r = await _run_check("python3 -m pytest -q", work_dir,
+                             timeout=int(os.environ.get("WEAVER_VERIFY_TEST_TIMEOUT", "180")))
+        if r.timed_out:
+            return True, (summary + " · ⏱️ تجاوزت الاختبارات المهلة (فحص منطقي جزئي)"), "tests"
+        if r.returncode != 0:
+            detail = (r.stdout or "") + ("\n" + r.stderr if r.stderr else "")
+            return (False,
+                    "❌ فشل التحقق المنطقي — الاختبارات لم تمرّ:\n" + detail.strip()[-1400:],
+                    "tests")
+        return True, (summary + " · ✅ الاختبارات تمرّ (فحص منطقي)"), "tests"
+    return True, (summary + " · (لا اختبارات — فحص بنية فقط)"), "syntax"
+
+
 def _copy_back(sandbox_work: Path, original: Path) -> None:
     """ينسخ الملفات الجديدة/المُعدَّلة من sandbox لمجلد العمل الأصلي."""
     try:
