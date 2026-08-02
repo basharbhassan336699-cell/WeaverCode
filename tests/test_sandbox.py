@@ -114,6 +114,40 @@ def test_verify_code_catches_logic_error(tmp_path):
     assert ok is False and kind == "tests"
 
 
+def test_verify_code_js_syntax(tmp_path):
+    """فحص JavaScript عبر node --check (إن توفّر node)."""
+    if not sandbox.shutil.which("node"):
+        pytest.skip("node not installed")
+    (tmp_path / "bad.js").write_text("function broken( {\n  return;\n")
+    ok, s, k = asyncio.run(sandbox.verify_code([str(tmp_path / "bad.js")], str(tmp_path)))
+    assert ok is False and "JavaScript" in s
+
+
+def test_verify_code_ruff_undefined_name(tmp_path):
+    """ruff يمسك اسماً غير معرّف (F821) يفوت على py_compile — إن توفّر ruff."""
+    if not sandbox.shutil.which("ruff"):
+        pytest.skip("ruff not installed")
+    (tmp_path / "u.py").write_text("def f():\n    return undefined_var + 1\n")
+    ok, s, k = asyncio.run(sandbox.verify_code([str(tmp_path / "u.py")], str(tmp_path)))
+    assert ok is False and k == "lint"
+
+
+def test_written_code_files_includes_js():
+    from background.daemon import WeaverDaemon
+    from core.action_blocks import ActionBlock, ToolOp
+
+    class _R:
+        pass
+    r = _R()
+    r.blocks = [ActionBlock(ops=[
+        ToolOp(tool_name="Write", args={"path": "a.py"}, result="ok"),
+        ToolOp(tool_name="Write", args={"path": "app.js"}, result="ok"),
+        ToolOp(tool_name="Write", args={"path": "readme.md"}, result="ok"),
+    ])]
+    files = WeaverDaemon()._written_code_files(r)
+    assert files == ["a.py", "app.js"]
+
+
 def test_verify_and_fix_auto_repairs(tmp_path):
     """حلقة الإصلاح: ملف فيه خطأ نحوي → engine يصلحه → إعادة الفحص تنجح."""
     from background.daemon import WeaverDaemon

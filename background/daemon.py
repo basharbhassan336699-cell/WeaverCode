@@ -329,7 +329,7 @@ class WeaverDaemon:
 
         did = False
         for attempt in range(max_fix + 1):
-            files = self._written_py_files(result)
+            files = self._written_code_files(result)
             if not files:
                 return did
             ok, summary, _kind = await verify_code(files, tools.work_dir)
@@ -366,14 +366,20 @@ class WeaverDaemon:
                 pass
         return did
 
+    _CODE_EXT = (".py", ".js", ".mjs", ".cjs", ".jsx")
+
     def _written_py_files(self, result) -> list:
-        """يجمع مسارات ملفات بايثون التي كُتبت/عُدّلت في هذه المهمة (للتحقّق التلقائي)."""
+        """ملفات بايثون التي كُتبت/عُدّلت (متوافق مع الاختبارات)."""
+        return [p for p in self._written_code_files(result) if p.endswith(".py")]
+
+    def _written_code_files(self, result) -> list:
+        """يجمع مسارات ملفات الكود (بايثون/JS) التي كُتبت/عُدّلت — للتحقّق التلقائي."""
         seen, out = set(), []
         for b in (getattr(result, "blocks", None) or []):
             for op in (getattr(b, "ops", None) or []):
                 if getattr(op, "tool_name", "") in ("Write", "Edit", "MultiEdit"):
                     p = str((getattr(op, "args", {}) or {}).get("path") or "")
-                    if p.endswith(".py") and p not in seen:
+                    if p.endswith(self._CODE_EXT) and p not in seen:
                         seen.add(p)
                         out.append(p)
         return out

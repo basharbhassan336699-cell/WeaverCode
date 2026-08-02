@@ -181,7 +181,7 @@ defaults are shown in brackets.
 | `WEAVER_PROMPT_CACHE` | Enable prompt caching `[0]` |
 | `WEAVER_SANDBOX` | Run Bash in an isolated proot sandbox `[0]` (needs `proot`) |
 | `WEAVER_SANDBOX_TIMEOUT` | Sandbox command timeout, seconds `[30]` |
-| `WEAVER_AUTO_VERIFY` | After writing code: check syntax (`py_compile`) + logic (`pytest` if tests exist), and **auto-fix errors** — inside the sandbox if enabled `[0]` |
+| `WEAVER_AUTO_VERIFY` | After writing code: check syntax (`py_compile`), real-bug lint (`ruff` if present), JS syntax (`node --check`), logic (`pytest` if tests exist), and **auto-fix errors** — inside the sandbox if enabled `[0]` |
 | `WEAVER_AUTO_FIX_MAX` | Max auto-fix attempts `[2]` |
 
 ### Paths, tools & integrations

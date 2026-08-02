@@ -200,8 +200,8 @@ async def run_sandboxed(
 
 
 async def _run_fallback(command: str, work_dir: Optional[str],
-                        timeout: int) -> SandboxResult:
-    """تشغيل بدون proot كاحتياطي (مع تحذير واضح)."""
+                        timeout: int, warn: bool = True) -> SandboxResult:
+    """تشغيل بدون proot كاحتياطي. warn=False للفحوص الداخلية (بلا تحذير)."""
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
@@ -211,9 +211,9 @@ async def _run_fallback(command: str, work_dir: Optional[str],
         )
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout)
+            prefix = "[تحذير: proot غير متاح — تشغيل عادي بدون عزل]\n" if warn else ""
             return SandboxResult(
-                "[تحذير: proot غير متاح — تشغيل عادي بدون عزل]\n"
-                + out.decode("utf-8", "replace"),
+                prefix + out.decode("utf-8", "replace"),
                 err.decode("utf-8", "replace"),
                 proc.returncode or 0,
             )
@@ -249,7 +249,7 @@ async def verify_python(files, work_dir: Optional[str] = None):
     if is_enabled():
         r = await run_sandboxed(cmd, work_dir=work_dir, copy_back=False)
     else:
-        r = await _run_fallback(cmd, work_dir, SANDBOX_TIMEOUT)
+        r = await _run_fallback(cmd, work_dir, SANDBOX_TIMEOUT, warn=False)
     ok = (r.returncode == 0) and not r.timed_out
     names = ", ".join(Path(p).name for p in pys)
     if ok:
@@ -265,7 +265,7 @@ async def _run_check(cmd: str, work_dir: Optional[str], timeout: int):
     """يشغّل أمر فحص داخل الـ sandbox إن كان مفعّلاً، وإلا عادياً (بلا copy_back)."""
     if is_enabled():
         return await run_sandboxed(cmd, work_dir=work_dir, timeout=timeout, copy_back=False)
-    return await _run_fallback(cmd, work_dir, timeout)
+    return await _run_fallback(cmd, work_dir, timeout, warn=False)
 
 
 def _has_tests(work_dir: Optional[str]) -> bool:
@@ -291,10 +291,37 @@ async def verify_code(files, work_dir: Optional[str] = None):
     {"none","syntax","tests"} — يشير لآخر فحص جرى. الفحص المنطقي يعتمد على وجود
     اختبارات؛ بدونها نكتفي بالبنية (بصدق: لا ندّعي فحص منطق غير موجود).
     """
-    ok, summary = await verify_python(files, work_dir)
-    if not ok:
-        return False, summary, "syntax"          # خطأ نحوي — لا نكمل للمنطق
-    if _has_tests(work_dir):
+    allf = [str(f) for f in (files or [])]
+    py = [f for f in allf if f.endswith(".py")]
+    js = [f for f in allf if f.endswith((".js", ".mjs", ".cjs", ".jsx"))]
+
+    # 1) بنية بايثون (py_compile)
+    summary = ""
+    if py:
+        ok, summary = await verify_python(py, work_dir)
+        if not ok:
+            return False, summary, "syntax"
+        # 1ب) أخطاء برمجية حقيقية عبر ruff (اختياري): E9 نحوي، F أسماء/استيراد
+        if shutil.which("ruff"):
+            rel = _relpaths(py, work_dir)
+            r = await _run_check(
+                "ruff check --select E9,F63,F7,F82,F821 --quiet " + _q(rel), work_dir, 60)
+            if r.returncode != 0:
+                bad = (r.stdout or r.stderr or "").strip()[-1200:]
+                return False, "❌ فشل الفحص (أخطاء برمجية عبر ruff):\n" + bad, "lint"
+            summary += " · ✅ ruff"
+
+    # 2) بنية JavaScript عبر node --check (اختياري)
+    if js and shutil.which("node"):
+        for f in _relpaths(js, work_dir):
+            r = await _run_check("node --check " + _q([f]), work_dir, 30)
+            if r.returncode != 0:
+                bad = (r.stderr or r.stdout or "").strip()[-800:]
+                return False, f"❌ خطأ نحوي في JavaScript ({Path(f).name}):\n{bad}", "syntax"
+        summary = (summary + " · ✅ JS").strip(" ·")
+
+    # 3) منطق بايثون عبر الاختبارات (إن وُجدت)
+    if py and _has_tests(work_dir):
         r = await _run_check("python3 -m pytest -q", work_dir,
                              timeout=int(os.environ.get("WEAVER_VERIFY_TEST_TIMEOUT", "180")))
         if r.timed_out:
@@ -305,7 +332,24 @@ async def verify_code(files, work_dir: Optional[str] = None):
                     "❌ فشل التحقق المنطقي — الاختبارات لم تمرّ:\n" + detail.strip()[-1400:],
                     "tests")
         return True, (summary + " · ✅ الاختبارات تمرّ (فحص منطقي)"), "tests"
-    return True, (summary + " · (لا اختبارات — فحص بنية فقط)"), "syntax"
+
+    if not summary:
+        return True, "", "none"
+    return True, (summary + (" · (لا اختبارات — فحص بنية فقط)" if py else "")), "syntax"
+
+
+def _relpaths(files, work_dir):
+    out = []
+    for f in files:
+        try:
+            out.append(os.path.relpath(f, work_dir) if work_dir else f)
+        except Exception:
+            out.append(f)
+    return out
+
+
+def _q(paths) -> str:
+    return " ".join("'" + str(p).replace("'", "") + "'" for p in paths)
 
 
 def _copy_back(sandbox_work: Path, original: Path) -> None:
