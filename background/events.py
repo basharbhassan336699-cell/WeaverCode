@@ -24,6 +24,7 @@ class EventType(Enum):
     STATUS = "status"            # تغيّر حالة الـ daemon
     ACTION_BLOCK = "action_block"  # ملخص جولة أدوات (diff + وصف)
     NARRATION = "narration"      # نصّ المساعد المُتخلِّل بين الأدوات (كواجهة Claude Code)
+    TOKEN = "token"              # جزء من نصّ المساعد أثناء البثّ الحيّ (token-by-token)
 
 
 @dataclass
@@ -34,6 +35,7 @@ class WeaverEvent:
     diff_added: int = 0
     diff_removed: int = 0
     ops: list = field(default_factory=list)   # تفاصيل عمليات Action Block (للـ popup)
+    streamed: bool = False                    # هل بُثّ هذا الردّ توكِناً بتوكِن؟
     timestamp: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
@@ -44,6 +46,7 @@ class WeaverEvent:
             "diff_added": self.diff_added,
             "diff_removed": self.diff_removed,
             "ops": self.ops,
+            "streamed": self.streamed,
             "timestamp": self.timestamp,
         }
 

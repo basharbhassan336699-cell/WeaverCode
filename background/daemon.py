@@ -213,10 +213,25 @@ class WeaverDaemon:
 
         _persist("")   # حفظ فوري لرسالة المستخدم قبل بدء التنفيذ
 
+        # ── بثّ التوكِنات (اختياري WEAVER_STREAM=1): يعرض الرد حرفاً حرفاً حيّاً ──
+        # عند التفعيل: نمرّر on_token (يبثّ الأجزاء) ونعطّل narration كي لا يتكرّر
+        # النصّ. معطّل افتراضياً؛ ومسار البثّ نفسه يعود لـ complete() عند أي فشل.
+        _stream = os.environ.get("WEAVER_STREAM", "0").strip().lower() in (
+            "1", "true", "yes", "on")
+
+        def _on_token(delta):   # يُستدعى من خيط المحرّك
+            d = delta or ""
+            if not d:
+                return
+            asyncio.run_coroutine_threadsafe(
+                event_bus.emit(WeaverEvent(EventType.TOKEN, d[:80], d)), loop)
+
+        _tok_cb = _on_token if _stream else None
+        _narr_cb = None if _stream else _on_narration
         try:
             result = await engine.run(prompt, history=hist_msgs, on_tool=on_tool,
                                        on_permission=_on_permission,
-                                       on_narration=_on_narration)
+                                       on_narration=_narr_cb, on_token=_tok_cb)
         except Exception as exc:
             # عطل غير متوقّع: احفظ ما لدينا (رسالة المستخدم على الأقل) ثم أبلغ
             _persist("")
@@ -250,7 +265,8 @@ class WeaverDaemon:
                     if raw:
                         text += f"\n\n🔎 تشخيص خام:\n{raw[:400]}"
             response_text = text
-            await event_bus.emit(WeaverEvent(EventType.RESPONSE, text[:200], text))
+            await event_bus.emit(WeaverEvent(EventType.RESPONSE, text[:200], text,
+                                             streamed=_stream))
 
         # ── لقطة شاشة تلقائية للناتج المرئي (كواجهة Claude Code) ───────────────
         # «صورة لما عمله فعلاً» — لا سجل commits: إن أنتجت المهمة ملفاً مرئياً
