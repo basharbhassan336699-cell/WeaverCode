@@ -162,7 +162,8 @@ defaults are shown in brackets.
 | Variable | Meaning |
 |---|---|
 | `WEAVER_WEB_PORT` | Dashboard port `[8080]` |
-| `WEAVER_WEB_HOST` | Bind host `[0.0.0.0]` · set `127.0.0.1` to limit to this device |
+| `WEAVER_WEB_HOST` | Bind host `[127.0.0.1]` (this device only) · set `0.0.0.0` to allow your network |
+| `WEAVER_WEB_TOKEN` | Access token for the dashboard, enforced for **non-local** clients — set it when exposing to your network. Open with `http://<ip>:8080/?token=<token>` |
 
 ### Behavior & safety
 | Variable | Meaning |

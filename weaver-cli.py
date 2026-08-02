@@ -105,7 +105,7 @@ def info(msg: str) -> None:
 
 
 def web_host() -> str:
-    return os.environ.get("WEAVER_WEB_HOST", "0.0.0.0")
+    return os.environ.get("WEAVER_WEB_HOST", "127.0.0.1")
 
 
 def web_port() -> int:
@@ -294,6 +294,15 @@ def status(_args=None) -> int:
     print(f"  {GY}Model:{RS}    {env.get('WEAVER_MODEL', '(not set)')}")
     print(f"  {GY}Provider:{RS} {env.get('WEAVER_BASE_URL', '(not set)')}")
     print(f"  {GY}API key:{RS}  " + ("set ✓" if env.get('WEAVER_API_KEY') else "MISSING ✗"))
+    # أمان اللوحة: تنبيه إن كانت مفتوحة للشبكة بلا توكن
+    _host = web_host()
+    _tok = (env.get("WEAVER_WEB_TOKEN") or os.environ.get("WEAVER_WEB_TOKEN") or "").strip()
+    if _host == "0.0.0.0" and not _tok:
+        bad("Dashboard is open to your network WITHOUT a token — set WEAVER_WEB_TOKEN")
+    elif _host == "0.0.0.0":
+        ok("Dashboard open to network, protected by token 🔑")
+    else:
+        ok("Dashboard is local-only (this device) 🔒")
     return 0
 
 

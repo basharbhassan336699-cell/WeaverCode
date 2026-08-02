@@ -1307,8 +1307,75 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    # -- المصادقة: توكن دخول اختياري (WEAVER_WEB_TOKEN) لغير الاتصالات المحلية --
+    def _is_local(self) -> bool:
+        ip = (self.client_address[0] if self.client_address else "") or ""
+        return ip in ("127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost")
+
+    def _require_auth(self) -> bool:
+        """يُفرَض التوكن فقط على الاتصالات **غير المحلية** (الشبكة). على الجهاز
+        نفسه لا مصادقة (لا احتكاك). يُرجع True للمتابعة، أو False وقد أرسل الردّ
+        (تعيين كوكي/redirect/صفحة دخول/401). لا يمسّ مفاتيح المزوّد إطلاقاً."""
+        import hmac
+        token = os.environ.get("WEAVER_WEB_TOKEN", "").strip()
+        if not token or self._is_local():
+            return True
+        parsed = urlparse(self.path)
+        qtok = (parse_qs(parsed.query).get("token") or [None])[0]
+        ctok = None
+        for part in (self.headers.get("Cookie", "") or "").split(";"):
+            part = part.strip()
+            if part.startswith("weaver_token="):
+                ctok = part[len("weaver_token="):]
+        htok = self.headers.get("X-Weaver-Token")
+
+        def _ok(v):
+            return v is not None and hmac.compare_digest(str(v), token)
+
+        if _ok(ctok) or _ok(htok):
+            return True
+        if _ok(qtok):
+            # توكن صحيح عبر الرابط → ثبّت كوكي وأعد التوجيه لرابط نظيف
+            self.send_response(302)
+            self.send_header("Set-Cookie",
+                             "weaver_token=" + token + "; HttpOnly; SameSite=Strict; Path=/")
+            self.send_header("Location", parsed.path or "/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+        # غير مصرّح: JSON 401 للـ API/الأحداث/غير-GET، وإلا صفحة تسجيل دخول
+        if (parsed.path.startswith("/api") or parsed.path == "/events"
+                or self.command != "GET"):
+            self._json({"error": "unauthorized", "need_token": True}, 401)
+        else:
+            self._login_page()
+        return False
+
+    def _login_page(self):
+        html = (
+            "<!doctype html><html lang=en dir=ltr><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<title>WeaverCode — Sign in</title><style>"
+            "body{background:#0f0f16;color:#f1eee8;font-family:system-ui,-apple-system,sans-serif;"
+            "display:grid;place-items:center;min-height:100vh;margin:0}"
+            "form{background:#16161f;border:1px solid #2a2a36;border-radius:16px;"
+            "padding:28px;width:min(90vw,320px);text-align:center}"
+            "h1{color:#e08a53;font-size:21px;margin:0 0 6px}"
+            "p{color:#9c9388;font-size:13px;margin:0 0 18px}"
+            "input{width:100%;padding:12px;border-radius:10px;border:1px solid #2a2a36;"
+            "background:#0f0f16;color:#f1eee8;font-size:15px;margin-bottom:12px;box-sizing:border-box}"
+            "button{width:100%;padding:12px;border:0;border-radius:10px;background:#c67121;"
+            "color:#fff;font-size:15px;font-weight:600;cursor:pointer}</style></head>"
+            "<body><form method=get action='/'>"
+            "<h1>🕸️ WeaverCode</h1><p>Enter the access token to continue</p>"
+            "<input type=password name=token placeholder='Access token' autofocus>"
+            "<button type=submit>Sign in</button></form></body></html>")
+        self._html(html, 401)
+
     # -- GET --
     def do_GET(self):
+        if not self._require_auth():
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
@@ -1456,6 +1523,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- POST --
     def do_POST(self):
+        if not self._require_auth():
+            return
         path = urlparse(self.path).path
         body = self._read_body()
         if path == "/api/task":
@@ -1597,7 +1666,9 @@ def _start_daemon_thread():
 
 
 def main():
-    host = os.environ.get("WEAVER_WEB_HOST", "0.0.0.0")
+    # الافتراض: هذا الجهاز فقط (127.0.0.1) — أكثر أماناً. لفتحه للشبكة اضبط
+    # WEAVER_WEB_HOST=0.0.0.0 (ويُنصَح حينها بضبط WEAVER_WEB_TOKEN لحماية اللوحة).
+    host = os.environ.get("WEAVER_WEB_HOST", "127.0.0.1")
     port = int(os.environ.get("WEAVER_WEB_PORT", "8080"))
     try:
         from core.ui import WEAVER_VERSION
@@ -1606,8 +1677,13 @@ def main():
     _start_daemon_thread()
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"🕸️ WeaverCode Dashboard {WEAVER_VERSION} — http://{host}:{port}")
+    _has_token = bool(os.environ.get("WEAVER_WEB_TOKEN", "").strip())
     if host == "0.0.0.0":
-        print("   ⚠️  Reachable on your local network. To limit to this device: WEAVER_WEB_HOST=127.0.0.1")
+        if _has_token:
+            print("   🔓 Reachable on your local network — protected by WEAVER_WEB_TOKEN 🔑")
+        else:
+            print("   ⚠️  Reachable on your local network WITHOUT a token. Set WEAVER_WEB_TOKEN "
+                  "to protect it, or use WEAVER_WEB_HOST=127.0.0.1 for this device only.")
     print("   (Built-in server, no dependencies — runs on Termux directly)")
     try:
         server.serve_forever()
