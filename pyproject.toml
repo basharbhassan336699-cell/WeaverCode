@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "weavercode"
+version = "4.49.0"
+description = "WeaverCode — a provider-agnostic AI coding agent (terminal + web dashboard). Works with any AI model from any provider."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Bashar" }]
+keywords = ["ai", "agent", "coding", "cli", "termux", "llm", "assistant"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Environment :: Console",
+]
+dependencies = [
+  "httpx>=0.24",
+  "python-dotenv>=1.0.0",
+  "rich>=13.0.0",
+  "prompt_toolkit>=3.0.0",
+  "beautifulsoup4>=4.12.0",
+  "lxml>=5.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/basharbhassan336699-cell/WeaverCode"
+Repository = "https://github.com/basharbhassan336699-cell/WeaverCode"
+
+# أمران: weaver (الإدارة) و weavercode (الوكيل)
+[project.scripts]
+weaver = "weaver_cli:main"
+weavercode = "weaver:main"
+
+[tool.setuptools]
+py-modules = ["weaver", "weaver_cli"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["core*", "prompts*", "background*", "web*", "providers*"]
+
+# ملفات غير برمجية داخل الحزم (الواجهة/الأصول)
+[tool.setuptools.package-data]
+web = ["static/*", "templates/*"]

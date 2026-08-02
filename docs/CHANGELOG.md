@@ -1,5 +1,23 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## v4.49.0 — حزمة قابلة للتثبيت (pip / pipx install)
+
+صار WeaverCode **حزمة قابلة للتثبيت** — لا استنساخ إجباري:
+
+```bash
+pipx install git+https://github.com/basharbhassan336699-cell/WeaverCode
+```
+
+- **`pyproject.toml`** جديد: بيانات + تبعيات + اكتشاف الحزم + تضمين أصول الويب
+  (`web/static`, `web/templates`) عبر package-data وMANIFEST.
+- أمران مثبَّتان: **`weaver`** (الإدارة) و**`weavercode`** (الوكيل).
+- المنطق نُقل إلى `weaver_cli.py` (اسم قابل للاستيراد)؛ و`weaver-cli.py` صار
+  shim للتوافق (‏`python weaver-cli.py` والمشغّل `./weaver` وinstall.sh تعمل كما هي).
+- أُضيف `web/__init__.py` ليصبح حزمةً تُبنى وتُثبَّت.
+
+**تحقّق فعلي**: بناء wheel + تثبيت في venv نظيف → `weaver version`/`weaver start`
+يعملان من أي مجلد، والدشبورد يستجيب **HTTP 200** بأصول مضمّنة. (لم يُمَسّ `provider.py`.)
+
 ## v4.48.0 — توسيع التحقّق: ruff (أخطاء برمجية) + فحص JavaScript
 
 توسعة حلقة التحقّق التلقائي لتتجاوز البنية:

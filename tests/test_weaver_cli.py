@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _load(monkeypatch, tmp_path):
-    spec = importlib.util.spec_from_file_location("weaver_cli", ROOT / "weaver-cli.py")
+    spec = importlib.util.spec_from_file_location("weaver_cli", ROOT / "weaver_cli.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     # اعزل ملف .env في مجلد مؤقّت (لا نلمس إعدادات المستخدم)

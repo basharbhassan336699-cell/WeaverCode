@@ -96,6 +96,14 @@ weaver restore              # restart after closing the device/terminal
 weaver stop | weaver doctor | weaver fix | weaver help
 ```
 
+### 📦 Or install as a package (pip / pipx)
+
+```bash
+pipx install git+https://github.com/basharbhassan336699-cell/WeaverCode
+# then, from anywhere:
+weaver start        # dashboard + URL      ·   weavercode -i   # interactive agent
+```
+
 <details><summary>Manual install (if you prefer)</summary>
 
 ```bash

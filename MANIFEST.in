@@ -1,0 +1,8 @@
+# ملفات البيانات المضمَّنة في الحزمة (لتعمل بعد pip/pipx install)
+recursive-include web/static *
+recursive-include web/templates *
+recursive-include prompts *.py
+recursive-include config *.txt *.example *.json
+recursive-include assets *
+include README.md
+include docs/CLI.md
