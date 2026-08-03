@@ -78,9 +78,22 @@ After `install`, the `weaver` command works from anywhere (POSIX).
 ### Backup & restore (memory + sessions)
 | Command | What it does |
 |---|---|
-| `backup [dest]` | Back up the memory DB + saved sessions to a portable `.tar.gz` (default: `~/.weaver/backup/`) |
+| `backup [dest] [--keep N]` | Back up the memory DB + saved sessions to a portable `.tar.gz` (default: `~/.weaver/backup/`); `--keep N` prunes old backups, keeping the newest N |
 | `backups` · `list-backups` | List existing backups with their date and counts |
 | `restore-backup <file> [--overwrite]` | Restore memory + sessions from a backup (snapshots the current DB first) |
+
+**Scheduling** (Linux/Termux): back up nightly with cron, keeping the last 7 —
+`0 3 * * * cd /path/to/WeaverCode && python3 weaver-cli.py backup --keep 7`
+
+### Code symbol index
+| Command | What it does |
+|---|---|
+| `symbols build [path]` | Build/refresh the symbol index (incremental — re-parses only changed files) |
+| `symbols find <name> [path]` | Find where a function/class/method is defined (`file:line`) |
+| `symbols outline <file> [path]` | List the symbols defined in one file, in order |
+
+Languages: Python (via `ast`), JavaScript/TypeScript, Go, Rust, Java (via
+regex). The same index is available to the agent as the `SymbolIndex` tool.
 
 ### Info
 | Command | What it does |

@@ -107,6 +107,13 @@ def create_backup(dest: Optional[str] = None,
     else:
         out = _backup_dir() / default_name
     out.parent.mkdir(parents=True, exist_ok=True)
+    # تفادي الكتابة فوق نسخة أُنشئت في الثانية نفسها (دقّة الطابع = ثانية)
+    if out.exists():
+        stem = out.name[:-len(".tar.gz")] if out.name.endswith(".tar.gz") else out.stem
+        i = 2
+        while out.exists():
+            out = out.parent / f"{stem}-{i}.tar.gz"
+            i += 1
 
     export = export_json(db)
     manifest = {
@@ -163,6 +170,23 @@ def list_backups() -> List[Dict]:
             pass
         out.append(info)
     return out
+
+
+def prune_backups(keep: int) -> List[str]:
+    """يحذف أقدم النسخ في المجلد الافتراضي مبقياً أحدث ``keep`` منها.
+
+    يُرجع مسارات النسخ المحذوفة. keep<=0 لا يحذف شيئاً (حماية)."""
+    if keep is None or keep <= 0:
+        return []
+    items = list_backups()   # الأحدث أولاً
+    removed: List[str] = []
+    for it in items[keep:]:
+        try:
+            Path(it["path"]).unlink()
+            removed.append(it["path"])
+        except Exception:
+            pass
+    return removed
 
 
 def restore_backup(archive: str, db_path: Optional[str] = None,

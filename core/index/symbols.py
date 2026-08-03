@@ -5,13 +5,15 @@ A lightweight symbol index over a project's source files, to speed up
 navigation and understanding on large codebases: "where is function/class X
 defined?" without a full-text scan every time.
 
-  • Python  → parsed with the stdlib ``ast`` (accurate: functions, classes,
-              methods, with line numbers and signatures)
-  • JS/TS   → parsed with tolerant regexes (functions, classes, exported
-              const arrows) — good enough for jump-to-definition
+  • Python        → parsed with the stdlib ``ast`` (accurate: functions,
+                    classes, methods, with line numbers and signatures)
+  • JS/TS/Go/     → parsed with tolerant regexes (functions, classes,
+    Rust/Java       structs, interfaces, …) — good enough for jump-to-definition
 
 stdlib-only; the index is a plain dict that serializes to JSON and can be
 cached under ~/.weaver/cache so re-indexing is only needed when files change.
+An *incremental* rebuild re-parses only files whose mtime changed, so it stays
+fast on large codebases.
 """
 from __future__ import annotations
 
@@ -32,6 +34,11 @@ _SKIP_DIRS = {
 }
 _PY_EXT = {".py", ".pyi"}
 _JS_EXT = {".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx"}
+_GO_EXT = {".go"}
+_RUST_EXT = {".rs"}
+_JAVA_EXT = {".java"}
+# كل الامتدادات المفهرَسة (Python عبر ast، والبقية عبر regex)
+_ALL_EXT = _PY_EXT | _JS_EXT | _GO_EXT | _RUST_EXT | _JAVA_EXT
 _MAX_FILE_BYTES = 1_500_000   # نتجاوز الملفات الضخمة (مولّدة عادةً)
 
 
@@ -48,7 +55,7 @@ def _iter_source_files(root: Path):
                        and not d.startswith(".")]
         for fn in filenames:
             ext = os.path.splitext(fn)[1].lower()
-            if ext in _PY_EXT or ext in _JS_EXT:
+            if ext in _ALL_EXT:
                 yield Path(dirpath) / fn
 
 
@@ -106,24 +113,48 @@ def extract_python(path: Path, rel: str) -> List[Dict]:
     return out
 
 
-# JS/TS: أنماط متسامحة لالتقاط أكثر التعريفات شيوعاً
+# أنماط متسامحة لكل لغة (regex سطرية) لالتقاط أكثر التعريفات شيوعاً
 _JS_PATTERNS = [
     (re.compile(r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)"), "function"),
     (re.compile(r"^\s*(?:export\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)"), "class"),
     (re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"), "function"),
     (re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?function"), "function"),
 ]
+_GO_PATTERNS = [
+    (re.compile(r"^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\("), "function"),
+    (re.compile(r"^\s*type\s+([A-Za-z_]\w*)\s+struct\b"), "struct"),
+    (re.compile(r"^\s*type\s+([A-Za-z_]\w*)\s+interface\b"), "interface"),
+]
+_RUST_PATTERNS = [
+    (re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)"), "function"),
+    (re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?struct\s+([A-Za-z_]\w*)"), "struct"),
+    (re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+([A-Za-z_]\w*)"), "enum"),
+    (re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?trait\s+([A-Za-z_]\w*)"), "trait"),
+]
+_JAVA_PATTERNS = [
+    (re.compile(r"^\s*(?:public|private|protected)?\s*(?:abstract\s+|final\s+)?class\s+([A-Za-z_]\w*)"), "class"),
+    (re.compile(r"^\s*(?:public|private|protected)?\s*interface\s+([A-Za-z_]\w*)"), "interface"),
+    (re.compile(r"^\s*(?:public|private|protected)?\s*enum\s+([A-Za-z_]\w*)"), "enum"),
+    (re.compile(r"^\s*(?:public|private|protected)\s+(?:static\s+)?(?:final\s+)?[\w<>\[\],\s]+?\s+([A-Za-z_]\w*)\s*\([^;{]*\)\s*\{"), "method"),
+]
+
+_REGEX_PATTERNS = {
+    **{e: _JS_PATTERNS for e in _JS_EXT},
+    **{e: _GO_PATTERNS for e in _GO_EXT},
+    **{e: _RUST_PATTERNS for e in _RUST_EXT},
+    **{e: _JAVA_PATTERNS for e in _JAVA_EXT},
+}
 
 
-def extract_js(path: Path, rel: str) -> List[Dict]:
-    """يستخرج رموز ملف JS/TS عبر regex (دوال/أصناف/const أسهُم مُصدَّرة)."""
+def extract_regex(path: Path, rel: str, patterns: List) -> List[Dict]:
+    """يستخرج رموز ملف نصّي عبر أنماط regex سطرية (JS/TS/Go/Rust/Java)."""
     out: List[Dict] = []
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except Exception:
         return out
     for i, line in enumerate(lines, 1):
-        for pat, kind in _JS_PATTERNS:
+        for pat, kind in patterns:
             m = pat.match(line)
             if m:
                 out.append({"name": m.group(1), "kind": kind,
@@ -133,20 +164,47 @@ def extract_js(path: Path, rel: str) -> List[Dict]:
     return out
 
 
-def build_index(root: str, cache: bool = True) -> Dict:
-    """يبني فهرس رموز لمجلد مشروع ويُرجعه (ويحفظه في الكاش اختيارياً)."""
+def extract_file(path: Path, rel: str) -> List[Dict]:
+    """يوجّه الملف إلى المستخرِج المناسب حسب امتداده."""
+    ext = path.suffix.lower()
+    if ext in _PY_EXT:
+        return extract_python(path, rel)
+    patterns = _REGEX_PATTERNS.get(ext)
+    if patterns:
+        return extract_regex(path, rel, patterns)
+    return []
+
+
+def build_index(root: str, cache: bool = True,
+                incremental: bool = False) -> Dict:
+    """يبني فهرس رموز لمجلد مشروع ويُرجعه (ويحفظه في الكاش اختيارياً).
+
+    incremental=True: يحمّل الفهرس المُخزَّن ويعيد تحليل الملفات المتغيّرة فقط
+    (حسب mtime)، ويُسقِط رموز الملفات المحذوفة — أسرع كثيراً على المشاريع الكبيرة.
+    يسقط تلقائياً إلى بناء كامل إن لم يوجد كاش سابق."""
     root_path = Path(os.path.expanduser(root)).resolve()
-    symbols: List[Dict] = []
-    files_indexed = 0
     if root_path.is_file():
         source_files = [root_path]
         base = root_path.parent
     else:
         source_files = _iter_source_files(root_path)
         base = root_path
+
+    old = load_index(root) if incremental else None
+    old_mtimes: Dict[str, float] = (old or {}).get("mtimes", {}) or {}
+    old_by_file: Dict[str, List[Dict]] = {}
+    if old:
+        for s in old.get("symbols", []):
+            old_by_file.setdefault(s["file"], []).append(s)
+
+    symbols: List[Dict] = []
+    mtimes: Dict[str, float] = {}
+    files_indexed = 0
+    reused = 0
     for f in source_files:
         try:
-            if f.stat().st_size > _MAX_FILE_BYTES:
+            st = f.stat()
+            if st.st_size > _MAX_FILE_BYTES:
                 continue
         except OSError:
             continue
@@ -154,13 +212,16 @@ def build_index(root: str, cache: bool = True) -> Dict:
             rel = str(f.relative_to(base))
         except ValueError:
             rel = str(f)
-        ext = f.suffix.lower()
-        if ext in _PY_EXT:
-            found = extract_python(f, rel)
-        elif ext in _JS_EXT:
-            found = extract_js(f, rel)
-        else:
+        mt = st.st_mtime
+        mtimes[rel] = mt
+        # إعادة استخدام رموز ملف لم يتغيّر (بناء تزايدي)
+        if (incremental and rel in old_mtimes
+                and abs(old_mtimes[rel] - mt) < 1e-6 and rel in old_by_file):
+            symbols.extend(old_by_file[rel])
+            files_indexed += 1
+            reused += 1
             continue
+        found = extract_file(f, rel)
         if found:
             files_indexed += 1
             symbols.extend(found)
@@ -170,7 +231,9 @@ def build_index(root: str, cache: bool = True) -> Dict:
         "built_at": time.time(),
         "files": files_indexed,
         "count": len(symbols),
+        "reused_files": reused,
         "symbols": symbols,
+        "mtimes": mtimes,
     }
     if cache:
         try:

@@ -1028,9 +1028,12 @@ class ToolRegistry:
             return f"خطأ: تعذّر تحميل فهرس الرموز: {e}"
         root = path or self.work_dir
         if action == "build":
-            idx = _sym.build_index(root, cache=True)
+            # بناء تزايدي: يعيد تحليل الملفات المتغيّرة فقط عند وجود كاش سابق
+            idx = _sym.build_index(root, cache=True, incremental=True)
+            extra = (f" ({idx['reused_files']} ملف دون تغيير)"
+                     if idx.get("reused_files") else "")
             return (f"✅ فُهرس {idx['count']} رمزاً من {idx['files']} ملفاً في "
-                    f"{idx['root']} (محفوظ في الكاش).")
+                    f"{idx['root']}{extra} (محفوظ في الكاش).")
         # find/outline يحتاجان فهرساً — حمّل الكاش أو ابنِه عند الحاجة
         idx = _sym.load_index(root)
         if idx is None:

@@ -8,6 +8,7 @@ test_final_touches.py — اختبارات اللمسات الأخيرة
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -167,3 +168,121 @@ def test_symbol_index_tool(tmp_path):
     assert "s.py" in found and "alpha" in found
     outline = asyncio.run(reg.execute("SymbolIndex", {"action": "outline", "file": "s.py"}))
     assert "alpha" in outline
+
+
+# ── 7b) لغات إضافية في الفهرس (Go/Rust/Java) ─────────────────────────────────
+
+def test_go_symbols(tmp_path):
+    (tmp_path / "m.go").write_text(
+        "package m\n"
+        "func Handle(w http.ResponseWriter) {}\n"
+        "func (s *Server) Serve() {}\n"
+        "type Server struct {}\n"
+        "type Reader interface {}\n", encoding="utf-8")
+    idx = sym.build_index(str(tmp_path), cache=False)
+    kinds = {s["name"]: s["kind"] for s in idx["symbols"]}
+    assert kinds.get("Handle") == "function"
+    assert kinds.get("Serve") == "function"      # method with receiver
+    assert kinds.get("Server") == "struct"
+    assert kinds.get("Reader") == "interface"
+
+
+def test_rust_symbols(tmp_path):
+    (tmp_path / "m.rs").write_text(
+        "pub fn run() {}\n"
+        "async fn fetch() {}\n"
+        "pub struct Config {}\n"
+        "enum State {}\n"
+        "trait Draw {}\n", encoding="utf-8")
+    idx = sym.build_index(str(tmp_path), cache=False)
+    kinds = {s["name"]: s["kind"] for s in idx["symbols"]}
+    assert kinds.get("run") == "function"
+    assert kinds.get("fetch") == "function"
+    assert kinds.get("Config") == "struct"
+    assert kinds.get("State") == "enum"
+    assert kinds.get("Draw") == "trait"
+
+
+def test_java_symbols(tmp_path):
+    (tmp_path / "M.java").write_text(
+        "public class Widget {\n"
+        "    public void render(int x) {\n"
+        "        return;\n"
+        "    }\n"
+        "}\n"
+        "interface Clickable {}\n", encoding="utf-8")
+    idx = sym.build_index(str(tmp_path), cache=False)
+    kinds = {s["name"]: s["kind"] for s in idx["symbols"]}
+    assert kinds.get("Widget") == "class"
+    assert kinds.get("Clickable") == "interface"
+    assert kinds.get("render") == "method"
+
+
+# ── 7c) البناء التزايدي (incremental) ────────────────────────────────────────
+
+def test_incremental_reuses_unchanged_and_reparses_changed(tmp_path):
+    a = tmp_path / "a.py"
+    b = tmp_path / "b.py"
+    a.write_text("def one():\n    pass\n", encoding="utf-8")
+    b.write_text("def two():\n    pass\n", encoding="utf-8")
+    first = sym.build_index(str(tmp_path), cache=True)
+    assert first["count"] == 2 and first["reused_files"] == 0
+
+    # عدّل a فقط (اضبط mtime للأمام لضمان الاختلاف)
+    import os as _os
+    a.write_text("def one():\n    pass\ndef one_more():\n    pass\n", encoding="utf-8")
+    future = time.time() + 10
+    _os.utime(a, (future, future))
+
+    second = sym.build_index(str(tmp_path), cache=True, incremental=True)
+    names = {s["name"] for s in second["symbols"]}
+    assert {"one", "one_more", "two"} <= names   # a أُعيد تحليله
+    assert second["reused_files"] == 1           # b أُعيد استخدامه دون تحليل
+
+
+def test_incremental_drops_deleted_files(tmp_path):
+    a = tmp_path / "a.py"
+    b = tmp_path / "b.py"
+    a.write_text("def keep():\n    pass\n", encoding="utf-8")
+    b.write_text("def gone():\n    pass\n", encoding="utf-8")
+    sym.build_index(str(tmp_path), cache=True)
+    b.unlink()
+    idx = sym.build_index(str(tmp_path), cache=True, incremental=True)
+    names = {s["name"] for s in idx["symbols"]}
+    assert "keep" in names and "gone" not in names
+
+
+def test_incremental_falls_back_to_full_without_cache(tmp_path):
+    (tmp_path / "x.py").write_text("def solo():\n    pass\n", encoding="utf-8")
+    # لا كاش سابق → بناء كامل دون خطأ
+    idx = sym.build_index(str(tmp_path), cache=False, incremental=True)
+    assert any(s["name"] == "solo" for s in idx["symbols"])
+
+
+# ── 6b) تقليم النسخ الاحتياطية (--keep) ──────────────────────────────────────
+
+def test_prune_backups_keeps_newest(tmp_path, monkeypatch):
+    # وجّه مجلد النسخ الافتراضي إلى مجلد مؤقت
+    bkdir = tmp_path / "backups"
+    bkdir.mkdir()
+    monkeypatch.setattr(bk, "_backup_dir", lambda: bkdir)
+    db = str(tmp_path / "m.db")
+    _seed(db)
+    outs = []
+    for _ in range(4):
+        outs.append(bk.create_backup(db_path=db))   # تُكتب في bkdir
+    assert len(bk.list_backups()) == 4
+    removed = bk.prune_backups(keep=2)
+    assert len(removed) == 2
+    assert len(bk.list_backups()) == 2
+
+
+def test_prune_backups_zero_keep_is_noop(tmp_path, monkeypatch):
+    bkdir = tmp_path / "backups"
+    bkdir.mkdir()
+    monkeypatch.setattr(bk, "_backup_dir", lambda: bkdir)
+    db = str(tmp_path / "m.db")
+    _seed(db)
+    bk.create_backup(db_path=db)
+    assert bk.prune_backups(0) == []
+    assert len(bk.list_backups()) == 1

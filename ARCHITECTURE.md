@@ -150,13 +150,16 @@ To work efficiently on large codebases, WeaverCode can build a lightweight
 
 - **Python** is parsed with the stdlib `ast` in a single parent-aware pass
   (methods vs. free functions are classified correctly, nothing double-counted).
-- **JS/TS** is parsed with tolerant regexes (functions, classes, exported arrow
-  consts).
+- **JS/TS, Go, Rust, Java** are parsed with tolerant regexes (functions,
+  classes, structs, interfaces, traits, enums).
 - Noise directories (`node_modules`, `.venv`, `__pycache__`, …) and oversized
-  files are skipped; the index is cached under `~/.weaver/cache`.
+  files are skipped; the index is cached under `~/.weaver/cache`. An
+  **incremental** rebuild re-parses only files whose mtime changed and drops
+  deleted ones, so refreshes stay fast on large trees.
 
 The `SymbolIndex` tool exposes `build` / `find` / `outline`, giving the model
-jump-to-definition without re-scanning the tree each time.
+jump-to-definition without re-scanning the tree each time. The same index is
+available from the terminal via `weaver symbols …`.
 
 ---
 
