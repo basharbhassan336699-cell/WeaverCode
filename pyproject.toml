@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weavercode"
-version = "4.50.0"
+version = "4.51.0"
 description = "WeaverCode — a provider-agnostic AI coding agent (terminal + web dashboard). Works with any AI model from any provider."
 readme = "README.md"
 requires-python = ">=3.8"

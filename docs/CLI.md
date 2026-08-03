@@ -75,6 +75,13 @@ After `install`, the `weaver` command works from anywhere (POSIX).
 | `doctor` · `diagnose` | Health checks: Python, git, deps, `.env`, key, provider reachability, port |
 | `fix` | Auto-fix common problems (dirs, `.env`, stuck port, deps, stale flags) |
 
+### Backup & restore (memory + sessions)
+| Command | What it does |
+|---|---|
+| `backup [dest]` | Back up the memory DB + saved sessions to a portable `.tar.gz` (default: `~/.weaver/backup/`) |
+| `backups` · `list-backups` | List existing backups with their date and counts |
+| `restore-backup <file> [--overwrite]` | Restore memory + sessions from a backup (snapshots the current DB first) |
+
 ### Info
 | Command | What it does |
 |---|---|

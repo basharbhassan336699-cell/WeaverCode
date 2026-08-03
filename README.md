@@ -359,6 +359,13 @@ WEAVER_LOOP_LIMIT=4              # Max repeats of the same tool+args before stop
 
 ---
 
+## Documentation
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how WeaverCode is built (agent loop, provider layer, tools, memory, symbol index, web dashboard)
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, ground rules, and how to verify & submit changes
+- [`docs/CLI.md`](docs/CLI.md) — full command & environment-variable reference
+- [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — release history
+
 ## Developer
 
 **Bashar** — UAE  

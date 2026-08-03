@@ -688,6 +688,31 @@ class ToolRegistry:
             fn=self._lsp,
         ))
 
+        # ── فهرس رموز الكود (symbol index) ───────────────────────────────────
+        self._add(Tool(
+            name="SymbolIndex",
+            description=("فهرس رموز الكود لتسريع العمل على المشاريع الكبيرة: أين "
+                         "تُعرَّف دالة/صنف؟ Python عبر ast (دقيق) وJS/TS عبر regex. "
+                         "الأوضاع: build (يبني/يحدّث الفهرس) | find (يبحث عن رمز "
+                         "بالاسم) | outline (رموز ملف واحد). يُخزَّن في الكاش."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string",
+                               "enum": ["build", "find", "outline"],
+                               "default": "find"},
+                    "name": {"type": "string",
+                             "description": "اسم الرمز للبحث (مع action=find)"},
+                    "file": {"type": "string",
+                             "description": "مسار الملف النسبي (مع action=outline)"},
+                    "path": {"type": "string",
+                             "description": "مجلد المشروع للفهرسة (اختياري، افتراضي مجلد العمل)"},
+                },
+                "required": [],
+            },
+            fn=self._symbol_index,
+        ))
+
         # ── وضع التخطيط ──────────────────────────────────────────────────────
         self._add(Tool(
             name="EnterPlanMode",
@@ -990,6 +1015,48 @@ class ToolRegistry:
             return f"الفاحص غير مثبّت: {e}"
         except Exception as e:
             return f"خطأ: {e}"
+
+    # ── فهرس رموز الكود (symbol index) ────────────────────────────────────────
+
+    def _symbol_index(self, action: str = "find", name: Optional[str] = None,
+                      file: Optional[str] = None,
+                      path: Optional[str] = None) -> str:
+        """يبني/يستعلم فهرس رموز الكود لتسريع التنقّل في المشاريع الكبيرة."""
+        try:
+            from core.index import symbols as _sym
+        except Exception as e:
+            return f"خطأ: تعذّر تحميل فهرس الرموز: {e}"
+        root = path or self.work_dir
+        if action == "build":
+            idx = _sym.build_index(root, cache=True)
+            return (f"✅ فُهرس {idx['count']} رمزاً من {idx['files']} ملفاً في "
+                    f"{idx['root']} (محفوظ في الكاش).")
+        # find/outline يحتاجان فهرساً — حمّل الكاش أو ابنِه عند الحاجة
+        idx = _sym.load_index(root)
+        if idx is None:
+            idx = _sym.build_index(root, cache=True)
+        if action == "outline":
+            if not file:
+                return "خطأ: مرّر 'file' (مسار نسبي) مع action=outline."
+            rows = _sym.outline(idx, file)
+            if not rows:
+                return f"لا رموز مفهرسة للملف: {file}"
+            lines = [f"{file} — {len(rows)} رمز:"]
+            for s in rows:
+                lines.append(f"  {s['line']:>4}  {s['kind']:<8} {s.get('signature', s['name'])}")
+            return "\n".join(lines)
+        # action == find
+        if not name:
+            return (f"الفهرس: {idx['count']} رمز من {idx['files']} ملف. "
+                    f"مرّر 'name' للبحث أو action=build لإعادة البناء.")
+        rows = _sym.find(idx, name)
+        if not rows:
+            return f"لم يُعثر على رمز باسم '{name}'."
+        lines = [f"نتائج '{name}' ({len(rows)}):"]
+        for s in rows:
+            lines.append(f"  {s['file']}:{s['line']}  [{s['kind']}] "
+                         f"{s.get('signature', s['name'])}")
+        return "\n".join(lines)
 
     # ── تنفيذ كل أداة ────────────────────────────────────────────────────────
 

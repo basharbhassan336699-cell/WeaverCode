@@ -23,6 +23,9 @@ Commands:
     model <name>         Set the model
     doctor | diagnose    Run health checks and report problems
     fix                  Auto-fix common problems (dirs, .env, stuck port, deps)
+    backup [dest]        Back up memory + sessions to a portable .tar.gz
+    backups              List existing backups
+    restore-backup <f>   Restore memory + sessions from a backup (--overwrite)
     logs [N]             Show the last N lines of the server log (default 40)
     banner | hello       Show the WeaverCode hero banner
     version              Print the WeaverCode version
@@ -659,6 +662,92 @@ def fix(_args=None) -> int:
     return 0
 
 
+# ── backup / restore (memory + sessions) ─────────────────────────────────────
+def _human_size(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{int(n)}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}GB"
+
+
+def backup_cmd(args) -> int:
+    """Create a portable backup of the memory DB + saved sessions."""
+    try:
+        from core import backup as _bk
+    except Exception as e:
+        bad(f"Could not load backup module: {e}")
+        return 1
+    dest = args[0] if args else None
+    say("Backing up WeaverCode memory + sessions…")
+    try:
+        out = _bk.create_backup(dest)
+    except Exception as e:
+        bad(f"Backup failed: {e}")
+        return 1
+    try:
+        counts = _bk.export_json()
+        n_conv = len(counts.get("conversations", []))
+        n_sess = len(counts.get("sessions", []))
+        n_fact = len(counts.get("facts", []))
+        info(f"{n_conv} conversations · {n_sess} sessions · {n_fact} facts")
+    except Exception:
+        pass
+    ok(f"Backup written → {out}")
+    info(f"Size: {_human_size(out.stat().st_size)}")
+    info("Restore later with: python weaver-cli.py restore-backup <file>")
+    return 0
+
+
+def backups_cmd(_args=None) -> int:
+    """List backups in ~/.weaver/backup."""
+    try:
+        from core import backup as _bk
+    except Exception as e:
+        bad(f"Could not load backup module: {e}")
+        return 1
+    items = _bk.list_backups()
+    if not items:
+        say("No backups yet. Create one with: python weaver-cli.py backup")
+        return 0
+    say(f"Backups ({len(items)}):")
+    for it in items:
+        man = it.get("manifest", {})
+        counts = man.get("counts", {})
+        when = man.get("created_at_human", "")
+        summary = ""
+        if counts:
+            summary = (f"  ·  {counts.get('conversations', 0)} conv, "
+                       f"{counts.get('sessions', 0)} sess")
+        print(f"  {OR}{it['name']}{RS}  ({_human_size(it['size'])}){summary}"
+              + (f"  ·  {when}" if when else ""))
+    return 0
+
+
+def restore_backup_cmd(args) -> int:
+    """Restore the memory DB from a backup file."""
+    try:
+        from core import backup as _bk
+    except Exception as e:
+        bad(f"Could not load backup module: {e}")
+        return 1
+    if not args:
+        bad("Usage: python weaver-cli.py restore-backup <file> [--overwrite]")
+        info("List available backups: python weaver-cli.py backups")
+        return 1
+    archive = args[0]
+    overwrite = "--overwrite" in args[1:] or "-f" in args[1:]
+    say("Restoring WeaverCode memory…")
+    msg = _bk.restore_backup(archive, overwrite=overwrite)
+    if msg.startswith("✅"):
+        for line in msg.splitlines():
+            ok(line.lstrip("✅ ")) if line.startswith("✅") else info(line)
+        info("Restart to apply: python weaver-cli.py restart")
+        return 0
+    bad(msg)
+    return 1
+
+
 # ── logs / version / help ────────────────────────────────────────────────────
 def _tail(path: Path, n: int) -> None:
     try:
@@ -721,6 +810,9 @@ COMMANDS = {
     "model": model_cmd,
     "doctor": doctor, "diagnose": doctor,
     "fix": fix,
+    "backup": backup_cmd,
+    "backups": backups_cmd, "list-backups": backups_cmd,
+    "restore-backup": restore_backup_cmd, "restore_backup": restore_backup_cmd,
     "logs": logs,
     "banner": banner_cmd, "hello": banner_cmd,
     "version": version, "--version": version, "-v": version,
