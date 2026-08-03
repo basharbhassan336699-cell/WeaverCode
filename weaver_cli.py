@@ -568,12 +568,20 @@ def doctor(_args=None) -> int:
     else:
         bad("git not found (needed for update)"); problems += 1
 
-    # dependencies
-    for mod in ("httpx",):
-        try:
-            __import__(mod); ok(f"dependency '{mod}' importable")
-        except Exception:
-            bad(f"dependency '{mod}' missing — run: python weaver-cli.py fix"); problems += 1
+    # curl — REQUIRED: the provider shells out to curl (not httpx) for every call
+    if shutil.which("curl"):
+        ok("curl found (used by the provider)")
+    else:
+        bad("curl not found — the provider needs it: "
+            "install it (apt install curl / pkg install curl on Termux)")
+        problems += 1
+
+    # httpx — OPTIONAL: only speeds up WebFetch; it falls back to curl without it
+    try:
+        __import__("httpx")
+        ok("optional 'httpx' available (faster WebFetch)")
+    except Exception:
+        info("optional 'httpx' not installed — WebFetch falls back to curl (fine)")
 
     # config
     if ENV_FILE.exists():
