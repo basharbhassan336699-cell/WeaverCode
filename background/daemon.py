@@ -322,6 +322,25 @@ class WeaverDaemon:
                     "قبل اعتبار المهمة منجزة.")
             await event_bus.emit(WeaverEvent(EventType.RESPONSE, _rem, _rem))
 
+        # ── رفع تلقائي لـ GitHub عند انتهاء المهمة (اختياري، WEAVER_AUTO_PUSH=1) ──
+        # يُشغَّل في executor حتى لا يحجب حلقة الأحداث أثناء الـ push، ورسائله
+        # تُبثّ للواجهة عبر SSE. مُغلَّف بالكامل: أي عطل لا يكسر المهمة، ولا
+        # يُنفَّذ شيء ما لم يفعّله المستخدم صراحةً (معطّل افتراضياً).
+        try:
+            from core.autopush import auto_push, is_enabled as _push_on
+            if _push_on():
+                _push_msgs: list = []
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: auto_push(
+                        tools.work_dir, task_summary=prompt,
+                        notify=lambda lvl, m: _push_msgs.append((lvl, m))))
+                for _lvl, _m in _push_msgs:
+                    _et = EventType.ERROR if _lvl == "error" else EventType.RESPONSE
+                    await event_bus.emit(WeaverEvent(_et, str(_m)[:200], str(_m)))
+        except Exception:
+            pass
+
         await event_bus.emit(WeaverEvent(EventType.DONE, "اكتملت المهمة"))
         st.save_status("idle")
 

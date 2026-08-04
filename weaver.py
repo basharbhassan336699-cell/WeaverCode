@@ -330,40 +330,29 @@ async def run_once(prompt: str, mode: str = "main", stream: bool = False,
 
         await mcp.stop_all()
 
-    _maybe_auto_push(engine.tools.work_dir)
+    _maybe_auto_push(engine.tools.work_dir, task_summary=prompt)
     await provider.close()
 
 
-def _maybe_auto_push(work_dir: str) -> None:
+def _maybe_auto_push(work_dir: str, task_summary: str = "") -> None:
     """رفع تلقائي إلى GitHub عند الانتهاء إن كان WEAVER_AUTO_PUSH=1 (معطّل افتراضياً).
 
-    آمن: يرفع فقط إن وُجدت تغييرات فعلية داخل مستودع Git، ويستخدم اعتماد git
-    المحلي. لا يُنفَّذ ما لم يفعّله المستخدم صراحةً.
+    يفوّض المنطق إلى ``core.autopush`` ليتشاركه الطرفية والـ daemon (لوحة الويب)
+    بسلوك واحد: فرع/remote قابلان للضبط، رسالة commit وصفية من ملخّص المهمة،
+    وضبط upstream تلقائياً. آمن: يرفع فقط إن وُجدت تغييرات فعلية داخل مستودع Git،
+    ولا يُنفَّذ ما لم يفعّله المستخدم صراحةً، ولا يرمي استثناء.
     """
-    if os.environ.get("WEAVER_AUTO_PUSH", "0").strip() not in ("1", "true", "yes", "on"):
-        return
-    import subprocess
-    try:
-        inside = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"],
-                                capture_output=True, text=True, cwd=work_dir, timeout=10)
-        if inside.returncode != 0 or inside.stdout.strip() != "true":
-            return
-        status = subprocess.run(["git", "status", "--porcelain"],
-                                capture_output=True, text=True, cwd=work_dir, timeout=10)
-        if not status.stdout.strip():
-            draw_info("لا تغييرات للرفع.")
-            return
-        subprocess.run(["git", "add", "-A"], capture_output=True, cwd=work_dir, timeout=30)
-        subprocess.run(["git", "commit", "-m", "🕸️ WeaverCode: auto-commit"],
-                       capture_output=True, cwd=work_dir, timeout=30)
-        push = subprocess.run(["git", "push"], capture_output=True, text=True,
-                              cwd=work_dir, timeout=90)
-        if push.returncode == 0:
-            draw_success("رُفعت التغييرات إلى GitHub ✓")
+    from core.autopush import auto_push
+
+    def _notify(level: str, msg: str) -> None:
+        if level == "success":
+            draw_success(msg)
+        elif level == "error":
+            draw_error(msg)
         else:
-            draw_error("تعذّر الرفع التلقائي: " + (push.stderr or "").strip()[:200])
-    except Exception as e:
-        draw_error(f"تعذّر الرفع التلقائي: {e}")
+            draw_info(msg)
+
+    auto_push(work_dir, task_summary=task_summary, notify=_notify)
 
 
 def _show_empty_diagnostic(provider) -> None:

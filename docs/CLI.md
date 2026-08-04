@@ -214,6 +214,9 @@ defaults are shown in brackets.
 | `WEAVER_CHROMIUM` | Path to Chromium (for the Screenshot tool) |
 | `WEAVER_GITHUB_TOKEN` · `GITHUB_TOKEN` | GitHub token (activity + push) |
 | `GITHUB_OAUTH_CLIENT_ID` · `GITHUB_OAUTH_CLIENT_SECRET` | One-tap GitHub OAuth app |
+| `WEAVER_AUTO_PUSH` | Auto-commit + push after each task, terminal **and** web dashboard `[0]` — only when there are real changes in a git repo |
+| `WEAVER_AUTO_PUSH_BRANCH` | Target branch for auto-push (empty = current branch) |
+| `WEAVER_AUTO_PUSH_REMOTE` | Target remote for auto-push `[origin]` |
 | `WEAVER_NO_RESTART` | `1` = `update` won't restart the server |
 
 ---
