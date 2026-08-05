@@ -156,6 +156,43 @@ python weaver.py --bg                     # web dashboard in the background
 | `/vim` | Toggle vim editing mode |
 | `exit` · `quit` | Leave interactive mode |
 
+### Integrated tools — OCR & Loop Engineering
+
+Two built-in agent tools wrap the vendored tools in `vendors/` through the thin
+bridges in `integrations/`. They run the underlying tools as **separate
+processes**, so their heavy dependencies load only when actually used, and they
+degrade gracefully with a clear message when a tool/dependency (or a vLLM
+server / Node) is missing. Both require permission (they spawn processes).
+
+**`OCR`** — extract text (Markdown) from a PDF or image.
+
+| Parameter | Meaning |
+|---|---|
+| `file_path` | PDF or image to read (required) |
+| `tool` | `auto` (route by type) · `olmocr` (PDF) · `chandra` (images) |
+| `server_url` | vLLM server URL — required for real extraction |
+| `method` | Chandra method: `vllm` (server) or `hf` (local) |
+| `workspace` | olmOCR workspace dir (optional, default temp) |
+| `detect_only` | `true` = just return which tool fits, without running |
+
+Routing: **PDF → olmOCR**, **images (png/jpg/…) → Chandra**. Underlying
+functions: `integrations.run_olmocr` / `run_chandra` / `detect_file_type`.
+
+**`LoopEngine`** — Loop Engineering tools for autonomous loops (Node).
+
+| `action` | Meaning | Extra params |
+|---|---|---|
+| `audit` | Project readiness score | `path` (default: work dir) |
+| `gate` | Evaluate a change against `gate.yaml` → allowed / escalate | `files` (list), `gate_action` (`commit`·`merge`·`auto-merge`) |
+| `context` | Circuit breaker over a run ledger → continue / escalate | `ledger_path` (JSON) |
+
+Underlying functions: `integrations.audit_project` / `check_gate` /
+`check_context`. See `vendors/README.md` for the tools and their optional
+`npm install` / vLLM setup.
+
+> The code **symbol index** is also available to the agent as the `SymbolIndex`
+> tool (and from the terminal via `weaver symbols …`).
+
 ---
 
 ## 3) Environment variables
