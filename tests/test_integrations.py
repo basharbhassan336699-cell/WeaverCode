@@ -173,7 +173,63 @@ def test_ocr_tool_unsupported():
 def test_ocr_tool_missing_file_is_graceful():
     import asyncio
     r = _registry()
-    # ملف غير موجود → رسالة خطأ واضحة، لا استثناء
+    # ملف غير موجود → رسالة خطأ واضحة, لا استثناء
     out = asyncio.run(r.execute("OCR", {"file_path": "/nope/a.pdf",
                                         "server_url": "http://localhost:8000/v1"}))
     assert out.startswith("❌")
+
+
+# ── تسجيل LoopEngine في registry الأدوات ─────────────────────────────────────
+
+def test_loopengine_tool_registered():
+    r = _registry()
+    assert "LoopEngine" in r.names()
+    assert r.requires_permission("LoopEngine") is True
+    sch = [t for t in r.get_schema() if t["function"]["name"] == "LoopEngine"][0]
+    props = sch["function"]["parameters"]["properties"]
+    assert {"action", "path", "files", "gate_action", "ledger_path"} <= set(props)
+
+
+def test_loopengine_missing_args_are_graceful():
+    import asyncio
+    r = _registry()
+    # gate بلا files / context بلا ledger → رسالة واضحة لا استثناء
+    assert "files" in asyncio.run(r.execute("LoopEngine", {"action": "gate"}))
+    assert "ledger" in asyncio.run(r.execute("LoopEngine", {"action": "context"}))
+
+
+@_needs_node
+def test_loopengine_audit(tmp_path):
+    import asyncio
+    (tmp_path / "README.md").write_text("# t\n", encoding="utf-8")
+    r = _registry()
+    out = asyncio.run(r.execute("LoopEngine", {"action": "audit", "path": str(tmp_path)}))
+    assert "loop-audit" in out
+
+
+@_needs_node
+def test_loopengine_gate(tmp_path):
+    import asyncio
+    r = _registry()
+    ok = asyncio.run(r.execute("LoopEngine",
+                               {"action": "gate", "files": ["src/app.py"],
+                                "gate_action": "commit"}))
+    assert "مسموح" in ok
+    esc = asyncio.run(r.execute("LoopEngine",
+                                {"action": "gate", "files": ["x.bin"],
+                                 "gate_action": "auto-merge"}))
+    assert "تصعيد" in esc
+
+
+@_needs_node
+def test_loopengine_context(tmp_path):
+    import asyncio
+    import json as _json
+    led = tmp_path / "ledger.json"
+    led.write_text(_json.dumps({"goal": "fix",
+                                "attempts": [{"summary": "a", "outcome": "in-progress"}]}),
+                   encoding="utf-8")
+    r = _registry()
+    out = asyncio.run(r.execute("LoopEngine", {"action": "context",
+                                               "ledger_path": str(led)}))
+    assert "القرار" in out

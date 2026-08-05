@@ -1,6 +1,6 @@
 """
 registry.py — سجل الأدوات المدمجة في WeaverCode
-48 أداة مدمجة حقيقية (ملفات/بحث/تنفيذ/ذاكرة/مهام/ويب/git/تعديل متعدد/وكيل فرعي/فهرس رموز/OCR)،
+49 أداة مدمجة حقيقية (ملفات/بحث/تنفيذ/ذاكرة/مهام/ويب/git/تعديل متعدد/وكيل فرعي/فهرس رموز/OCR/Loop)،
 مع إمكانية تسجيل أدوات خارجية ديناميكياً عبر MCP (register_dynamic).
 """
 
@@ -742,6 +742,36 @@ class ToolRegistry:
             requires_permission=True,
         ))
 
+        # ── LoopEngine: أدوات هندسة الحلقات المستقلة (Loop Engineering) ───────
+        self._add(Tool(
+            name="LoopEngine",
+            description=("أدوات Loop Engineering المدمجة (Node) لهندسة الحلقات "
+                         "المستقلة. الأوضاع: audit (درجة جاهزية مشروع) | gate "
+                         "(تقييم إجراء commit/merge مقابل gate.yaml → pass/fail) | "
+                         "context (قاطِع دائرة على سجلّ تشغيل → continue/escalate)."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string",
+                               "enum": ["audit", "gate", "context"],
+                               "default": "audit"},
+                    "path": {"type": "string",
+                             "description": "مجلد المشروع (مع action=audit، افتراضي مجلد العمل)"},
+                    "files": {"type": "array", "items": {"type": "string"},
+                              "description": "الملفات المتغيّرة (مع action=gate)"},
+                    "gate_action": {"type": "string",
+                                    "enum": ["commit", "merge", "auto-merge"],
+                                    "default": "commit",
+                                    "description": "نوع الإجراء المقيَّم (مع action=gate)"},
+                    "ledger_path": {"type": "string",
+                                    "description": "مسار سجلّ التشغيل JSON (مع action=context)"},
+                },
+                "required": [],
+            },
+            fn=self._loop_engine,
+            requires_permission=True,
+        ))
+
         # ── وضع التخطيط ──────────────────────────────────────────────────────
         self._add(Tool(
             name="EnterPlanMode",
@@ -1127,6 +1157,57 @@ class ToolRegistry:
             return f"❌ تعذّر تشغيل OCR ({chosen}): {e}"
         except Exception as e:
             return f"❌ خطأ غير متوقّع في OCR: {e}"
+
+    # ── LoopEngine: جسر أدوات Loop Engineering (audit/gate/context) ────────────
+
+    def _loop_engine(self, action: str = "audit", path: Optional[str] = None,
+                     files: Optional[List[str]] = None,
+                     gate_action: str = "commit",
+                     ledger_path: Optional[str] = None) -> str:
+        """يشغّل أدوات Loop Engineering المدمجة عبر جسور integrations."""
+        try:
+            from integrations import (audit_project, check_gate, check_context,
+                                      LoopBridgeError)
+        except Exception as e:
+            return f"خطأ: تعذّر تحميل جسور Loop: {e}"
+        try:
+            if action == "audit":
+                res = audit_project(path or self.work_dir)
+                rep = res.get("report", {})
+                score = rep.get("score")
+                level = rep.get("level")
+                assess = rep.get("assessment", "")
+                lines = [f"🔁 loop-audit — درجة الجاهزية: {score} · المستوى: {level}"]
+                if assess:
+                    lines.append(f"  {assess}")
+                recs = rep.get("recommendations") or []
+                if recs:
+                    lines.append("  توصيات:")
+                    for r in recs[:5]:
+                        lines.append(f"   • {r}")
+                return "\n".join(lines)
+
+            if action == "gate":
+                if not files:
+                    return "خطأ: مرّر 'files' (قائمة الملفات المتغيّرة) مع action=gate."
+                res = check_gate(files, action=gate_action)
+                mark = "✅ مسموح" if res["passed"] else "⛔ تصعيد"
+                return (f"🔁 loop-gate ({gate_action}) → {mark} "
+                        f"[{res.get('trigger')}]\n  {res.get('reason') or ''}")
+
+            if action == "context":
+                if not ledger_path:
+                    return "خطأ: مرّر 'ledger_path' (سجلّ التشغيل JSON) مع action=context."
+                res = check_context(ledger_path)
+                dec = res["decision"]
+                mark = "▶️ متابعة" if dec == "continue" else "⛔ تصعيد"
+                return f"🔁 loop-context → القرار: {dec} ({mark})"
+
+            return f"إجراء غير معروف: {action} (المتاح: audit | gate | context)"
+        except LoopBridgeError as e:
+            return f"❌ تعذّر تشغيل Loop ({action}): {e}"
+        except Exception as e:
+            return f"❌ خطأ غير متوقّع في Loop: {e}"
 
     # ── تنفيذ كل أداة ────────────────────────────────────────────────────────
 
