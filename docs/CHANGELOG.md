@@ -1,5 +1,30 @@
 # سجل التغييرات — WeaverCode 🕸️
 
+## v4.54.0 — دمج أدوات خارجية: olmOCR + Chandra + Loop Engineering
+
+أُضيفت ثلاث أدوات خارجية **مدمجة كما هي** (vendored) مع جسور رقيقة، دون تعديل أيّ
+شيفرة داخلها ودون المساس بأيّ سلوك قائم:
+
+- **`vendors/`**: olmOCR (تحويل PDF إلى نصّ) + Chandra (OCR مستندات) + Loop
+  Engineering (أدوات Node لهندسة الحلقات المستقلة). مع `vendors/__init__.py`
+  و`vendors/README.md` يوثّق كل أداة. `node_modules` **مُتجاهَلة في git**
+  (~18MB / 5200+ ملف تُعاد بـ `npm install`) — الشيفرة والمبنيّات `dist/` محفوظة.
+- **`integrations/ocr_bridge.py`**: `run_olmocr(file, workspace, server_url)`
+  → نصّ Markdown · `run_chandra(file, server_url=None, method="vllm")` → نتيجة ·
+  `detect_file_type(file)` → يوجّه PDF↦olmOCR والصور↦Chandra تلقائياً.
+- **`integrations/loop_bridge.py`**: `audit_project(path=".")` → تقرير جاهزية ·
+  `check_gate(files, action="commit")` → pass/fail مقابل `gate.yaml` ·
+  `check_context(ledger_path)` → قرار continue/escalate.
+- **`integrations/__init__.py`**: يعرض الدوال الستّ مباشرةً.
+
+الجسور تُشغّل الأدوات كعمليات منفصلة (subprocess)، فلا تُحمَّل تبعياتها الثقيلة
+إلا عند الحاجة، وتتدهور بأمان برسائل واضحة عند غياب أداة/تبعية — ولا تمسّ الاتصال
+بالمزوّد إطلاقاً.
+
+**تحقّق فعلي**: **٤٢٦ اختباراً تمرّ** (٤٠٧ + ١٩ جديدة): الكشف عن نوع الملف،
+مسارات أخطاء OCR، وأدوات loop الثلاث فعلياً عبر Node (تقرير جاهزية حقيقي،
+gate يُميّز commit المسموح عن auto-merge المُصعَّد، وقرار السياق).
+
 ## v4.53.0 — رفع تلقائي مُحسّن لـ GitHub (طرفية + لوحة الويب)
 
 تحسين ميزة الرفع التلقائي عند انتهاء المهمة وتوحيدها بين الطرفية ولوحة الويب —
