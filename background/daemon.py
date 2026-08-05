@@ -213,10 +213,25 @@ class WeaverDaemon:
 
         _persist("")   # حفظ فوري لرسالة المستخدم قبل بدء التنفيذ
 
+        # ── بثّ التوكِنات (اختياري WEAVER_STREAM=1): يعرض الرد حرفاً حرفاً حيّاً ──
+        # عند التفعيل: نمرّر on_token (يبثّ الأجزاء) ونعطّل narration كي لا يتكرّر
+        # النصّ. معطّل افتراضياً؛ ومسار البثّ نفسه يعود لـ complete() عند أي فشل.
+        _stream = os.environ.get("WEAVER_STREAM", "0").strip().lower() in (
+            "1", "true", "yes", "on")
+
+        def _on_token(delta):   # يُستدعى من خيط المحرّك
+            d = delta or ""
+            if not d:
+                return
+            asyncio.run_coroutine_threadsafe(
+                event_bus.emit(WeaverEvent(EventType.TOKEN, d[:80], d)), loop)
+
+        _tok_cb = _on_token if _stream else None
+        _narr_cb = None if _stream else _on_narration
         try:
             result = await engine.run(prompt, history=hist_msgs, on_tool=on_tool,
                                        on_permission=_on_permission,
-                                       on_narration=_on_narration)
+                                       on_narration=_narr_cb, on_token=_tok_cb)
         except Exception as exc:
             # عطل غير متوقّع: احفظ ما لدينا (رسالة المستخدم على الأقل) ثم أبلغ
             _persist("")
@@ -250,7 +265,8 @@ class WeaverDaemon:
                     if raw:
                         text += f"\n\n🔎 تشخيص خام:\n{raw[:400]}"
             response_text = text
-            await event_bus.emit(WeaverEvent(EventType.RESPONSE, text[:200], text))
+            await event_bus.emit(WeaverEvent(EventType.RESPONSE, text[:200], text,
+                                             streamed=_stream))
 
         # ── لقطة شاشة تلقائية للناتج المرئي (كواجهة Claude Code) ───────────────
         # «صورة لما عمله فعلاً» — لا سجل commits: إن أنتجت المهمة ملفاً مرئياً
@@ -305,6 +321,25 @@ class WeaverDaemon:
             _rem = ("⚠️ تذكير: تحقّق من الملفات المُنشأة (py_compile/pytest) "
                     "قبل اعتبار المهمة منجزة.")
             await event_bus.emit(WeaverEvent(EventType.RESPONSE, _rem, _rem))
+
+        # ── رفع تلقائي لـ GitHub عند انتهاء المهمة (اختياري، WEAVER_AUTO_PUSH=1) ──
+        # يُشغَّل في executor حتى لا يحجب حلقة الأحداث أثناء الـ push، ورسائله
+        # تُبثّ للواجهة عبر SSE. مُغلَّف بالكامل: أي عطل لا يكسر المهمة، ولا
+        # يُنفَّذ شيء ما لم يفعّله المستخدم صراحةً (معطّل افتراضياً).
+        try:
+            from core.autopush import auto_push, is_enabled as _push_on
+            if _push_on():
+                _push_msgs: list = []
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: auto_push(
+                        tools.work_dir, task_summary=prompt,
+                        notify=lambda lvl, m: _push_msgs.append((lvl, m))))
+                for _lvl, _m in _push_msgs:
+                    _et = EventType.ERROR if _lvl == "error" else EventType.RESPONSE
+                    await event_bus.emit(WeaverEvent(_et, str(_m)[:200], str(_m)))
+        except Exception:
+            pass
 
         await event_bus.emit(WeaverEvent(EventType.DONE, "اكتملت المهمة"))
         st.save_status("idle")

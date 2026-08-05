@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weavercode"
-version = "4.49.0"
+version = "4.56.0"
 description = "WeaverCode — a provider-agnostic AI coding agent (terminal + web dashboard). Works with any AI model from any provider."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -17,14 +17,21 @@ classifiers = [
   "Operating System :: OS Independent",
   "Environment :: Console",
 ]
+# التبعيات الأساسية. ملاحظة: المزوّد يتصل بالشبكة عبر curl (لا httpx)، فلا
+# تبعية شبكة إلزامية — httpx اختياري لتسريع WebFetch (راجع optional-dependencies).
 dependencies = [
-  "httpx>=0.24",
   "python-dotenv>=1.0.0",
   "rich>=13.0.0",
   "prompt_toolkit>=3.0.0",
   "beautifulsoup4>=4.12.0",
   "lxml>=5.0.0",
 ]
+
+[project.optional-dependencies]
+# مسار WebFetch السريع (وإلا يسقط تلقائياً إلى curl)
+fast-web = ["httpx>=0.24"]
+# أدوات التطوير والاختبار
+dev = ["pytest>=7.0"]
 
 [project.urls]
 Homepage = "https://github.com/basharbhassan336699-cell/WeaverCode"

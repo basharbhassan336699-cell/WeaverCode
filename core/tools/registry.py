@@ -1,6 +1,6 @@
 """
 registry.py — سجل الأدوات المدمجة في WeaverCode
-27 أداة مدمجة حقيقية (ملفات/بحث/تنفيذ/ذاكرة/مهام/ويب/git/تعديل متعدد/وكيل فرعي)،
+49 أداة مدمجة حقيقية (ملفات/بحث/تنفيذ/ذاكرة/مهام/ويب/git/تعديل متعدد/وكيل فرعي/فهرس رموز/OCR/Loop)،
 مع إمكانية تسجيل أدوات خارجية ديناميكياً عبر MCP (register_dynamic).
 """
 
@@ -688,6 +688,90 @@ class ToolRegistry:
             fn=self._lsp,
         ))
 
+        # ── فهرس رموز الكود (symbol index) ───────────────────────────────────
+        self._add(Tool(
+            name="SymbolIndex",
+            description=("فهرس رموز الكود لتسريع العمل على المشاريع الكبيرة: أين "
+                         "تُعرَّف دالة/صنف؟ Python عبر ast (دقيق) وJS/TS عبر regex. "
+                         "الأوضاع: build (يبني/يحدّث الفهرس) | find (يبحث عن رمز "
+                         "بالاسم) | outline (رموز ملف واحد). يُخزَّن في الكاش."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string",
+                               "enum": ["build", "find", "outline"],
+                               "default": "find"},
+                    "name": {"type": "string",
+                             "description": "اسم الرمز للبحث (مع action=find)"},
+                    "file": {"type": "string",
+                             "description": "مسار الملف النسبي (مع action=outline)"},
+                    "path": {"type": "string",
+                             "description": "مجلد المشروع للفهرسة (اختياري، افتراضي مجلد العمل)"},
+                },
+                "required": [],
+            },
+            fn=self._symbol_index,
+        ))
+
+        # ── OCR: استخراج نصّ من PDF/صور عبر الأدوات المدمجة (olmOCR/Chandra) ──
+        self._add(Tool(
+            name="OCR",
+            description=("استخراج النصّ (Markdown) من ملف PDF أو صورة عبر الأدوات "
+                         "المدمجة: olmOCR (PDF) و Chandra (صور). يوجّه تلقائياً "
+                         "حسب نوع الملف. detect_only=true يُرجع الأداة المناسبة "
+                         "دون تشغيل. التشغيل الفعلي يتطلّب خادم vLLM (server_url)."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "مسار ملف PDF أو صورة"},
+                    "tool": {"type": "string", "enum": ["auto", "olmocr", "chandra"],
+                             "default": "auto",
+                             "description": "الأداة (auto = كشف تلقائي حسب النوع)"},
+                    "server_url": {"type": "string",
+                                   "description": "رابط خادم vLLM المتوافق (لازم للتشغيل الفعلي)"},
+                    "method": {"type": "string", "enum": ["vllm", "hf"], "default": "vllm",
+                               "description": "طريقة Chandra: خادم vllm أو نموذج hf محلي"},
+                    "workspace": {"type": "string",
+                                  "description": "مجلد عمل olmOCR (اختياري، افتراضي مؤقت)"},
+                    "detect_only": {"type": "boolean", "default": False,
+                                    "description": "إرجاع الأداة المناسبة فقط دون تشغيل OCR"},
+                },
+                "required": ["file_path"],
+            },
+            fn=self._ocr,
+            requires_permission=True,
+        ))
+
+        # ── LoopEngine: أدوات هندسة الحلقات المستقلة (Loop Engineering) ───────
+        self._add(Tool(
+            name="LoopEngine",
+            description=("أدوات Loop Engineering المدمجة (Node) لهندسة الحلقات "
+                         "المستقلة. الأوضاع: audit (درجة جاهزية مشروع) | gate "
+                         "(تقييم إجراء commit/merge مقابل gate.yaml → pass/fail) | "
+                         "context (قاطِع دائرة على سجلّ تشغيل → continue/escalate)."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string",
+                               "enum": ["audit", "gate", "context"],
+                               "default": "audit"},
+                    "path": {"type": "string",
+                             "description": "مجلد المشروع (مع action=audit، افتراضي مجلد العمل)"},
+                    "files": {"type": "array", "items": {"type": "string"},
+                              "description": "الملفات المتغيّرة (مع action=gate)"},
+                    "gate_action": {"type": "string",
+                                    "enum": ["commit", "merge", "auto-merge"],
+                                    "default": "commit",
+                                    "description": "نوع الإجراء المقيَّم (مع action=gate)"},
+                    "ledger_path": {"type": "string",
+                                    "description": "مسار سجلّ التشغيل JSON (مع action=context)"},
+                },
+                "required": [],
+            },
+            fn=self._loop_engine,
+            requires_permission=True,
+        ))
+
         # ── وضع التخطيط ──────────────────────────────────────────────────────
         self._add(Tool(
             name="EnterPlanMode",
@@ -990,6 +1074,140 @@ class ToolRegistry:
             return f"الفاحص غير مثبّت: {e}"
         except Exception as e:
             return f"خطأ: {e}"
+
+    # ── فهرس رموز الكود (symbol index) ────────────────────────────────────────
+
+    def _symbol_index(self, action: str = "find", name: Optional[str] = None,
+                      file: Optional[str] = None,
+                      path: Optional[str] = None) -> str:
+        """يبني/يستعلم فهرس رموز الكود لتسريع التنقّل في المشاريع الكبيرة."""
+        try:
+            from core.index import symbols as _sym
+        except Exception as e:
+            return f"خطأ: تعذّر تحميل فهرس الرموز: {e}"
+        root = path or self.work_dir
+        if action == "build":
+            # بناء تزايدي: يعيد تحليل الملفات المتغيّرة فقط عند وجود كاش سابق
+            idx = _sym.build_index(root, cache=True, incremental=True)
+            extra = (f" ({idx['reused_files']} ملف دون تغيير)"
+                     if idx.get("reused_files") else "")
+            return (f"✅ فُهرس {idx['count']} رمزاً من {idx['files']} ملفاً في "
+                    f"{idx['root']}{extra} (محفوظ في الكاش).")
+        # find/outline يحتاجان فهرساً — حمّل الكاش أو ابنِه عند الحاجة
+        idx = _sym.load_index(root)
+        if idx is None:
+            idx = _sym.build_index(root, cache=True)
+        if action == "outline":
+            if not file:
+                return "خطأ: مرّر 'file' (مسار نسبي) مع action=outline."
+            rows = _sym.outline(idx, file)
+            if not rows:
+                return f"لا رموز مفهرسة للملف: {file}"
+            lines = [f"{file} — {len(rows)} رمز:"]
+            for s in rows:
+                lines.append(f"  {s['line']:>4}  {s['kind']:<8} {s.get('signature', s['name'])}")
+            return "\n".join(lines)
+        # action == find
+        if not name:
+            return (f"الفهرس: {idx['count']} رمز من {idx['files']} ملف. "
+                    f"مرّر 'name' للبحث أو action=build لإعادة البناء.")
+        rows = _sym.find(idx, name)
+        if not rows:
+            return f"لم يُعثر على رمز باسم '{name}'."
+        lines = [f"نتائج '{name}' ({len(rows)}):"]
+        for s in rows:
+            lines.append(f"  {s['file']}:{s['line']}  [{s['kind']}] "
+                         f"{s.get('signature', s['name'])}")
+        return "\n".join(lines)
+
+    # ── OCR: جسر الأدوات المدمجة (olmOCR / Chandra) ───────────────────────────
+
+    def _ocr(self, file_path: str, tool: str = "auto",
+             server_url: Optional[str] = None, method: str = "vllm",
+             workspace: Optional[str] = None,
+             detect_only: bool = False) -> str:
+        """يستخرج نصّاً من PDF/صورة عبر جسور integrations، مع كشف تلقائي للأداة."""
+        try:
+            from integrations import (detect_file_type, run_olmocr, run_chandra,
+                                      OcrBridgeError)
+        except Exception as e:
+            return f"خطأ: تعذّر تحميل جسور OCR: {e}"
+
+        src = str(self._resolve(file_path))
+        det = detect_file_type(src)
+        chosen = tool if tool in ("olmocr", "chandra") else det["tool"]
+
+        if detect_only:
+            return (f"النوع: {det['category']} ({det['ext'] or 'بلا امتداد'}) — "
+                    f"الأداة المقترحة: {chosen or 'لا توجد'} — {det['reason']}")
+
+        if chosen is None:
+            return (f"❌ نوع الملف غير مدعوم للـ OCR: {det['ext'] or '(بلا امتداد)'} — "
+                    "المدعوم: PDF (olmOCR) والصور png/jpg/… (Chandra).")
+        try:
+            if chosen == "olmocr":
+                ws = workspace or str(Path(self.work_dir) / ".weaver_ocr_ws")
+                text = run_olmocr(src, ws, server_url or "")
+                return f"✅ olmOCR — نصّ مستخرَج ({len(text)} حرف):\n\n{text}"
+            # chandra
+            res = run_chandra(src, server_url=server_url, method=method)
+            text = res.get("text", "") or ""
+            return f"✅ Chandra — نصّ مستخرَج ({len(text)} حرف):\n\n{text}"
+        except OcrBridgeError as e:
+            return f"❌ تعذّر تشغيل OCR ({chosen}): {e}"
+        except Exception as e:
+            return f"❌ خطأ غير متوقّع في OCR: {e}"
+
+    # ── LoopEngine: جسر أدوات Loop Engineering (audit/gate/context) ────────────
+
+    def _loop_engine(self, action: str = "audit", path: Optional[str] = None,
+                     files: Optional[List[str]] = None,
+                     gate_action: str = "commit",
+                     ledger_path: Optional[str] = None) -> str:
+        """يشغّل أدوات Loop Engineering المدمجة عبر جسور integrations."""
+        try:
+            from integrations import (audit_project, check_gate, check_context,
+                                      LoopBridgeError)
+        except Exception as e:
+            return f"خطأ: تعذّر تحميل جسور Loop: {e}"
+        try:
+            if action == "audit":
+                res = audit_project(path or self.work_dir)
+                rep = res.get("report", {})
+                score = rep.get("score")
+                level = rep.get("level")
+                assess = rep.get("assessment", "")
+                lines = [f"🔁 loop-audit — درجة الجاهزية: {score} · المستوى: {level}"]
+                if assess:
+                    lines.append(f"  {assess}")
+                recs = rep.get("recommendations") or []
+                if recs:
+                    lines.append("  توصيات:")
+                    for r in recs[:5]:
+                        lines.append(f"   • {r}")
+                return "\n".join(lines)
+
+            if action == "gate":
+                if not files:
+                    return "خطأ: مرّر 'files' (قائمة الملفات المتغيّرة) مع action=gate."
+                res = check_gate(files, action=gate_action)
+                mark = "✅ مسموح" if res["passed"] else "⛔ تصعيد"
+                return (f"🔁 loop-gate ({gate_action}) → {mark} "
+                        f"[{res.get('trigger')}]\n  {res.get('reason') or ''}")
+
+            if action == "context":
+                if not ledger_path:
+                    return "خطأ: مرّر 'ledger_path' (سجلّ التشغيل JSON) مع action=context."
+                res = check_context(ledger_path)
+                dec = res["decision"]
+                mark = "▶️ متابعة" if dec == "continue" else "⛔ تصعيد"
+                return f"🔁 loop-context → القرار: {dec} ({mark})"
+
+            return f"إجراء غير معروف: {action} (المتاح: audit | gate | context)"
+        except LoopBridgeError as e:
+            return f"❌ تعذّر تشغيل Loop ({action}): {e}"
+        except Exception as e:
+            return f"❌ خطأ غير متوقّع في Loop: {e}"
 
     # ── تنفيذ كل أداة ────────────────────────────────────────────────────────
 

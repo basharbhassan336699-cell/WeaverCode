@@ -1,0 +1,40 @@
+# CI: يشغّل مجموعة اختبارات WeaverCode على كل push/PR لمنع أي كسر.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          # التبعيات الاختيارية (للواجهة/الويب) — لا تُفشِل CI إن تعذّرت
+          pip install -r config/requirements.txt || true
+
+      - name: Show environment
+        run: |
+          python --version
+          curl --version | head -1   # المزوّد يعتمد curl (متوفّر على ubuntu-latest)
+
+      - name: Run test suite
+        run: python -m pytest tests/ -q

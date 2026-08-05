@@ -1150,6 +1150,17 @@
     if (live) live.insertAdjacentHTML("beforebegin", html);
     else $("#chatMsgs").insertAdjacentHTML("beforeend", html);
   }
+  // ── البثّ الحيّ (token-by-token): فقاعة تُبنى تدريجياً أثناء وصول التوكِنات ──
+  // فقاعة المساعد الجارية أثناء البثّ ونصّها المتراكم. تبقى null ما لم يكن WEAVER_STREAM=1.
+  let streamBubble = null, streamText = "";
+  // يُنهي فقاعة البثّ الجارية (يزيل مؤشر الكتابة). يُستدعى عند اكتمال الردّ أو بدء كتلة عمل.
+  function finalizeStream() {
+    if (streamBubble) {
+      streamBubble.classList.remove("streaming");
+      streamBubble = null;
+      streamText = "";
+    }
+  }
   function connectSSE() {
     const es = new EventSource("/events");
     es.onmessage = (ev) => {
@@ -1159,18 +1170,43 @@
       if (LIVE_WORD[d.type]) { setLive(LIVE_WORD[d.type]); setRunning(true); }
       else if (d.type === "response" || d.type === "done" || d.type === "error") setLive(null);
       if (d.type === "done" || d.type === "error") setRunning(false);
+      if (d.type === "error") finalizeStream();  // أنهِ فقاعة البثّ إن انقطعت بخطأ
       // عند اكتمال مهمة، حدّث قائمة الجلسات إن كانت ظاهرة
       if (d.type === "done") { refreshStatus(); if ($("#v-sessions").classList.contains("active")) loadSessions(); if ($("#v-dashboard").classList.contains("active")) loadDashboard(); }
       const chat = $("#v-chat");
       if (!chat.classList.contains("active")) { return; }
-      if (d.type === "response") {
+      if (d.type === "token") {
+        // جزء نصّي أثناء البثّ الحيّ: ابنِ فقاعة المساعد تدريجياً توكِناً بتوكِن.
+        if (!streamBubble) {
+          const el = document.createElement("div");
+          el.className = "bubble agent streaming";
+          el.setAttribute("dir", "auto");
+          el.innerHTML = '<div class="who">🕸️ WeaverCode</div><span class="stream-body"></span>';
+          const live = $("#inlineLive");
+          if (live) live.parentNode.insertBefore(el, live);
+          else $("#chatMsgs").appendChild(el);
+          streamBubble = el;
+          streamText = "";
+        }
+        streamText += (d.detail || d.message || "");
+        const body = streamBubble.querySelector(".stream-body");
+        if (body) body.innerHTML = md(streamText);
+      } else if (d.type === "response") {
         const txt = d.detail || d.message;
-        chatAppend(bubble("agent", md(txt)));
+        // إذا كان الردّ قد بُثّ توكِناً بتوكِن، الفقاعة موجودة أصلاً — أنهِها بلا تكرار.
+        if (d.streamed && streamBubble) {
+          const body = streamBubble.querySelector(".stream-body");
+          if (body) body.innerHTML = md(txt);   // النصّ النهائي المكتمل
+          finalizeStream();
+        } else {
+          chatAppend(bubble("agent", md(txt)));
+        }
         // أرفق كتل العمليات المتراكمة بردّ المساعد ليُحفَظ ويُسترجَع بعد التحديث
         const entry = { role: "assistant", content: txt };
         if (pendingBlocks.length) { entry.blocks = pendingBlocks.slice(); pendingBlocks = []; }
         chatHistory.push(entry);
       } else if (d.type === "done") {
+        finalizeStream();
         // بدل «اكتملت»: بطاقة ملخّص إنجاز (ملفات + أسطر + أوامر) كواجهة Claude Code
         chatAppend(completionSummaryHtml(turnBlocks));
         maybeAddPrChip(turnBlocks);   // رقاقة «آخر النشاط» = عمليات هذه الرسالة فعلاً
@@ -1182,6 +1218,7 @@
         chatAppend('<div class="bubble agent narr" dir="' + dir + '">' + md(txt) + "</div>");
       } else if (d.type === "action_block") {
         // ملخص جولة الأدوات (قابل للضغط → المستوى الثالث). يُتراكم للحفظ + الملخّص.
+        finalizeStream();   // نصّ الجولة انتهى قبل كتلة العمل — أنهِ فقاعة البثّ إن وُجدت
         const blk = { desc: d.detail || d.message, ops: d.ops || [],
           added: d.diff_added || 0, removed: d.diff_removed || 0 };
         pendingBlocks.push(blk); turnBlocks.push(blk);

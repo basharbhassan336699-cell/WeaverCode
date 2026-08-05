@@ -75,6 +75,26 @@ After `install`, the `weaver` command works from anywhere (POSIX).
 | `doctor` · `diagnose` | Health checks: Python, git, deps, `.env`, key, provider reachability, port |
 | `fix` | Auto-fix common problems (dirs, `.env`, stuck port, deps, stale flags) |
 
+### Backup & restore (memory + sessions)
+| Command | What it does |
+|---|---|
+| `backup [dest] [--keep N]` | Back up the memory DB + saved sessions to a portable `.tar.gz` (default: `~/.weaver/backup/`); `--keep N` prunes old backups, keeping the newest N |
+| `backups` · `list-backups` | List existing backups with their date and counts |
+| `restore-backup <file> [--overwrite]` | Restore memory + sessions from a backup (snapshots the current DB first) |
+
+**Scheduling** (Linux/Termux): back up nightly with cron, keeping the last 7 —
+`0 3 * * * cd /path/to/WeaverCode && python3 weaver-cli.py backup --keep 7`
+
+### Code symbol index
+| Command | What it does |
+|---|---|
+| `symbols build [path]` | Build/refresh the symbol index (incremental — re-parses only changed files) |
+| `symbols find <name> [path]` | Find where a function/class/method is defined (`file:line`) |
+| `symbols outline <file> [path]` | List the symbols defined in one file, in order |
+
+Languages: Python (via `ast`), JavaScript/TypeScript, Go, Rust, Java (via
+regex). The same index is available to the agent as the `SymbolIndex` tool.
+
 ### Info
 | Command | What it does |
 |---|---|
@@ -136,6 +156,43 @@ python weaver.py --bg                     # web dashboard in the background
 | `/vim` | Toggle vim editing mode |
 | `exit` · `quit` | Leave interactive mode |
 
+### Integrated tools — OCR & Loop Engineering
+
+Two built-in agent tools wrap the vendored tools in `vendors/` through the thin
+bridges in `integrations/`. They run the underlying tools as **separate
+processes**, so their heavy dependencies load only when actually used, and they
+degrade gracefully with a clear message when a tool/dependency (or a vLLM
+server / Node) is missing. Both require permission (they spawn processes).
+
+**`OCR`** — extract text (Markdown) from a PDF or image.
+
+| Parameter | Meaning |
+|---|---|
+| `file_path` | PDF or image to read (required) |
+| `tool` | `auto` (route by type) · `olmocr` (PDF) · `chandra` (images) |
+| `server_url` | vLLM server URL — required for real extraction |
+| `method` | Chandra method: `vllm` (server) or `hf` (local) |
+| `workspace` | olmOCR workspace dir (optional, default temp) |
+| `detect_only` | `true` = just return which tool fits, without running |
+
+Routing: **PDF → olmOCR**, **images (png/jpg/…) → Chandra**. Underlying
+functions: `integrations.run_olmocr` / `run_chandra` / `detect_file_type`.
+
+**`LoopEngine`** — Loop Engineering tools for autonomous loops (Node).
+
+| `action` | Meaning | Extra params |
+|---|---|---|
+| `audit` | Project readiness score | `path` (default: work dir) |
+| `gate` | Evaluate a change against `gate.yaml` → allowed / escalate | `files` (list), `gate_action` (`commit`·`merge`·`auto-merge`) |
+| `context` | Circuit breaker over a run ledger → continue / escalate | `ledger_path` (JSON) |
+
+Underlying functions: `integrations.audit_project` / `check_gate` /
+`check_context`. See `vendors/README.md` for the tools and their optional
+`npm install` / vLLM setup.
+
+> The code **symbol index** is also available to the agent as the `SymbolIndex`
+> tool (and from the terminal via `weaver symbols …`).
+
 ---
 
 ## 3) Environment variables
@@ -183,6 +240,7 @@ defaults are shown in brackets.
 | `WEAVER_SANDBOX_TIMEOUT` | Sandbox command timeout, seconds `[30]` |
 | `WEAVER_AUTO_VERIFY` | After writing code: check syntax (`py_compile`), real-bug lint (`ruff` if present), JS syntax (`node --check`), logic (`pytest` if tests exist), and **auto-fix errors** — inside the sandbox if enabled `[0]` |
 | `WEAVER_AUTO_FIX_MAX` | Max auto-fix attempts `[2]` |
+| `WEAVER_STREAM` | Live token-by-token streaming of replies in the web dashboard `[0]` — falls back to normal mode on any streaming error, never affecting the provider connection |
 
 ### Paths, tools & integrations
 | Variable | Meaning |
@@ -193,6 +251,9 @@ defaults are shown in brackets.
 | `WEAVER_CHROMIUM` | Path to Chromium (for the Screenshot tool) |
 | `WEAVER_GITHUB_TOKEN` · `GITHUB_TOKEN` | GitHub token (activity + push) |
 | `GITHUB_OAUTH_CLIENT_ID` · `GITHUB_OAUTH_CLIENT_SECRET` | One-tap GitHub OAuth app |
+| `WEAVER_AUTO_PUSH` | Auto-commit + push after each task, terminal **and** web dashboard `[0]` — only when there are real changes in a git repo |
+| `WEAVER_AUTO_PUSH_BRANCH` | Target branch for auto-push (empty = current branch) |
+| `WEAVER_AUTO_PUSH_REMOTE` | Target remote for auto-push `[origin]` |
 | `WEAVER_NO_RESTART` | `1` = `update` won't restart the server |
 
 ---

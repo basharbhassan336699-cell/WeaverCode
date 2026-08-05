@@ -23,6 +23,10 @@ Commands:
     model <name>         Set the model
     doctor | diagnose    Run health checks and report problems
     fix                  Auto-fix common problems (dirs, .env, stuck port, deps)
+    backup [dest]        Back up memory + sessions to a portable .tar.gz (--keep N)
+    backups              List existing backups
+    restore-backup <f>   Restore memory + sessions from a backup (--overwrite)
+    symbols <sub>        Code symbol index: build | find <name> | outline <file>
     logs [N]             Show the last N lines of the server log (default 40)
     banner | hello       Show the WeaverCode hero banner
     version              Print the WeaverCode version
@@ -565,12 +569,20 @@ def doctor(_args=None) -> int:
     else:
         bad("git not found (needed for update)"); problems += 1
 
-    # dependencies
-    for mod in ("httpx",):
-        try:
-            __import__(mod); ok(f"dependency '{mod}' importable")
-        except Exception:
-            bad(f"dependency '{mod}' missing — run: python weaver-cli.py fix"); problems += 1
+    # curl — REQUIRED: the provider shells out to curl (not httpx) for every call
+    if shutil.which("curl"):
+        ok("curl found (used by the provider)")
+    else:
+        bad("curl not found — the provider needs it: "
+            "install it (apt install curl / pkg install curl on Termux)")
+        problems += 1
+
+    # httpx — OPTIONAL: only speeds up WebFetch; it falls back to curl without it
+    try:
+        __import__("httpx")
+        ok("optional 'httpx' available (faster WebFetch)")
+    except Exception:
+        info("optional 'httpx' not installed — WebFetch falls back to curl (fine)")
 
     # config
     if ENV_FILE.exists():
@@ -659,6 +671,160 @@ def fix(_args=None) -> int:
     return 0
 
 
+# ── backup / restore (memory + sessions) ─────────────────────────────────────
+def _human_size(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{int(n)}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}GB"
+
+
+def backup_cmd(args) -> int:
+    """Create a portable backup of the memory DB + saved sessions.
+
+    Usage: backup [dest] [--keep N]   (--keep prunes old backups in the
+    default folder, keeping only the newest N)."""
+    try:
+        from core import backup as _bk
+    except Exception as e:
+        bad(f"Could not load backup module: {e}")
+        return 1
+    # parse args: optional dest + optional --keep N
+    dest = None
+    keep = None
+    it = iter(args or [])
+    for a in it:
+        if a in ("--keep", "-k"):
+            try:
+                keep = int(next(it))
+            except (StopIteration, ValueError):
+                bad("--keep needs a number, e.g. --keep 5")
+                return 1
+        elif dest is None:
+            dest = a
+    say("Backing up WeaverCode memory + sessions…")
+    try:
+        out = _bk.create_backup(dest)
+    except Exception as e:
+        bad(f"Backup failed: {e}")
+        return 1
+    try:
+        counts = _bk.export_json()
+        n_conv = len(counts.get("conversations", []))
+        n_sess = len(counts.get("sessions", []))
+        n_fact = len(counts.get("facts", []))
+        info(f"{n_conv} conversations · {n_sess} sessions · {n_fact} facts")
+    except Exception:
+        pass
+    ok(f"Backup written → {out}")
+    info(f"Size: {_human_size(out.stat().st_size)}")
+    if keep is not None:
+        removed = _bk.prune_backups(keep)
+        if removed:
+            info(f"Pruned {len(removed)} old backup(s) · kept newest {keep}")
+    info("Restore later with: python weaver-cli.py restore-backup <file>")
+    return 0
+
+
+def symbols_cmd(args) -> int:
+    """Query the code symbol index: build | find <name> | outline <file>."""
+    try:
+        from core.index import symbols as _sym
+    except Exception as e:
+        bad(f"Could not load symbol index: {e}")
+        return 1
+    sub = (args[0].lower() if args else "build")
+    rest = args[1:]
+    root = str(ROOT)
+    if sub == "build":
+        path = rest[0] if rest else root
+        idx = _sym.build_index(path, cache=True, incremental=True)
+        extra = (f"  ({idx['reused_files']} unchanged)"
+                 if idx.get("reused_files") else "")
+        ok(f"Indexed {idx['count']} symbols from {idx['files']} files{extra}")
+        return 0
+    # find / outline need an index — load cache or build it
+    path = rest[1] if len(rest) > 1 else root
+    idx = _sym.load_index(path) or _sym.build_index(path, cache=True)
+    if sub == "find":
+        if not rest:
+            bad("Usage: symbols find <name> [path]")
+            return 1
+        rows = _sym.find(idx, rest[0])
+        if not rows:
+            say(f"No symbol named '{rest[0]}'.")
+            return 0
+        say(f"Results for '{rest[0]}' ({len(rows)}):")
+        for s in rows:
+            print(f"  {OR}{s['file']}:{s['line']}{RS}  [{s['kind']}] "
+                  f"{s.get('signature', s['name'])}")
+        return 0
+    if sub == "outline":
+        if not rest:
+            bad("Usage: symbols outline <file> [path]")
+            return 1
+        rows = _sym.outline(idx, rest[0])
+        if not rows:
+            say(f"No indexed symbols for: {rest[0]}")
+            return 0
+        say(f"{rest[0]} — {len(rows)} symbols:")
+        for s in rows:
+            print(f"  {s['line']:>4}  {s['kind']:<9} {s.get('signature', s['name'])}")
+        return 0
+    bad(f"Unknown symbols action: {sub}  (build | find | outline)")
+    return 1
+
+
+def backups_cmd(_args=None) -> int:
+    """List backups in ~/.weaver/backup."""
+    try:
+        from core import backup as _bk
+    except Exception as e:
+        bad(f"Could not load backup module: {e}")
+        return 1
+    items = _bk.list_backups()
+    if not items:
+        say("No backups yet. Create one with: python weaver-cli.py backup")
+        return 0
+    say(f"Backups ({len(items)}):")
+    for it in items:
+        man = it.get("manifest", {})
+        counts = man.get("counts", {})
+        when = man.get("created_at_human", "")
+        summary = ""
+        if counts:
+            summary = (f"  ·  {counts.get('conversations', 0)} conv, "
+                       f"{counts.get('sessions', 0)} sess")
+        print(f"  {OR}{it['name']}{RS}  ({_human_size(it['size'])}){summary}"
+              + (f"  ·  {when}" if when else ""))
+    return 0
+
+
+def restore_backup_cmd(args) -> int:
+    """Restore the memory DB from a backup file."""
+    try:
+        from core import backup as _bk
+    except Exception as e:
+        bad(f"Could not load backup module: {e}")
+        return 1
+    if not args:
+        bad("Usage: python weaver-cli.py restore-backup <file> [--overwrite]")
+        info("List available backups: python weaver-cli.py backups")
+        return 1
+    archive = args[0]
+    overwrite = "--overwrite" in args[1:] or "-f" in args[1:]
+    say("Restoring WeaverCode memory…")
+    msg = _bk.restore_backup(archive, overwrite=overwrite)
+    if msg.startswith("✅"):
+        for line in msg.splitlines():
+            ok(line.lstrip("✅ ")) if line.startswith("✅") else info(line)
+        info("Restart to apply: python weaver-cli.py restart")
+        return 0
+    bad(msg)
+    return 1
+
+
 # ── logs / version / help ────────────────────────────────────────────────────
 def _tail(path: Path, n: int) -> None:
     try:
@@ -721,6 +887,10 @@ COMMANDS = {
     "model": model_cmd,
     "doctor": doctor, "diagnose": doctor,
     "fix": fix,
+    "backup": backup_cmd,
+    "backups": backups_cmd, "list-backups": backups_cmd,
+    "restore-backup": restore_backup_cmd, "restore_backup": restore_backup_cmd,
+    "symbols": symbols_cmd, "symbol": symbols_cmd,
     "logs": logs,
     "banner": banner_cmd, "hello": banner_cmd,
     "version": version, "--version": version, "-v": version,

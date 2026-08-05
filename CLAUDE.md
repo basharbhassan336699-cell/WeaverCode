@@ -32,9 +32,14 @@ WeaverCode/
 │   └── hooks/             ← hooks الدورة الحياتية
 ├── core/
 │   ├── engine/            ← محرك الوكيل الرئيسي
-│   ├── tools/             ← الأدوات المدمجة (46 أداة)
+│   ├── tools/             ← الأدوات المدمجة (49 أداة)
+│   ├── index/             ← فهرس رموز الكود (SymbolIndex)
 │   ├── memory/            ← نظام الذاكرة SQLite
+│   ├── backup.py          ← نسخ احتياطي/تصدير الذاكرة والجلسات
+│   ├── autopush.py        ← الرفع التلقائي إلى GitHub (اختياري)
 │   └── skills/            ← نظام المهارات
+├── integrations/          ← جسور الأدوات الخارجية (ocr_bridge / loop_bridge)
+├── vendors/               ← أدوات خارجية مدمجة (olmOCR/Chandra/Loop) — لا تُعدَّل
 ├── providers/             ← موصلات المزودين
 ├── config/                ← إعدادات المشروع
 ├── scripts/               ← سكربتات التشغيل والبناء
@@ -46,6 +51,8 @@ WeaverCode/
 - تعديل الملفات: استخدم `Edit` لا `sed`
 - البحث: استخدم `Grep` لا `grep` مباشرة
 - البحث عن ملفات: استخدم `Glob` لا `find`
+- التنقّل في مشروع كبير («أين تُعرَّف X؟»): استخدم `SymbolIndex`
+- استخراج نصّ من PDF/صورة: استخدم `OCR`
 
 ### 4. قواعد Python
 - Python 3.10+ مطلوب
@@ -175,6 +182,38 @@ WEAVER_DB_PATH=~/.weaver/memory.db
 
 ### GCP Gateway
 - `scripts/weaver-gateway.sh [setup|deploy|destroy]` + Terraform في `scripts/gateway/`
+
+---
+
+## الميزات المضافة (v4.5x) — أدوات مدمجة جديدة
+
+### فهرس رموز الكود — أداة `SymbolIndex` (core/index/symbols.py)
+- «أين تُعرَّف دالة/صنف/طريقة؟» بسرعة على المشاريع الكبيرة، مع الملف والسطر.
+- **Python عبر `ast`** (دقيق) و**JS/TS/Go/Rust/Java عبر regex**. بناء **تزايدي**
+  (يعيد تحليل الملفات المتغيّرة فقط) وكاش في `~/.weaver/cache`.
+- الأوضاع: `build` | `find` | `outline`. ومن الطرفية: `weaver symbols …`.
+
+### OCR — أداة `OCR` (integrations/ocr_bridge.py → vendors/)
+- استخراج نصّ (Markdown) من PDF/صور. توجيه تلقائي: **PDF↦olmOCR، صور↦Chandra**.
+- `detect_only=true` يُرجع الأداة المناسبة دون تشغيل؛ التشغيل الفعلي يتطلّب
+  خادم vLLM (`server_url`). تتطلّب إذناً وتتدهور بأمان عند غياب أداة/تبعية.
+
+### Loop Engineering — أداة `LoopEngine` (integrations/loop_bridge.py → vendors/)
+- أدوات Node لهندسة الحلقات المستقلة: `audit` (درجة جاهزية) | `gate`
+  (تقييم commit/merge مقابل `gate.yaml` → مسموح/تصعيد) | `context` (قاطِع دائرة
+  على سجلّ تشغيل → متابعة/تصعيد). تتطلّب إذناً + Node.
+
+### قاعدة الأدوات المدمجة (vendors/)
+- **لا تُعدّل أيّ شيفرة داخل `vendors/`** — أيّ تحسين يكون في `integrations/` فقط.
+- الجسور تُشغّل الأدوات كعمليات منفصلة (subprocess)؛ `node_modules` مُتجاهَلة في git.
+
+### ميزات مساندة أخرى
+- **نسخ احتياطي**: `weaver backup [--keep N]` · `backups` · `restore-backup`
+  (core/backup.py) — أرشيف محمول للذاكرة والجلسات.
+- **رفع تلقائي** (اختياري، `WEAVER_AUTO_PUSH=1`): core/autopush.py — يشترك فيه
+  الطرفية ولوحة الويب.
+- **بثّ حيّ** (اختياري، `WEAVER_STREAM=1`): عرض الردّ توكِناً بتوكِن في لوحة الويب.
+- **CI**: `.github/workflows/tests.yml` يشغّل الاختبارات على كل push/PR.
 
 ---
 

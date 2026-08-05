@@ -193,7 +193,7 @@ python3 weaver.py --plan --interactive
 
 ---
 
-## Built-in Tools (43 built-in + MCP)
+## Built-in Tools (49 built-in + MCP)
 
 | Category | Tools |
 |----------|-------|
@@ -205,7 +205,9 @@ python3 weaver.py --plan --interactive
 | **Web** | WebFetch, WebSearch |
 | **Git** | GitStatus, GitClone, GitCommit, GitPush |
 | **Agents/Planning** | Agent (subagents), EnterPlanMode, ExitPlanMode |
-| **Code** | LSP (diagnostics) |
+| **Code** | LSP (diagnostics), SymbolIndex (function/class/method index — Python/JS/TS/Go/Rust/Java) |
+| **OCR** | OCR (PDF & images → text; auto-routes PDF→olmOCR, images→Chandra) |
+| **Loop Engineering** | LoopEngine (audit: readiness score · gate: policy check → allow/escalate · context: circuit breaker) |
 | **System** | EnvSet, EnvGet, DirectoryList, AskUser, Skill |
 | **External** | Any MCP server tool, resource & prompt (`mcp__<server>__<tool>`) |
 
@@ -217,6 +219,12 @@ python3 weaver.py --plan --interactive
 > **self-healing**: automatic retry on transient network errors and automatic
 > **provider fallback** (`config/providers.json`) when the primary runs out of
 > credit or fails.
+
+> **Vendored integrations**: the **OCR** and **LoopEngine** tools wrap external
+> tools bundled under `vendors/` (olmOCR, Chandra, Loop Engineering) through thin
+> bridges in `integrations/`. They run as separate processes (heavy deps load
+> only when used) and degrade gracefully when a tool/dependency is missing. See
+> [`vendors/README.md`](vendors/README.md) and [`docs/CLI.md`](docs/CLI.md).
 
 ---
 
@@ -284,7 +292,7 @@ WeaverCode/
 │   │   ├── provider.py    ← Universal API connector
 │   │   └── query_engine.py← Agentic loop
 │   ├── tools/
-│   │   └── registry.py    ← 43 built-in tools
+│   │   └── registry.py    ← 49 built-in tools
 │   ├── memory/
 │   │   └── store.py       ← SQLite persistent memory
 │   ├── cost.py            ← USD cost + token tracking
@@ -358,6 +366,13 @@ WEAVER_LOOP_LIMIT=4              # Max repeats of the same tool+args before stop
 - ⚫ Dark: `#0F0F19` — Background
 
 ---
+
+## Documentation
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how WeaverCode is built (agent loop, provider layer, tools, memory, symbol index, web dashboard)
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, ground rules, and how to verify & submit changes
+- [`docs/CLI.md`](docs/CLI.md) — full command & environment-variable reference
+- [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — release history
 
 ## Developer
 

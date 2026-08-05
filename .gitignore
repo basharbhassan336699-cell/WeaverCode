@@ -33,3 +33,9 @@ config/mcp.json
 config/providers.json
 ~/.weaver/
 config/oauth.json
+
+# أدوات vendored: نُبقي مصدر الأدوات لا تبعيات Node/Python المولّدة
+# (‏node_modules ~18MB و5200+ ملف — تُعاد بـ npm install، والكاش يُعاد توليده)
+vendors/**/node_modules/
+vendors/**/__pycache__/
+vendors/**/*.pyc

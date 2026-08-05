@@ -511,6 +511,38 @@ class QueryEngine:
         # تمكين أداة Agent من تشغيل وكيل فرعي
         self.tools.agent_runner = self._run_subagent
 
+    async def _complete_or_stream(self, messages, tools_schema, on_token):
+        """يستدعي المزوّد. عند تفعيل البثّ (WEAVER_STREAM=1 و on_token) يبثّ
+        التوكِنات عبر on_token ويُجمّع ردّاً **مكافئاً تماماً** لـ complete()، فتبقى
+        كل الميزات (Action Blocks/بطاقة الإنجاز/التحقّق) تعمل. عند أي فشل في البثّ
+        يعود لـ complete() العادي — فلا يُكسَر الاتصال بالمزوّد إطلاقاً.
+        """
+        _stream = bool(on_token) and os.environ.get(
+            "WEAVER_STREAM", "0").strip().lower() in ("1", "true", "yes", "on")
+        if _stream:
+            try:
+                text_buf, tool_calls, finish = "", [], "stop"
+                async for ev in self.provider.stream_events(messages, tools=tools_schema):
+                    t = ev.get("type")
+                    if t == "text":
+                        d = ev.get("text", "")
+                        if d:
+                            text_buf += d
+                            try:
+                                on_token(d)
+                            except Exception:
+                                pass
+                    elif t == "tool_calls":
+                        tool_calls = ev.get("tool_calls") or []
+                    elif t == "done":
+                        finish = ev.get("finish_reason", "stop")
+                return {"choices": [{"message": {
+                    "content": text_buf, "tool_calls": tool_calls or None},
+                    "finish_reason": finish}]}
+            except Exception:
+                pass   # أي عطل في البثّ → المسار العادي (لا كسر للاتصال)
+        return await self.provider.complete(messages, tools=tools_schema)
+
     def _emit_action_block(self, block) -> None:
         """عرض Action Block في الطرفية ونشره للوحة الويب (كلاهما آمن/اختياري)."""
         # (1) طرفية CLI
@@ -811,6 +843,7 @@ class QueryEngine:
         on_permission: Optional[Callable[[str, Dict], str]] = None,
         on_plan: Optional[Callable[[str], bool]] = None,
         on_narration: Optional[Callable[[str], None]] = None,
+        on_token: Optional[Callable[[str], None]] = None,
     ) -> QueryResult:
         """
         تشغيل الحلقة الوكيلية الكاملة
@@ -942,7 +975,8 @@ class QueryEngine:
             # ميزانية النموذج فيرجع فارغاً — سبب الرد الفارغ من أول رسالة.
             messages = _bound_context(messages)
             try:
-                response = await self.provider.complete(messages, tools=tools_schema)
+                response = await self._complete_or_stream(
+                    messages, tools_schema, on_token)
             except Exception as e:
                 result.error = str(e)
                 break
