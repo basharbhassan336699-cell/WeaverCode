@@ -133,3 +133,47 @@ def test_vendors_present():
         assert (root / tool).is_dir(), f"vendors/{tool} مفقود"
     assert (root / "__init__.py").exists()
     assert (root / "README.md").exists()
+
+
+# ── تسجيل OCR في registry الأدوات ────────────────────────────────────────────
+
+def _registry():
+    from core.tools.registry import ToolRegistry
+    return ToolRegistry(work_dir=".")
+
+
+def test_ocr_tool_registered():
+    r = _registry()
+    assert "OCR" in r.names()
+    assert "SymbolIndex" in r.names()
+    # OCR يحتاج إذناً (يُشغّل عمليات + شبكة)
+    assert r.requires_permission("OCR") is True
+    # schema سليم
+    sch = [t for t in r.get_schema() if t["function"]["name"] == "OCR"][0]
+    props = sch["function"]["parameters"]["properties"]
+    assert {"file_path", "tool", "server_url", "method", "detect_only"} <= set(props)
+
+
+def test_ocr_tool_detect_only():
+    import asyncio
+    r = _registry()
+    out = asyncio.run(r.execute("OCR", {"file_path": "/x/a.pdf", "detect_only": True}))
+    assert "olmocr" in out
+    out2 = asyncio.run(r.execute("OCR", {"file_path": "/x/a.png", "detect_only": True}))
+    assert "chandra" in out2
+
+
+def test_ocr_tool_unsupported():
+    import asyncio
+    r = _registry()
+    out = asyncio.run(r.execute("OCR", {"file_path": "/x/a.txt"}))
+    assert "غير مدعوم" in out
+
+
+def test_ocr_tool_missing_file_is_graceful():
+    import asyncio
+    r = _registry()
+    # ملف غير موجود → رسالة خطأ واضحة، لا استثناء
+    out = asyncio.run(r.execute("OCR", {"file_path": "/nope/a.pdf",
+                                        "server_url": "http://localhost:8000/v1"}))
+    assert out.startswith("❌")

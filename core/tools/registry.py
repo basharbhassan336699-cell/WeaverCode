@@ -1,6 +1,6 @@
 """
 registry.py — سجل الأدوات المدمجة في WeaverCode
-47 أداة مدمجة حقيقية (ملفات/بحث/تنفيذ/ذاكرة/مهام/ويب/git/تعديل متعدد/وكيل فرعي/فهرس رموز)،
+48 أداة مدمجة حقيقية (ملفات/بحث/تنفيذ/ذاكرة/مهام/ويب/git/تعديل متعدد/وكيل فرعي/فهرس رموز/OCR)،
 مع إمكانية تسجيل أدوات خارجية ديناميكياً عبر MCP (register_dynamic).
 """
 
@@ -713,6 +713,35 @@ class ToolRegistry:
             fn=self._symbol_index,
         ))
 
+        # ── OCR: استخراج نصّ من PDF/صور عبر الأدوات المدمجة (olmOCR/Chandra) ──
+        self._add(Tool(
+            name="OCR",
+            description=("استخراج النصّ (Markdown) من ملف PDF أو صورة عبر الأدوات "
+                         "المدمجة: olmOCR (PDF) و Chandra (صور). يوجّه تلقائياً "
+                         "حسب نوع الملف. detect_only=true يُرجع الأداة المناسبة "
+                         "دون تشغيل. التشغيل الفعلي يتطلّب خادم vLLM (server_url)."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "مسار ملف PDF أو صورة"},
+                    "tool": {"type": "string", "enum": ["auto", "olmocr", "chandra"],
+                             "default": "auto",
+                             "description": "الأداة (auto = كشف تلقائي حسب النوع)"},
+                    "server_url": {"type": "string",
+                                   "description": "رابط خادم vLLM المتوافق (لازم للتشغيل الفعلي)"},
+                    "method": {"type": "string", "enum": ["vllm", "hf"], "default": "vllm",
+                               "description": "طريقة Chandra: خادم vllm أو نموذج hf محلي"},
+                    "workspace": {"type": "string",
+                                  "description": "مجلد عمل olmOCR (اختياري، افتراضي مؤقت)"},
+                    "detect_only": {"type": "boolean", "default": False,
+                                    "description": "إرجاع الأداة المناسبة فقط دون تشغيل OCR"},
+                },
+                "required": ["file_path"],
+            },
+            fn=self._ocr,
+            requires_permission=True,
+        ))
+
         # ── وضع التخطيط ──────────────────────────────────────────────────────
         self._add(Tool(
             name="EnterPlanMode",
@@ -1060,6 +1089,44 @@ class ToolRegistry:
             lines.append(f"  {s['file']}:{s['line']}  [{s['kind']}] "
                          f"{s.get('signature', s['name'])}")
         return "\n".join(lines)
+
+    # ── OCR: جسر الأدوات المدمجة (olmOCR / Chandra) ───────────────────────────
+
+    def _ocr(self, file_path: str, tool: str = "auto",
+             server_url: Optional[str] = None, method: str = "vllm",
+             workspace: Optional[str] = None,
+             detect_only: bool = False) -> str:
+        """يستخرج نصّاً من PDF/صورة عبر جسور integrations، مع كشف تلقائي للأداة."""
+        try:
+            from integrations import (detect_file_type, run_olmocr, run_chandra,
+                                      OcrBridgeError)
+        except Exception as e:
+            return f"خطأ: تعذّر تحميل جسور OCR: {e}"
+
+        src = str(self._resolve(file_path))
+        det = detect_file_type(src)
+        chosen = tool if tool in ("olmocr", "chandra") else det["tool"]
+
+        if detect_only:
+            return (f"النوع: {det['category']} ({det['ext'] or 'بلا امتداد'}) — "
+                    f"الأداة المقترحة: {chosen or 'لا توجد'} — {det['reason']}")
+
+        if chosen is None:
+            return (f"❌ نوع الملف غير مدعوم للـ OCR: {det['ext'] or '(بلا امتداد)'} — "
+                    "المدعوم: PDF (olmOCR) والصور png/jpg/… (Chandra).")
+        try:
+            if chosen == "olmocr":
+                ws = workspace or str(Path(self.work_dir) / ".weaver_ocr_ws")
+                text = run_olmocr(src, ws, server_url or "")
+                return f"✅ olmOCR — نصّ مستخرَج ({len(text)} حرف):\n\n{text}"
+            # chandra
+            res = run_chandra(src, server_url=server_url, method=method)
+            text = res.get("text", "") or ""
+            return f"✅ Chandra — نصّ مستخرَج ({len(text)} حرف):\n\n{text}"
+        except OcrBridgeError as e:
+            return f"❌ تعذّر تشغيل OCR ({chosen}): {e}"
+        except Exception as e:
+            return f"❌ خطأ غير متوقّع في OCR: {e}"
 
     # ── تنفيذ كل أداة ────────────────────────────────────────────────────────
 

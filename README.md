@@ -193,7 +193,7 @@ python3 weaver.py --plan --interactive
 
 ---
 
-## Built-in Tools (47 built-in + MCP)
+## Built-in Tools (48 built-in + MCP)
 
 | Category | Tools |
 |----------|-------|
@@ -284,7 +284,7 @@ WeaverCode/
 │   │   ├── provider.py    ← Universal API connector
 │   │   └── query_engine.py← Agentic loop
 │   ├── tools/
-│   │   └── registry.py    ← 47 built-in tools
+│   │   └── registry.py    ← 48 built-in tools
 │   ├── memory/
 │   │   └── store.py       ← SQLite persistent memory
 │   ├── cost.py            ← USD cost + token tracking
